@@ -11,11 +11,13 @@ from zoneto.storage import last_modified, source_row_counts, write_source
 
 @pytest.fixture
 def sample_df() -> pl.DataFrame:
-    return pl.DataFrame({
-        "year": pl.Series([2023, 2023, 2024], dtype=pl.Int32),
-        "permit_no": ["A001", "A002", "B001"],
-        "source_name": ["test", "test", "test"],
-    })
+    return pl.DataFrame(
+        {
+            "year": pl.Series([2023, 2023, 2024], dtype=pl.Int32),
+            "permit_no": ["A001", "A002", "B001"],
+            "source_name": ["test", "test", "test"],
+        }
+    )
 
 
 def test_write_creates_hive_directory_structure(
@@ -36,16 +38,20 @@ def test_write_returns_row_count(tmp_path: Path, sample_df: pl.DataFrame) -> Non
 
 def test_second_write_removes_stale_partitions(tmp_path: Path) -> None:
     """A second write overwrites the previous data with no leftover partitions."""
-    df1 = pl.DataFrame({
-        "year": pl.Series([2023], dtype=pl.Int32),
-        "permit_no": ["A001"],
-        "source_name": ["test"],
-    })
-    df2 = pl.DataFrame({
-        "year": pl.Series([2024], dtype=pl.Int32),
-        "permit_no": ["B001"],
-        "source_name": ["test"],
-    })
+    df1 = pl.DataFrame(
+        {
+            "year": pl.Series([2023], dtype=pl.Int32),
+            "permit_no": ["A001"],
+            "source_name": ["test"],
+        }
+    )
+    df2 = pl.DataFrame(
+        {
+            "year": pl.Series([2024], dtype=pl.Int32),
+            "permit_no": ["B001"],
+            "source_name": ["test"],
+        }
+    )
 
     write_source(df1, "permits_active", tmp_path)
     write_source(df2, "permits_active", tmp_path)
