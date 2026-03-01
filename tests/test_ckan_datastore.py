@@ -6,6 +6,12 @@ from pytest_httpx import HTTPXMock
 from zoneto.models import CKANConfig
 from zoneto.sources.ckan import CKANSource
 
+_RESOURCE_ID = "test-resource-id"
+
+_PACKAGE_SHOW = {
+    "result": {"resources": [{"id": _RESOURCE_ID, "datastore_active": True}]}
+}
+
 
 @pytest.fixture
 def source() -> CKANSource:
@@ -21,6 +27,7 @@ def test_single_page_returns_all_records(
     httpx_mock: HTTPXMock, source: CKANSource
 ) -> None:
     """A single page with records followed by an empty page fetches all records."""
+    httpx_mock.add_response(json=_PACKAGE_SHOW)
     httpx_mock.add_response(
         json={
             "result": {
@@ -41,6 +48,7 @@ def test_single_page_returns_all_records(
 
 def test_multi_page_pagination(httpx_mock: HTTPXMock, source: CKANSource) -> None:
     """Records from multiple pages are concatenated correctly."""
+    httpx_mock.add_response(json=_PACKAGE_SHOW)
     httpx_mock.add_response(
         json={
             "result": {
@@ -72,6 +80,7 @@ def test_empty_first_response_returns_empty_dataframe(
     httpx_mock: HTTPXMock, source: CKANSource
 ) -> None:
     """An empty first response terminates immediately and returns an empty DataFrame."""
+    httpx_mock.add_response(json=_PACKAGE_SHOW)
     httpx_mock.add_response(
         json={"result": {"records": []}},
     )
@@ -84,6 +93,7 @@ def test_normalization_snake_case_columns(
     httpx_mock: HTTPXMock, source: CKANSource
 ) -> None:
     """Column names are converted to snake_case."""
+    httpx_mock.add_response(json=_PACKAGE_SHOW)
     httpx_mock.add_response(
         json={
             "result": {
@@ -105,6 +115,7 @@ def test_normalization_year_derived_from_date(
     httpx_mock: HTTPXMock, source: CKANSource
 ) -> None:
     """year column is derived from application_date."""
+    httpx_mock.add_response(json=_PACKAGE_SHOW)
     httpx_mock.add_response(
         json={
             "result": {
@@ -127,6 +138,7 @@ def test_null_date_produces_year_zero(
     httpx_mock: HTTPXMock, source: CKANSource
 ) -> None:
     """Records with null application dates get year=0."""
+    httpx_mock.add_response(json=_PACKAGE_SHOW)
     httpx_mock.add_response(
         json={
             "result": {
@@ -144,6 +156,7 @@ def test_null_date_produces_year_zero(
 
 def test_source_name_column_added(httpx_mock: HTTPXMock, source: CKANSource) -> None:
     """source_name column is set to the dataset_id."""
+    httpx_mock.add_response(json=_PACKAGE_SHOW)
     httpx_mock.add_response(
         json={
             "result": {

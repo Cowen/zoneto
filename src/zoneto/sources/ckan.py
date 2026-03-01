@@ -30,8 +30,21 @@ class CKANSource:
                 df = self._fetch_bulk_csv(client)
         return self._normalize(df)
 
+    def _datastore_resource_id(self, client: httpx.Client) -> str:
+        """Return the resource ID of the first datastore-enabled resource."""
+        resp = client.get(
+            "/api/3/action/package_show",
+            params={"id": self.config.dataset_id},
+        )
+        resp.raise_for_status()
+        for resource in resp.json()["result"]["resources"]:
+            if resource.get("datastore_active"):
+                return str(resource["id"])
+        raise ValueError(f"No datastore resource found for {self.config.dataset_id!r}")
+
     def _fetch_datastore(self, client: httpx.Client) -> pl.DataFrame:
         """Paginate through datastore_search until the response has no records."""
+        resource_id = self._datastore_resource_id(client)
         limit = 32000
         offset = 0
         records: list[dict] = []
@@ -40,7 +53,7 @@ class CKANSource:
             resp = client.get(
                 "/api/3/action/datastore_search",
                 params={
-                    "id": self.config.dataset_id,
+                    "id": resource_id,
                     "limit": limit,
                     "offset": offset,
                 },
