@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import re
 
 import httpx
@@ -26,7 +27,7 @@ class CKANSource:
             if self.config.access_mode == "datastore":
                 df = self._fetch_datastore(client)
             else:
-                raise NotImplementedError("bulk_csv mode not yet implemented")
+                df = self._fetch_bulk_csv(client)
         return self._normalize(df)
 
     def _fetch_datastore(self, client: httpx.Client) -> pl.DataFrame:
@@ -54,6 +55,34 @@ class CKANSource:
         if not records:
             return pl.DataFrame()
         return pl.DataFrame(records)
+
+    def _fetch_bulk_csv(self, client: httpx.Client) -> pl.DataFrame:
+        """Download year-based CSV resources discovered via package_show."""
+        resp = client.get(
+            "/api/3/action/package_show",
+            params={"id": self.config.dataset_id},
+        )
+        resp.raise_for_status()
+        resources: list[dict] = resp.json()["result"]["resources"]
+
+        dfs: list[pl.DataFrame] = []
+        for resource in resources:
+            match = re.search(r"\b(20\d{2})\b", resource.get("name", ""))
+            if match is None:
+                continue
+            if int(match.group(1)) < self.config.year_start:
+                continue
+            csv_resp = client.get(resource["url"])
+            csv_resp.raise_for_status()
+            df = pl.read_csv(
+                io.BytesIO(csv_resp.content),
+                infer_schema_length=10000,
+            )
+            dfs.append(df)
+
+        if not dfs:
+            return pl.DataFrame()
+        return pl.concat(dfs, how="diagonal")
 
     def _normalize(self, df: pl.DataFrame) -> pl.DataFrame:
         """Normalize column names, parse dates, derive year, add source_name."""
