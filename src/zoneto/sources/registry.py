@@ -15,7 +15,7 @@ SOURCES: dict[str, Source] = {
     "permits_cleared": CKANSource(
         CKANConfig(
             dataset_id="building-permits-cleared-permits",
-            access_mode="bulk_csv",
+            access_mode="datastore",
             year_start=2020,
         )
     ),
