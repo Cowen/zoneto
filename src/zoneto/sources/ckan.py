@@ -89,7 +89,8 @@ class CKANSource:
             csv_resp.raise_for_status()
             df = pl.read_csv(
                 io.BytesIO(csv_resp.content),
-                infer_schema_length=10000,
+                infer_schema_length=None,
+                truncate_ragged_lines=True,
             )
             dfs.append(df)
 
