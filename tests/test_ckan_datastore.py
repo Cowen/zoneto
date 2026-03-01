@@ -258,3 +258,35 @@ def test_source_name_column_added(httpx_mock: HTTPXMock, source: CKANSource) -> 
     df = source.fetch()
     assert "source_name" in df.columns
     assert df["source_name"][0] == "building-permits-active-permits"
+
+
+def test_custom_year_column_derives_year(httpx_mock: HTTPXMock) -> None:
+    """year is derived from the configured year_column, not the hardcoded application_date.
+
+    A source configured with year_column='date_submitted' must extract year
+    from that column after snake_case normalization ('Date Submitted' -> 'date_submitted').
+    """
+    source = CKANSource(
+        CKANConfig(
+            dataset_id="development-applications",
+            access_mode="datastore",
+            year_column="date_submitted",
+        )
+    )
+    httpx_mock.add_response(json=_PACKAGE_SHOW)
+    httpx_mock.add_response(
+        json={
+            "result": {
+                "records": [
+                    {"Date Submitted": "2023-05-15", "APPLICATION#": "OZ-01"},
+                    {"Date Submitted": "2021-11-30", "APPLICATION#": "SA-02"},
+                ]
+            }
+        },
+    )
+    httpx_mock.add_response(json={"result": {"records": []}})
+
+    df = source.fetch()
+    years = df["year"].to_list()
+    assert 2023 in years
+    assert 2021 in years

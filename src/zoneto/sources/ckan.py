@@ -134,14 +134,15 @@ class CKANSource:
             except pl.exceptions.ComputeError:
                 pass  # unrecognisable format — leave column as string
 
-        # 3. Derive year from application_date (null dates → year 0)
+        # 3. Derive year from the configured year_column (null dates → year 0)
         # Only possible if the column was successfully parsed as pl.Date.
+        year_col = self.config.year_column
         if (
-            "application_date" in df.columns
-            and df.schema["application_date"] == pl.Date
+            year_col in df.columns
+            and df.schema[year_col] == pl.Date
         ):
             df = df.with_columns(
-                pl.col("application_date")
+                pl.col(year_col)
                 .dt.year()
                 .fill_null(0)
                 .cast(pl.Int32)

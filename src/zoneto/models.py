@@ -11,3 +11,4 @@ class CKANConfig(BaseModel):
     dataset_id: str
     access_mode: Literal["datastore", "bulk_csv"]
     year_start: int = 2015
+    year_column: str = "application_date"
