@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
 <!-- Freshness: 2026-03-01 -->
-<!-- Last reviewed against: 4b630df -->
+<!-- Last reviewed against: develop-dev_applications (Phase 2) -->
 
 ## Purpose
 
@@ -50,13 +50,14 @@ The returned DataFrame **must** contain at least a `year` column (Int32) and a
 
 ### CKANConfig (`models.py`)
 
-Pydantic model with three fields:
+Pydantic model with four fields:
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `dataset_id` | `str` | required | CKAN package name |
 | `access_mode` | `Literal["datastore", "bulk_csv"]` | required | fetch strategy |
 | `year_start` | `int` | 2015 | year floor: skip CSV resources and filter rows below this year |
+| `year_column` | `str` | `"application_date"` | column name to extract year from; parsed to `pl.Date` before year extraction |
 
 ### Storage (`storage.py`)
 
@@ -73,11 +74,12 @@ creates correct Hive directories while pyarrow creates flat files.
 
 `SOURCES: dict[str, Source]` maps logical names to Source instances:
 
-| Key | Dataset | Mode | year_start |
-|---|---|---|---|
-| `permits_active` | building-permits-active-permits | datastore | 2020 |
-| `permits_cleared` | building-permits-cleared-permits | datastore | 2020 |
-| `coa` | committee-of-adjustment-applications | bulk_csv | 2020 |
+| Key | Dataset | Mode | year_start | year_column |
+|---|---|---|---|---|
+| `permits_active` | building-permits-active-permits | datastore | 2020 | `application_date` (default) |
+| `permits_cleared` | building-permits-cleared-permits | datastore | 2020 | `application_date` (default) |
+| `coa` | committee-of-adjustment-applications | bulk_csv | 2020 | `application_date` (default) |
+| `dev_applications` | development-applications | datastore | 2000 | `date_submitted` |
 
 ### CLI (`cli.py`)
 
@@ -107,8 +109,8 @@ Dev: pytest, pytest-httpx, ruff, ty.
   snake_case names get `_2`/`_3` suffixes.
 - Date columns (any column name containing "date") are parsed to `pl.Date`
   best-effort; unrecognizable formats leave the column as String.
-- `year` is derived from `application_date` only if it was successfully parsed
-  as `pl.Date`; otherwise defaults to 0.
+- `year` is derived from the column specified in `CKANConfig.year_column` (defaults to
+  `application_date`) only if it was successfully parsed as `pl.Date`; otherwise defaults to 0.
 - `fetch()` applies a rolling year filter: keeps rows with `year == 0` (unknown)
   or `year >= year_start`. Datastore mode auto-discovers the resource UUID via
   `package_show`. Bulk CSV mode skips non-CSV format resources.

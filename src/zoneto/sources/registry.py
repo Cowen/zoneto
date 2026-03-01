@@ -26,4 +26,12 @@ SOURCES: dict[str, Source] = {
             year_start=2020,
         )
     ),
+    "dev_applications": CKANSource(
+        CKANConfig(
+            dataset_id="development-applications",
+            access_mode="datastore",
+            year_start=2000,
+            year_column="date_submitted",
+        )
+    ),
 }
