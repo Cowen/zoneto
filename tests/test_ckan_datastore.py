@@ -211,6 +211,36 @@ def test_null_date_records_preserved_despite_year_filter(
     assert len(df) == 2
 
 
+def test_column_null_in_first_100_records_then_string_does_not_raise(
+    httpx_mock: HTTPXMock, source: CKANSource
+) -> None:
+    """A column that is null for the first 100 records then holds a string value
+    is handled without a schema mismatch error.
+
+    Regression test: pl.DataFrame(list_of_dicts) defaults to
+    infer_schema_length=100, so a column that is null in the first 100 rows is
+    inferred as Null type; appending a string value (e.g. 'Sfd Detached') in
+    row 101 then raises 'could not append value of type str to the builder'.
+    """
+    null_records = [
+        {"Application Date": "2021-01-01", "Permit No": f"A{i:03d}", "Work Type": None}
+        for i in range(100)
+    ]
+    string_record = {
+        "Application Date": "2021-01-02",
+        "Permit No": "A100",
+        "Work Type": "Sfd Detached",
+    }
+    httpx_mock.add_response(json=_PACKAGE_SHOW)
+    httpx_mock.add_response(
+        json={"result": {"records": [*null_records, string_record]}}
+    )
+    httpx_mock.add_response(json={"result": {"records": []}})
+
+    df = source.fetch()
+    assert len(df) == 101
+
+
 def test_source_name_column_added(httpx_mock: HTTPXMock, source: CKANSource) -> None:
     """source_name column is set to the dataset_id."""
     httpx_mock.add_response(json=_PACKAGE_SHOW)

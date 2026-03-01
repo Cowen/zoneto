@@ -74,7 +74,7 @@ class CKANSource:
 
         if not records:
             return pl.DataFrame()
-        return pl.DataFrame(records)
+        return pl.from_dicts(records, infer_schema_length=None)
 
     def _fetch_bulk_csv(self, client: httpx.Client) -> pl.DataFrame:
         """Download year-based CSV resources discovered via package_show."""
