@@ -1,6 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
 <!-- Freshness: 2026-03-01 -->
+<!-- Last reviewed against: 4b630df -->
 
 ## Purpose
 
@@ -55,13 +56,13 @@ Pydantic model with three fields:
 |---|---|---|---|
 | `dataset_id` | `str` | required | CKAN package name |
 | `access_mode` | `Literal["datastore", "bulk_csv"]` | required | fetch strategy |
-| `year_start` | `int` | 2015 | ignore CSV resources older than this |
+| `year_start` | `int` | 2015 | year floor: skip CSV resources and filter rows below this year |
 
 ### Storage (`storage.py`)
 
 - `write_source(df, name, data_dir)` -- writes Hive-partitioned Parquet under
   `data_dir/name/year=YYYY/`. Deletes existing source dir first (full replace).
-  Returns row count.
+  Returns 0 immediately if the DataFrame is empty. Returns row count.
 - `source_row_counts(name, data_dir)` -- returns total rows or None.
 - `last_modified(name, data_dir)` -- returns most recent mtime or None.
 
@@ -72,11 +73,11 @@ creates correct Hive directories while pyarrow creates flat files.
 
 `SOURCES: dict[str, Source]` maps logical names to Source instances:
 
-| Key | Dataset | Mode |
-|---|---|---|
-| `permits_active` | building-permits-active-permits | datastore |
-| `permits_cleared` | building-permits-cleared-permits | bulk_csv |
-| `coa` | committee-of-adjustment-applications | bulk_csv |
+| Key | Dataset | Mode | year_start |
+|---|---|---|---|
+| `permits_active` | building-permits-active-permits | datastore | 2020 |
+| `permits_cleared` | building-permits-cleared-permits | datastore | 2020 |
+| `coa` | committee-of-adjustment-applications | bulk_csv | 2020 |
 
 ### CLI (`cli.py`)
 
@@ -102,9 +103,15 @@ Dev: pytest, pytest-httpx, ruff, ty.
 ## Invariants
 
 - Python >= 3.13 required (uses `X | Y` union syntax).
-- All column names are normalized to snake_case before storage.
-- Date columns (any column name containing "date") are parsed to `pl.Date`.
-- `year` is derived from `application_date` when present, else defaults to 0.
+- All column names are normalized to snake_case before storage; duplicate
+  snake_case names get `_2`/`_3` suffixes.
+- Date columns (any column name containing "date") are parsed to `pl.Date`
+  best-effort; unrecognizable formats leave the column as String.
+- `year` is derived from `application_date` only if it was successfully parsed
+  as `pl.Date`; otherwise defaults to 0.
+- `fetch()` applies a rolling year filter: keeps rows with `year == 0` (unknown)
+  or `year >= year_start`. Datastore mode auto-discovers the resource UUID via
+  `package_show`. Bulk CSV mode skips non-CSV format resources.
 - Storage is always full-replace per source (rmtree + rewrite).
 - Tests use `pytest-httpx` to mock all HTTP calls; no network in CI.
 - CKAN base URL: `https://ckan0.cf.opendata.inter.prod-toronto.ca`
