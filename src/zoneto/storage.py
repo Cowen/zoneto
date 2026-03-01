@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import polars as pl
 
@@ -16,6 +17,8 @@ def write_source(df: pl.DataFrame, name: str, data_dir: Path) -> int:
     source_dir = data_dir / name
     if source_dir.exists():
         shutil.rmtree(source_dir)
+    # use_pyarrow omitted: polars 1.38+ native engine creates correct year=YYYY/ Hive
+    # directories; use_pyarrow=True in that version creates a single flat file instead.
     df.write_parquet(source_dir, partition_by=["year"])
     return len(df)
 
@@ -25,8 +28,10 @@ def source_row_counts(name: str, data_dir: Path) -> int | None:
     source_dir = data_dir / name
     if not source_dir.exists():
         return None
-    df = pl.scan_parquet(str(source_dir / "**/*.parquet")).select(pl.len()).collect()
-    assert isinstance(df, pl.DataFrame)
+    df = cast(
+        pl.DataFrame,
+        pl.scan_parquet(str(source_dir / "**/*.parquet")).select(pl.len()).collect(),
+    )
     return df.item()
 
 
