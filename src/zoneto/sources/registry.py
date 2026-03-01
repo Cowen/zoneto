@@ -9,18 +9,21 @@ SOURCES: dict[str, Source] = {
         CKANConfig(
             dataset_id="building-permits-active-permits",
             access_mode="datastore",
+            year_start=2020,
         )
     ),
     "permits_cleared": CKANSource(
         CKANConfig(
             dataset_id="building-permits-cleared-permits",
             access_mode="bulk_csv",
+            year_start=2020,
         )
     ),
     "coa": CKANSource(
         CKANConfig(
             dataset_id="committee-of-adjustment-applications",
             access_mode="bulk_csv",
+            year_start=2020,
         )
     ),
 }

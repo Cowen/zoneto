@@ -154,6 +154,63 @@ def test_null_date_produces_year_zero(
     assert df["year"][0] == 0
 
 
+def test_year_filter_excludes_records_before_year_start(
+    httpx_mock: HTTPXMock,
+) -> None:
+    """Records with year < year_start are excluded from the returned DataFrame."""
+    filtered_source = CKANSource(
+        CKANConfig(
+            dataset_id="building-permits-active-permits",
+            access_mode="datastore",
+            year_start=2020,
+        )
+    )
+    httpx_mock.add_response(json=_PACKAGE_SHOW)
+    httpx_mock.add_response(
+        json={
+            "result": {
+                "records": [
+                    {"Application Date": "2019-06-01", "Permit No": "OLD001"},
+                    {"Application Date": "2021-03-15", "Permit No": "NEW001"},
+                ]
+            }
+        },
+    )
+    httpx_mock.add_response(json={"result": {"records": []}})
+
+    df = filtered_source.fetch()
+    assert len(df) == 1
+    assert df["permit_no"][0] == "NEW001"
+
+
+def test_null_date_records_preserved_despite_year_filter(
+    httpx_mock: HTTPXMock,
+) -> None:
+    """Records with null application dates (year=0) are kept regardless of year_start."""
+    filtered_source = CKANSource(
+        CKANConfig(
+            dataset_id="building-permits-active-permits",
+            access_mode="datastore",
+            year_start=2020,
+        )
+    )
+    httpx_mock.add_response(json=_PACKAGE_SHOW)
+    httpx_mock.add_response(
+        json={
+            "result": {
+                "records": [
+                    {"Application Date": None, "Permit No": "NULL001"},
+                    {"Application Date": "2021-03-15", "Permit No": "NEW001"},
+                ]
+            }
+        },
+    )
+    httpx_mock.add_response(json={"result": {"records": []}})
+
+    df = filtered_source.fetch()
+    assert len(df) == 2
+
+
 def test_source_name_column_added(httpx_mock: HTTPXMock, source: CKANSource) -> None:
     """source_name column is set to the dataset_id."""
     httpx_mock.add_response(json=_PACKAGE_SHOW)

@@ -28,7 +28,14 @@ class CKANSource:
                 df = self._fetch_datastore(client)
             else:
                 df = self._fetch_bulk_csv(client)
-        return self._normalize(df)
+        df = self._normalize(df)
+        if not df.is_empty():
+            # Keep null-date records (year=0) regardless of year_start;
+            # exclude records whose year is known but predates the window.
+            df = df.filter(
+                (pl.col("year") == 0) | (pl.col("year") >= self.config.year_start)
+            )
+        return df
 
     def _datastore_resource_id(self, client: httpx.Client) -> str:
         """Return the resource ID of the first datastore-enabled resource."""

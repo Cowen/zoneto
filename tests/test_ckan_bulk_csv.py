@@ -123,3 +123,53 @@ def test_year_column_set_from_application_date(
     df = source.fetch()
     assert "year" in df.columns
     assert df["year"][0] == 2021
+
+
+def test_mixed_numeric_column_parsed_without_error(
+    httpx_mock: HTTPXMock, source: CKANSource
+) -> None:
+    """A CSV with float-formatted values like '0.' in an otherwise-integer column
+    is parsed without error.
+
+    Regression test for infer_schema_length=None: with a smaller inference window,
+    polars infers the column as i64 from early rows and then fails to parse '0.'.
+    """
+    httpx_mock.add_response(
+        json=_package_show_response(
+            [{"name": "Cleared 2021", "url": "https://example.com/2021.csv"}]
+        ),
+    )
+    # 'Units' column: first row has a plain integer, second has '0.' (float notation)
+    csv_content = (
+        b"Application Date,Permit No,Units\n"
+        b"2021-01-01,B001,5\n"
+        b"2021-02-01,B002,0.\n"
+    )
+    httpx_mock.add_response(content=csv_content)
+
+    df = source.fetch()
+    assert len(df) == 2
+
+
+def test_ragged_csv_rows_are_truncated(
+    httpx_mock: HTTPXMock, source: CKANSource
+) -> None:
+    """Rows with more fields than the header are silently truncated.
+
+    Regression test for truncate_ragged_lines=True: without it, polars raises
+    'found more fields than defined in Schema' for rows with extra trailing fields.
+    """
+    httpx_mock.add_response(
+        json=_package_show_response(
+            [{"name": "Cleared 2021", "url": "https://example.com/2021.csv"}]
+        ),
+    )
+    csv_content = (
+        b"Application Date,Permit No\n"
+        b"2021-01-01,B001\n"
+        b"2021-02-01,B002,extra_field\n"
+    )
+    httpx_mock.add_response(content=csv_content)
+
+    df = source.fetch()
+    assert len(df) == 2
