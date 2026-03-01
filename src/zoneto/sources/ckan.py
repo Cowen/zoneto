@@ -87,6 +87,8 @@ class CKANSource:
 
         dfs: list[pl.DataFrame] = []
         for resource in resources:
+            if resource.get("format", "").upper() != "CSV":
+                continue
             match = re.search(r"\b(20\d{2})\b", resource.get("name", ""))
             if match is None:
                 continue

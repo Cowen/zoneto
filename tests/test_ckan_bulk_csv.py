@@ -18,6 +18,11 @@ def source() -> CKANSource:
     )
 
 
+def _csv_resource(name: str, url: str) -> dict:
+    """Build a CSV resource dict with format='CSV' (the default for bulk download)."""
+    return {"name": name, "url": url, "format": "CSV"}
+
+
 def _package_show_response(resources: list[dict]) -> dict:
     """Build a package_show API response with the given resources."""
     return {"result": {"resources": resources}}
@@ -30,9 +35,9 @@ def test_downloads_qualifying_years_only(
     httpx_mock.add_response(
         json=_package_show_response(
             [
-                {"name": "Cleared Permits 2019", "url": "https://example.com/2019.csv"},
-                {"name": "Cleared Permits 2020", "url": "https://example.com/2020.csv"},
-                {"name": "Cleared Permits 2021", "url": "https://example.com/2021.csv"},
+                _csv_resource("Cleared Permits 2019", "https://example.com/2019.csv"),
+                _csv_resource("Cleared Permits 2020", "https://example.com/2020.csv"),
+                _csv_resource("Cleared Permits 2021", "https://example.com/2021.csv"),
             ]
         ),
     )
@@ -51,9 +56,9 @@ def test_all_qualifying_csvs_concatenated(
     httpx_mock.add_response(
         json=_package_show_response(
             [
-                {"name": "Cleared 2020", "url": "https://example.com/2020.csv"},
-                {"name": "Cleared 2021", "url": "https://example.com/2021.csv"},
-                {"name": "Cleared 2022", "url": "https://example.com/2022.csv"},
+                _csv_resource("Cleared 2020", "https://example.com/2020.csv"),
+                _csv_resource("Cleared 2021", "https://example.com/2021.csv"),
+                _csv_resource("Cleared 2022", "https://example.com/2022.csv"),
             ]
         ),
     )
@@ -76,9 +81,9 @@ def test_non_year_resources_are_skipped(
     httpx_mock.add_response(
         json=_package_show_response(
             [
-                {"name": "Active Permits", "url": "https://example.com/active.csv"},
-                {"name": "Metadata file", "url": "https://example.com/meta.csv"},
-                {"name": "Cleared 2021", "url": "https://example.com/2021.csv"},
+                _csv_resource("Active Permits", "https://example.com/active.csv"),
+                _csv_resource("Metadata file", "https://example.com/meta.csv"),
+                _csv_resource("Cleared 2021", "https://example.com/2021.csv"),
             ]
         ),
     )
@@ -96,8 +101,8 @@ def test_no_qualifying_resources_returns_empty(
     httpx_mock.add_response(
         json=_package_show_response(
             [
-                {"name": "Cleared 2015", "url": "https://example.com/2015.csv"},
-                {"name": "Cleared 2019", "url": "https://example.com/2019.csv"},
+                _csv_resource("Cleared 2015", "https://example.com/2015.csv"),
+                _csv_resource("Cleared 2019", "https://example.com/2019.csv"),
             ]
         ),
     )
@@ -113,9 +118,7 @@ def test_year_column_set_from_application_date(
     """year column is derived from the application_date column after normalization."""
     httpx_mock.add_response(
         json=_package_show_response(
-            [
-                {"name": "Cleared 2021", "url": "https://example.com/2021.csv"},
-            ]
+            [_csv_resource("Cleared 2021", "https://example.com/2021.csv")]
         ),
     )
     httpx_mock.add_response(content=b"Application Date,Permit No\n2021-06-01,B001\n")
@@ -136,7 +139,7 @@ def test_mixed_numeric_column_parsed_without_error(
     """
     httpx_mock.add_response(
         json=_package_show_response(
-            [{"name": "Cleared 2021", "url": "https://example.com/2021.csv"}]
+            [_csv_resource("Cleared 2021", "https://example.com/2021.csv")]
         ),
     )
     # 'Units' column: first row has a plain integer, second has '0.' (float notation)
@@ -151,6 +154,46 @@ def test_mixed_numeric_column_parsed_without_error(
     assert len(df) == 2
 
 
+def test_only_csv_format_resources_are_downloaded(
+    httpx_mock: HTTPXMock, source: CKANSource
+) -> None:
+    """Only resources with format='CSV' are downloaded; XML and JSON duplicates
+    that share the same year in their name are skipped.
+
+    Regression test: package_show returns CSV, XML, and JSON variants for each
+    year. Downloading all three and feeding XML/JSON to pl.read_csv creates
+    garbage columns (observed: 139,810 columns on the COA dataset).
+    """
+    httpx_mock.add_response(
+        json=_package_show_response(
+            [
+                {
+                    "name": "Closed Applications 2021",
+                    "url": "https://example.com/2021.csv",
+                    "format": "CSV",
+                },
+                {
+                    "name": "Closed Applications 2021.xml",
+                    "url": "https://example.com/2021.xml",
+                    "format": "XML",
+                },
+                {
+                    "name": "Closed Applications 2021.json",
+                    "url": "https://example.com/2021.json",
+                    "format": "JSON",
+                },
+            ]
+        ),
+    )
+    # Only one HTTP call for the CSV; XML and JSON should never be requested
+    httpx_mock.add_response(
+        content=b"Application Date,Permit No\n2021-06-01,C001\n"
+    )
+
+    df = source.fetch()
+    assert len(df) == 1
+
+
 def test_unrecognized_date_format_does_not_raise(
     httpx_mock: HTTPXMock, source: CKANSource
 ) -> None:
@@ -162,7 +205,7 @@ def test_unrecognized_date_format_does_not_raise(
     """
     httpx_mock.add_response(
         json=_package_show_response(
-            [{"name": "COA 2021", "url": "https://example.com/2021.csv"}]
+            [_csv_resource("COA 2021", "https://example.com/2021.csv")]
         ),
     )
     csv_content = b"Application Date,File Number\n01/15/2021,A21-001\n"
@@ -184,7 +227,7 @@ def test_duplicate_snake_case_column_names_are_deduplicated(
     """
     httpx_mock.add_response(
         json=_package_show_response(
-            [{"name": "COA 2021", "url": "https://example.com/2021.csv"}]
+            [_csv_resource("COA 2021", "https://example.com/2021.csv")]
         ),
     )
     csv_content = (
@@ -208,7 +251,7 @@ def test_ragged_csv_rows_are_truncated(
     """
     httpx_mock.add_response(
         json=_package_show_response(
-            [{"name": "Cleared 2021", "url": "https://example.com/2021.csv"}]
+            [_csv_resource("Cleared 2021", "https://example.com/2021.csv")]
         ),
     )
     csv_content = (
