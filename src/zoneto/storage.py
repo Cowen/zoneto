@@ -17,6 +17,8 @@ def write_source(df: pl.DataFrame, name: str, data_dir: Path) -> int:
     source_dir = data_dir / name
     if source_dir.exists():
         shutil.rmtree(source_dir)
+    if df.is_empty():
+        return 0
     # use_pyarrow omitted: polars 1.38+ native engine creates correct year=YYYY/ Hive
     # directories; use_pyarrow=True in that version creates a single flat file instead.
     df.write_parquet(source_dir, partition_by=["year"])

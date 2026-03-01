@@ -151,6 +151,31 @@ def test_mixed_numeric_column_parsed_without_error(
     assert len(df) == 2
 
 
+def test_duplicate_snake_case_column_names_are_deduplicated(
+    httpx_mock: HTTPXMock, source: CKANSource
+) -> None:
+    """Two columns that normalize to the same snake_case name do not raise.
+
+    Regression test: COA CSVs have columns like 'Street Direction' and
+    'STREET_DIRECTION' that both map to 'street_direction', causing a duplicate
+    column error inside df.rename().
+    """
+    httpx_mock.add_response(
+        json=_package_show_response(
+            [{"name": "COA 2021", "url": "https://example.com/2021.csv"}]
+        ),
+    )
+    csv_content = (
+        b"Application Date,Street Direction,STREET_DIRECTION\n"
+        b"2021-01-01,N,North\n"
+    )
+    httpx_mock.add_response(content=csv_content)
+
+    df = source.fetch()
+    assert len(df) == 1
+    assert "street_direction" in df.columns
+
+
 def test_ragged_csv_rows_are_truncated(
     httpx_mock: HTTPXMock, source: CKANSource
 ) -> None:

@@ -85,3 +85,14 @@ def test_last_modified_returns_datetime(
 def test_last_modified_missing_returns_none(tmp_path: Path) -> None:
     """last_modified returns None when the source directory does not exist."""
     assert last_modified("nonexistent", tmp_path) is None
+
+
+def test_write_empty_dataframe_returns_zero(tmp_path: Path) -> None:
+    """write_source with an empty DataFrame returns 0 without raising.
+
+    Regression test: permits_cleared returned pl.DataFrame() (no qualifying
+    resources) and write_source crashed trying to partition_by=['year'] on a
+    frame with no columns.
+    """
+    count = write_source(pl.DataFrame(), "empty_source", tmp_path)
+    assert count == 0

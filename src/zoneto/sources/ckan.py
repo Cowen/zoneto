@@ -110,10 +110,14 @@ class CKANSource:
         if df.is_empty():
             return df
 
-        # 1. Rename all columns to snake_case
-        rename_map = {
-            c: re.sub(r"[^a-z0-9]+", "_", c.lower()).strip("_") for c in df.columns
-        }
+        # 1. Rename all columns to snake_case, appending _2/_3/... on collisions
+        seen: dict[str, int] = {}
+        rename_map: dict[str, str] = {}
+        for c in df.columns:
+            base = re.sub(r"[^a-z0-9]+", "_", c.lower()).strip("_")
+            count = seen.get(base, 0) + 1
+            seen[base] = count
+            rename_map[c] = base if count == 1 else f"{base}_{count}"
         df = df.rename(rename_map)
 
         # 2. Parse all columns whose names contain "date" (best-effort, nulls allowed)
