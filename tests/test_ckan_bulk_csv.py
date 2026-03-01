@@ -151,6 +151,28 @@ def test_mixed_numeric_column_parsed_without_error(
     assert len(df) == 2
 
 
+def test_unrecognized_date_format_does_not_raise(
+    httpx_mock: HTTPXMock, source: CKANSource
+) -> None:
+    """A date column whose format polars cannot auto-detect is left as-is without
+    raising, and the row is still returned with year=0.
+
+    Regression test: COA CSVs use MM/DD/YYYY dates which polars cannot infer,
+    causing 'could not find an appropriate format to parse dates'.
+    """
+    httpx_mock.add_response(
+        json=_package_show_response(
+            [{"name": "COA 2021", "url": "https://example.com/2021.csv"}]
+        ),
+    )
+    csv_content = b"Application Date,File Number\n01/15/2021,A21-001\n"
+    httpx_mock.add_response(content=csv_content)
+
+    df = source.fetch()
+    assert len(df) == 1
+    assert df["year"][0] == 0  # date unparseable -> year defaults to 0
+
+
 def test_duplicate_snake_case_column_names_are_deduplicated(
     httpx_mock: HTTPXMock, source: CKANSource
 ) -> None:

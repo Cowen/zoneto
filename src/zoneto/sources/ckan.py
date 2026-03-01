@@ -121,14 +121,23 @@ class CKANSource:
         df = df.rename(rename_map)
 
         # 2. Parse all columns whose names contain "date" (best-effort, nulls allowed)
+        # If polars cannot auto-detect the date format it raises ComputeError;
+        # leave the column as a string rather than crashing.
         date_cols = [c for c in df.columns if "date" in c]
         for col in date_cols:
-            df = df.with_columns(
-                pl.col(col).cast(pl.String).str.to_date(strict=False).alias(col)
-            )
+            try:
+                df = df.with_columns(
+                    pl.col(col).cast(pl.String).str.to_date(strict=False).alias(col)
+                )
+            except pl.exceptions.ComputeError:
+                pass  # unrecognisable format — leave column as string
 
         # 3. Derive year from application_date (null dates → year 0)
-        if "application_date" in df.columns:
+        # Only possible if the column was successfully parsed as pl.Date.
+        if (
+            "application_date" in df.columns
+            and df.schema["application_date"] == pl.Date
+        ):
             df = df.with_columns(
                 pl.col("application_date")
                 .dt.year()
