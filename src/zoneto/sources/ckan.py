@@ -91,8 +91,7 @@ class CKANSource:
 
         # 1. Rename all columns to snake_case
         rename_map = {
-            c: re.sub(r"[^a-z0-9]+", "_", c.lower()).strip("_")
-            for c in df.columns
+            c: re.sub(r"[^a-z0-9]+", "_", c.lower()).strip("_") for c in df.columns
         }
         df = df.rename(rename_map)
 
