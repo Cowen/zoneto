@@ -14,7 +14,9 @@ def test_datastore_defaults() -> None:
 
 
 def test_bulk_csv_custom_year() -> None:
-    config = CKANConfig(dataset_id="my-dataset", access_mode="bulk_csv", year_start=2020)
+    config = CKANConfig(
+        dataset_id="my-dataset", access_mode="bulk_csv", year_start=2020
+    )
     assert config.year_start == 2020
 
 
