@@ -261,10 +261,12 @@ def test_source_name_column_added(httpx_mock: HTTPXMock, source: CKANSource) -> 
 
 
 def test_custom_year_column_derives_year(httpx_mock: HTTPXMock) -> None:
-    """year is derived from the configured year_column, not the hardcoded application_date.
+    """year is derived from the configured year_column,
+    not the hardcoded application_date.
 
-    A source configured with year_column='date_submitted' must extract year
-    from that column after snake_case normalization ('Date Submitted' -> 'date_submitted').
+    A source configured with year_column='date_submitted' must
+    extract year from that column after snake_case normalization
+    ('Date Submitted' -> 'date_submitted').
     """
     source = CKANSource(
         CKANConfig(
