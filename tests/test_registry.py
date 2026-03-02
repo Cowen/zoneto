@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from zoneto.sources.base import Source
+from zoneto.sources.ckan import CKANSource
 from zoneto.sources.registry import SOURCES
 
 
 def test_all_sources_present() -> None:
-    assert set(SOURCES.keys()) == {"permits_active", "permits_cleared", "coa", "dev_applications"}
+    assert set(SOURCES.keys()) == {
+        "permits_active",
+        "permits_cleared",
+        "coa",
+        "dev_applications",
+    }
 
 
 def test_source_names_match_dataset_ids() -> None:
@@ -29,6 +35,7 @@ def test_all_sources_have_callable_fetch() -> None:
 def test_dev_applications_config() -> None:
     """dev_applications uses date_submitted as year column, fetches all years."""
     source = SOURCES["dev_applications"]
+    assert isinstance(source, CKANSource)
     cfg = source.config
     assert cfg.dataset_id == "development-applications"
     assert cfg.access_mode == "datastore"
