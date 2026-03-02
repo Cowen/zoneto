@@ -40,15 +40,17 @@ in two modes:
 
 ### Sources in this pipeline
 
-| Key | Dataset | CKAN mode | Rows (2020+) | Updated |
-|-----|---------|-----------|--------------|---------|
-| `permits_active` | Building Permits — Active | DataStore | ~98 k | Daily |
-| `permits_cleared` | Building Permits — Cleared | DataStore | ~161 k | Daily |
-| `coa` | Committee of Adjustment Applications | Bulk CSV | ~5 k | Periodic |
+| Key | Dataset | CKAN mode | Rows | Updated |
+|-----|---------|-----------|------|---------|
+| `permits_active` | Building Permits — Active | DataStore | ~98 k (2020+) | Daily |
+| `permits_cleared` | Building Permits — Cleared | DataStore | ~161 k (2020+) | Daily |
+| `coa` | Committee of Adjustment Applications | Bulk CSV | ~5 k (2020+) | Periodic |
+| `dev_applications` | Development Applications | DataStore | ~26 k (all years) | Retired |
 
-All sources are fetched with `year_start=2020` (rows with `year < 2020` are
-discarded after fetch, except for records with unparseable dates which land in
-`year=0`).
+Building permit sources (`permits_active`, `permits_cleared`) and `coa` are fetched
+from 2020 onwards (`year_start=2020`). `dev_applications` uses `year_start=2000` to
+capture the full archive (earliest records are from 2008). In all cases, records with
+unparseable dates land in `year=0`.
 
 ---
 
@@ -169,14 +171,65 @@ Scarborough.
 
 ---
 
+### Development Applications (`dev_applications`)
+
+**CKAN dataset:** `development-applications`
+**What it is:** Every development application filed with the City of Toronto, covering
+rezoning (Official Plan/Zoning By-law Amendments), site plan approvals, condominium
+registrations, subdivision plans, and part-lot control exemptions. The dataset spans
+2008 to present and is the primary planning-application data used by development
+trackers such as UrbanToronto.
+
+**Application types:**
+
+| Code | Type |
+|------|------|
+| OZ | Official Plan Amendment and/or Zoning By-law Amendment |
+| SA | Site Plan Control Application |
+| CD | Draft Plan of Condominium Application |
+| SB | Draft Plan of Subdivision Application |
+| PL | Part Lot Control Exemption Application |
+
+**Key fields (24 columns):**
+
+| Column | Description |
+|--------|-------------|
+| `application_type` | Application type code (OZ / SA / CD / SB / PL) |
+| `application` | Application number (e.g. `22 123456 SA`) — from raw column `APPLICATION#` |
+| `date_submitted` | Date the application was filed |
+| `status` | Current status (e.g. Closed, Under Review, Council Approved) |
+| `street_num`, `street_name`, `street_type`, `street_direction`, `postal` | Address |
+| `description` | Brief description of the proposed development |
+| `reference_file` | Cross-reference file number — from raw column `REFERENCE_FILE#` |
+| `folderrsn` | Internal city folder reference number |
+| `ward_number`, `ward_name` | City ward |
+| `community_meeting_date`, `community_meeting_time`, `community_meeting_location` | Public consultation details |
+| `application_url` | Link to the city's planning application viewer |
+| `contact_name`, `contact_phone`, `contact_email` | Planner contact |
+| `parent_folder_number` | Links related applications (e.g. a rezoning and its site plan) |
+| `x`, `y` | Coordinates (city internal CRS) |
+
+**Known limitations:**
+
+- **Retired dataset.** The `development-applications` dataset is marked "Retired" on
+  the Toronto Open Data Portal. Data continues to be served but is unlikely to receive
+  new records. If the dataset is eventually removed from CKAN, sync will fail with an
+  HTTP error rather than silently returning empty data.
+- **One row per address/parcel.** Each `application` number may appear in multiple rows —
+  one per address or parcel within the development boundary. This structure is preserved
+  as-is. If per-application deduplication is needed downstream, `application` is the join
+  key; `parent_folder_number` links related applications.
+- **`description` is brief.** The field contains a short summary rather than a full
+  project description.
+- **No detailed conditions or approval text.** The dataset records status and dates but
+  not the conditions attached to approvals.
+
+---
+
 ## Gaps and what's not here
 
 **Not captured by any current source:**
 
-- **Development applications** — rezoning (OPA/ZBA), site plan approval, plan of
-  subdivision, and condominium applications are in a separate CKAN dataset
-  (`development-applications`). This is the main dataset used by development
-  trackers like UrbanToronto.
 - **Property assessments** — MPAC (Municipal Property Assessment Corporation)
   assessed values and property attributes. MPAC data is not open by default;
   partial data surfaces via the City's property tax dataset.
@@ -202,7 +255,6 @@ All available on `https://open.toronto.ca`:
 
 | Dataset | Notes |
 |---------|-------|
-| `development-applications` | Rezoning, site plan, condos, subdivisions — the main planning pipeline |
 | `zoning-by-law` | Current Zoning By-law 569-2013 with amendments; spatial + text |
 | `building-permits-green-roofs` | Eco-Roof Incentive Program permit data |
 | `registered-condominium-plans` | Registered condominiums with unit counts |
