@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
 <!-- Freshness: 2026-03-01 -->
-<!-- Last reviewed against: develop-dev_applications (Phase 2) -->
+<!-- Last reviewed against: development-applications branch -->
 
 ## Purpose
 
