@@ -7,6 +7,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from zoneto.analytics.enrich import enrich_coa, enrich_dev, fetch_reference
+from zoneto.analytics.score import score_all
+from zoneto.analytics.train import train_all
 from zoneto.sources.registry import SOURCES
 from zoneto.storage import last_modified, source_row_counts, write_source
 
@@ -68,3 +71,63 @@ def status() -> None:
         table.add_row(name, rows_str, modified_str)
 
     console.print(table)
+
+
+@app.command()
+def enrich(
+    fetch_ref: Annotated[
+        bool,
+        typer.Option(
+            "--fetch-ref/--no-fetch-ref",
+            help="Download reference datasets first.",
+        ),
+    ] = True,
+) -> None:
+    """Enrich raw Parquet with spatial features and outcome labels."""
+    if fetch_ref:
+        console.print("[bold]Fetching reference datasets...[/bold]")
+        fetch_reference(DATA_DIR)
+        console.print("  [green]✓[/green] Reference data ready")
+
+    for label, fn in [("COA", enrich_coa), ("Dev applications", enrich_dev)]:
+        console.print(f"[bold]Enriching {label}...[/bold]")
+        try:
+            count = fn(DATA_DIR)
+            console.print(f"  [green]✓[/green] {count:,} rows written")
+        except Exception as exc:
+            console.print(f"  [red]✗ {exc}[/red]")
+
+
+@app.command()
+def train(
+    model_dir: Annotated[
+        Path,
+        typer.Option(help="Directory to write .joblib model files."),
+    ] = Path("models"),
+) -> None:
+    """Train all outcome-prediction models from enriched Parquet."""
+    console.print("[bold]Training models...[/bold]")
+    try:
+        results = train_all(data_dir=DATA_DIR, model_dir=model_dir)
+        for name, count in results.items():
+            console.print(f"  [green]✓[/green] {name}: {count:,} training rows")
+    except Exception as exc:
+        console.print(f"  [red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def score(
+    model_dir: Annotated[
+        Path,
+        typer.Option(help="Directory containing .joblib model files."),
+    ] = Path("models"),
+) -> None:
+    """Run batch inference on enriched Parquet; write data/scores/."""
+    console.print("[bold]Scoring...[/bold]")
+    try:
+        score_all(data_dir=DATA_DIR, model_dir=model_dir)
+        console.print("  [green]✓[/green] Scores written to data/scores/")
+    except Exception as exc:
+        console.print(f"  [red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
