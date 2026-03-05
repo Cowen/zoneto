@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
 <!-- Freshness: 2026-03-04 -->
-<!-- Last reviewed against: development-outcome-prediction branch -->
+<!-- Last reviewed against: development-outcome-prediction branch (Phase 2) -->
 
 ## Purpose
 
@@ -25,7 +25,7 @@ The CLI entrypoint is `zoneto` (mapped to `zoneto.cli:app` in pyproject.toml).
 
 ```
 src/zoneto/
-  cli.py             Typer app: `sync` and `status` commands
+  cli.py             Typer app: `sync`, `status`, and `enrich` commands
   models.py          CKANConfig pydantic model
   storage.py         write_source / source_row_counts / last_modified
   sources/
@@ -35,6 +35,7 @@ src/zoneto/
   analytics/
     __init__.py      Analytics subpackage (empty)
     features.py      Canonical feature column lists for ML models
+    enrich.py        Reference data downloads and enrichment pipelines
 ```
 
 Data flows: CLI -> registry -> source.fetch() -> storage.write_source() -> data/<name>/year=YYYY/*.parquet
@@ -89,6 +90,9 @@ creates correct Hive directories while pyarrow creates flat files.
 - `zoneto sync [--source NAME]` -- fetches one or all sources, writes Parquet
   to `./data/`. Prints colored output via Rich.
 - `zoneto status` -- prints a Rich table of row counts and last-modified times.
+- `zoneto enrich [--fetch-ref/--no-fetch-ref]` -- enriches raw parquet with outcome
+  labels and spatial features. Downloads reference datasets to `data/reference/` if
+  `--fetch-ref` (default). Writes enriched parquet to `data/enriched/`.
 
 `DATA_DIR` defaults to `Path("data")` (cwd-relative).
 
@@ -100,6 +104,23 @@ Canonical feature column lists for machine learning models:
 - `DEV_NUM_COLS` -- numeric features for development applications
 - `COA_CAT_COLS` -- categorical features for committee-of-adjustment applications
 - `COA_NUM_COLS` -- numeric features for committee-of-adjustment applications
+
+### Enrichment (`analytics/enrich.py`)
+
+Downloads reference datasets from CKAN and enriches raw source parquet:
+
+**Reference datasets** (cached in `data/reference/`):
+- Zoning (CSV with GeoJSON) -- for spatial point-in-polygon join
+- Heritage register (ZIP → SHP with WGS84 points) -- flag properties in register
+- Heritage districts (ZIP → SHP) -- flag properties in district
+- Secondary plans (GeoJSON) -- flag properties in plan area
+
+**Enrichment functions**:
+- `fetch_reference(data_dir)` -- downloads/extracts all reference datasets (idempotent)
+- `enrich_coa(data_dir)` -- enriches COA with outcome labels, ward_number, year_submitted,
+  coa_approved (1/0/null), coa_days_to_approval regression target
+- `enrich_dev(data_dir)` -- enriches dev_applications with year_submitted, has_community_meeting,
+  spatial features (zoning, heritage, secondary plan), dev_approved and dev_no_appeal labels
 
 ## Dependencies
 
