@@ -181,13 +181,19 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     df = df.with_columns(
         pl.Series("lon", lons, dtype=pl.Float64),
         pl.Series("lat", lats, dtype=pl.Float64),
+        pl.Series("_rid", range(len(df)), dtype=pl.Int64),
     )
 
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial;")
 
-    # Register the polars df as a DuckDB table
+    # Pre-read zoning CSV with polars (lines can be >700KB due to geometry)
+    # and register as Arrow table to avoid DuckDB's CSV sniffer limits.
+    zoning_df = pl.read_csv(
+        ref / "zoning.csv", infer_schema_length=0, truncate_ragged_lines=True
+    )
     con.register("apps", df.to_arrow())
+    con.register("zoning", zoning_df.to_arrow())
 
     hr_shp = str(next((ref / "heritage_register").glob("*.shp"))).replace(
         "'",
@@ -198,12 +204,11 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
         "''",
     )
     sp_geojson = str(ref / "secondary_plans.geojson").replace("'", "''")
-    zoning_csv = str(ref / "zoning.csv").replace("'", "''")
 
     result = con.execute(f"""
         WITH pts AS (
             SELECT
-                rowid AS _rid,
+                _rid,
                 lon, lat,
                 CASE WHEN lon IS NOT NULL AND lat IS NOT NULL
                      THEN ST_Point(lon, lat) END AS geom
@@ -214,7 +219,7 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
                 p._rid,
                 z.ZN_ZONE AS zoning_class
             FROM pts p
-            LEFT JOIN read_csv('{zoning_csv}', AUTO_DETECT=TRUE) z
+            LEFT JOIN zoning z
                 ON ST_Within(p.geom, ST_GeomFromGeoJSON(z.geometry))
             WHERE p.geom IS NOT NULL
         ),
@@ -256,10 +261,10 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
             CASE WHEN sp.secondary_plan_name IS NOT NULL
                  THEN 1 ELSE 0 END AS in_secondary_plan
         FROM apps a
-        LEFT JOIN zoning_join z ON a.rowid = z._rid
-        LEFT JOIN hr_join h ON a.rowid = h._rid
-        LEFT JOIN hd_join d ON a.rowid = d._rid
-        LEFT JOIN sp_join sp ON a.rowid = sp._rid
+        LEFT JOIN zoning_join z ON a._rid = z._rid
+        LEFT JOIN hr_join h ON a._rid = h._rid
+        LEFT JOIN hd_join d ON a._rid = d._rid
+        LEFT JOIN sp_join sp ON a._rid = sp._rid
     """).pl()
 
     con.close()
@@ -273,10 +278,16 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
     """
     df = pl.read_parquet(data_dir / "dev_applications", hive_partitioning=True)
 
-    # year_submitted from date_submitted
-    df = df.with_columns(
-        pl.col("date_submitted").dt.year().cast(pl.Int32).alias("year_submitted")
-    )
+    # year_submitted from date_submitted (may be Date/Datetime or String)
+    _ds_dtype = df["date_submitted"].dtype
+    if _ds_dtype.is_temporal():
+        _year_expr = pl.col("date_submitted").dt.year().cast(pl.Int32)
+    else:
+        # String like "2022-08-09T00:00:00" — extract year from first 4 chars
+        _year_expr = (
+            pl.col("date_submitted").str.slice(0, 4).cast(pl.Int32, strict=False)
+        )
+    df = df.with_columns(_year_expr.alias("year_submitted"))
 
     # has_community_meeting
     df = df.with_columns(
