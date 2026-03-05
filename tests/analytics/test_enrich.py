@@ -9,13 +9,18 @@ import pytest
 
 from zoneto.analytics.enrich import enrich_coa, enrich_dev, fetch_reference
 
-
 # ---------------------------------------------------------------------------
 # fetch_reference
 # ---------------------------------------------------------------------------
 
-def test_fetch_reference_creates_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """fetch_reference should create reference subdirectories even if files already exist."""
+def test_fetch_reference_creates_dirs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fetch_reference should create reference subdirectories.
+
+    Even if files already exist.
+    """
 
     def fake_download(url: str, dest: Path) -> None:
         # Write a minimal ZIP for ZIP URLs, plain text for CSV/GeoJSON
@@ -45,9 +50,19 @@ def _make_coa_parquet(tmp_path: Path) -> None:
         {
             "in_date": ["2022-01-15", "2022-03-01", "2022-06-10", "2022-09-01"],
             "finaldate": ["2022-04-20", "2022-05-15", None, "2022-11-30"],
-            "c_of_a_descision": ["Approved", "Refused", "Deferred", "approved with conditions"],
+            "c_of_a_descision": [
+                "Approved",
+                "Refused",
+                "Deferred",
+                "approved with conditions",
+            ],
             "ward": [5, 10, 15, 20],
-            "application_type": ["Minor Variance", "Consent", "Minor Variance", "Consent"],
+            "application_type": [
+                "Minor Variance",
+                "Consent",
+                "Minor Variance",
+                "Consent",
+            ],
             "sub_type": ["A", "B", "A", "C"],
             "zoning_designation": ["RS", "RM", None, "CR"],
             "source_name": ["coa"] * 4,
@@ -135,7 +150,10 @@ def _make_dev_parquet(tmp_path: Path) -> None:
     df.write_parquet(out / "part0.parquet")
 
 
-def test_enrich_dev_creates_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enrich_dev_creates_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _make_dev_parquet(tmp_path)
     # Stub spatial join to return empty enrichment columns
     def fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
@@ -151,7 +169,10 @@ def test_enrich_dev_creates_output(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert (tmp_path / "enriched" / "dev_applications.parquet").exists()
 
 
-def test_enrich_dev_approved_label(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enrich_dev_approved_label(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _make_dev_parquet(tmp_path)
     def fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
         return df.with_columns(
@@ -174,7 +195,42 @@ def test_enrich_dev_approved_label(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert df.filter(pl.col("year_submitted") == 2022)["dev_approved"][0] is None
 
 
-def test_enrich_dev_has_community_meeting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enrich_dev_no_appeal_label(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test dev_no_appeal label logic."""
+    _make_dev_parquet(tmp_path)
+
+    def fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
+        return df.with_columns(
+            pl.lit(None, dtype=pl.Utf8).alias("zoning_class"),
+            pl.lit(None, dtype=pl.Utf8).alias("secondary_plan_name"),
+            pl.lit(0, dtype=pl.Int8).alias("in_heritage_register"),
+            pl.lit(0, dtype=pl.Int8).alias("in_heritage_district"),
+            pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
+        )
+
+    monkeypatch.setattr("zoneto.analytics.enrich._spatial_join_dev",
+                        fake_spatial_join)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+    # "Closed" is in approved set, not in appealed → 0
+    assert df.filter(pl.col("application_type") == "Rezoning").filter(
+        pl.col("year_submitted") == 2021
+    )["dev_no_appeal"][0] == 0
+    # "Refused" is in refused set, neither in approved nor appealed → None
+    assert df.filter(pl.col("application_type") == "Site Plan")[
+        "dev_no_appeal"
+    ][0] is None
+    # "Under Review" not in any set → None
+    assert df.filter(pl.col("year_submitted") == 2022)["dev_no_appeal"][0] is None
+
+
+def test_enrich_dev_has_community_meeting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _make_dev_parquet(tmp_path)
     def fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
         return df.with_columns(
@@ -188,5 +244,8 @@ def test_enrich_dev_has_community_meeting(tmp_path: Path, monkeypatch: pytest.Mo
     enrich_dev(data_dir=tmp_path)
     df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
     # Row 0 has community_meeting_date → 1
-    row0 = df.filter(pl.col("year_submitted") == 2021).sort("has_community_meeting", descending=True)
+    row0 = df.filter(pl.col("year_submitted") == 2021).sort(
+        "has_community_meeting",
+        descending=True,
+    )
     assert row0["has_community_meeting"][0] == 1

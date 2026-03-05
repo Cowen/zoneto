@@ -189,10 +189,16 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     # Register the polars df as a DuckDB table
     con.register("apps", df.to_arrow())
 
-    hr_shp = str(next((ref / "heritage_register").glob("*.shp")))
-    hd_shp = str(next((ref / "heritage_districts").glob("*.shp")))
-    sp_geojson = str(ref / "secondary_plans.geojson")
-    zoning_csv = str(ref / "zoning.csv")
+    hr_shp = str(next((ref / "heritage_register").glob("*.shp"))).replace(
+        "'",
+        "''",
+    )
+    hd_shp = str(next((ref / "heritage_districts").glob("*.shp"))).replace(
+        "'",
+        "''",
+    )
+    sp_geojson = str(ref / "secondary_plans.geojson").replace("'", "''")
+    zoning_csv = str(ref / "zoning.csv").replace("'", "''")
 
     result = con.execute(f"""
         WITH pts AS (
@@ -241,14 +247,12 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
         )
         SELECT
             a.*,
-            COALESCE(z.zoning_class, NULL)
-                AS zoning_class,
+            z.zoning_class AS zoning_class,
             COALESCE(h.in_heritage_register, 0)
                 AS in_heritage_register,
             COALESCE(d.in_heritage_district, 0)
                 AS in_heritage_district,
-            COALESCE(sp.secondary_plan_name, NULL)
-                AS secondary_plan_name,
+            sp.secondary_plan_name AS secondary_plan_name,
             CASE WHEN sp.secondary_plan_name IS NOT NULL
                  THEN 1 ELSE 0 END AS in_secondary_plan
         FROM apps a
