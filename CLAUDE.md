@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
-<!-- Freshness: 2026-03-01 -->
-<!-- Last reviewed against: development-applications branch -->
+<!-- Freshness: 2026-03-04 -->
+<!-- Last reviewed against: development-outcome-prediction branch -->
 
 ## Purpose
 
@@ -32,6 +32,9 @@ src/zoneto/
     base.py          Source protocol (runtime_checkable)
     ckan.py          CKANSource (datastore + bulk_csv modes)
     registry.py      SOURCES dict -- the single source of truth for datasets
+  analytics/
+    __init__.py      Analytics subpackage (empty)
+    features.py      Canonical feature column lists for ML models
 ```
 
 Data flows: CLI -> registry -> source.fetch() -> storage.write_source() -> data/<name>/year=YYYY/*.parquet
@@ -89,16 +92,30 @@ creates correct Hive directories while pyarrow creates flat files.
 
 `DATA_DIR` defaults to `Path("data")` (cwd-relative).
 
+### Analytics Features (`analytics/features.py`)
+
+Canonical feature column lists for machine learning models:
+
+- `DEV_CAT_COLS` -- categorical features for development applications
+- `DEV_NUM_COLS` -- numeric features for development applications
+- `COA_CAT_COLS` -- categorical features for committee-of-adjustment applications
+- `COA_NUM_COLS` -- numeric features for committee-of-adjustment applications
+
 ## Dependencies
 
 | Package | Role |
 |---|---|
+| duckdb | OLAP database for analytics |
 | httpx | HTTP client for CKAN API |
+| joblib | Serialization and parallel computing for ML models |
 | polars | DataFrames + Parquet I/O |
 | pyarrow | Required by polars for Parquet support |
 | pydantic | Config validation |
-| typer | CLI framework |
+| pyproj | Coordinate reference system transformations |
 | rich | Terminal formatting |
+| scikit-learn | Machine learning library |
+| shapely | Spatial geometry operations |
+| typer | CLI framework |
 
 Dev: pytest, pytest-httpx, ruff, ty.
 
