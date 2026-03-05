@@ -1,13 +1,15 @@
 # Zoneto -- Toronto Building Data Pipeline
 
 <!-- Freshness: 2026-03-04 -->
-<!-- Last reviewed against: development-outcome-prediction branch (Phase 4) -->
+<!-- Last reviewed against: development-outcome-prediction branch (all phases) -->
 
 ## Purpose
 
 Zoneto is a CLI pipeline that fetches City of Toronto building-permit and
 planning-application datasets from the city's CKAN open-data portal, normalizes
-them, and stores them as Hive-partitioned Parquet files.
+them, stores them as Hive-partitioned Parquet files, and trains ML models to
+predict development application outcomes (approval likelihood, appeal risk,
+and processing time).
 
 ## Quick Start
 
