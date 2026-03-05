@@ -1,4 +1,5 @@
 """Batch and single-application scoring from trained joblib models."""
+
 from __future__ import annotations
 
 from pathlib import Path

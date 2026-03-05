@@ -1,4 +1,5 @@
 """Enrichment pipeline: fetch reference data, label outcomes, spatial join."""
+
 from __future__ import annotations
 
 import zipfile
@@ -37,26 +38,43 @@ _SECONDARY_PLANS_URL = (
 # ---------------------------------------------------------------------------
 # Status label sets (lowercase after strip)
 # ---------------------------------------------------------------------------
-_DEV_APPROVED_SET: frozenset[str] = frozenset({
-    "closed", "noac issued", "council approved", "draft plan approved",
-    "final approval completed", "omb approved", "approved",
-    "omb partially approved",
-})
+_DEV_APPROVED_SET: frozenset[str] = frozenset(
+    {
+        "closed",
+        "noac issued",
+        "council approved",
+        "draft plan approved",
+        "final approval completed",
+        "omb approved",
+        "approved",
+        "omb partially approved",
+    }
+)
 _DEV_REFUSED_SET: frozenset[str] = frozenset({"refused", "omb refused"})
-_DEV_APPEALED_SET: frozenset[str] = frozenset({
-    "omb appeal", "appeal received", "omb approved", "omb refused",
-    "omb partially approved",
-})
-_COA_APPROVED_SET: frozenset[str] = frozenset({
-    "approved", "conditional approval", "approved with conditions",
-    "approved on condition",
-})
+_DEV_APPEALED_SET: frozenset[str] = frozenset(
+    {
+        "omb appeal",
+        "appeal received",
+        "omb approved",
+        "omb refused",
+        "omb partially approved",
+    }
+)
+_COA_APPROVED_SET: frozenset[str] = frozenset(
+    {
+        "approved",
+        "conditional approval",
+        "approved with conditions",
+        "approved on condition",
+    }
+)
 _COA_REFUSED_SET: frozenset[str] = frozenset({"refused", "withdrawn"})
 
 
 def _download(url: str, dest: Path) -> None:
     """Download *url* to *dest* (binary)."""
     import httpx
+
     with httpx.Client(follow_redirects=True, timeout=120) as client:
         r = client.get(url)
         r.raise_for_status()
@@ -161,9 +179,7 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     ref = data_dir / "reference"
 
     # Reproject x/y from EPSG:26917 → EPSG:4326
-    transformer = pyproj.Transformer.from_crs(
-        "EPSG:26917", "EPSG:4326", always_xy=True
-    )
+    transformer = pyproj.Transformer.from_crs("EPSG:26917", "EPSG:4326", always_xy=True)
     xs = df["x"].cast(pl.Float64, strict=False).to_list()
     ys = df["y"].cast(pl.Float64, strict=False).to_list()
 

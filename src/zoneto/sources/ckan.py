@@ -137,16 +137,9 @@ class CKANSource:
         # 3. Derive year from the configured year_column (null dates → year 0)
         # Only possible if the column was successfully parsed as pl.Date.
         year_col = self.config.year_column
-        if (
-            year_col in df.columns
-            and df.schema[year_col] == pl.Date
-        ):
+        if year_col in df.columns and df.schema[year_col] == pl.Date:
             df = df.with_columns(
-                pl.col(year_col)
-                .dt.year()
-                .fill_null(0)
-                .cast(pl.Int32)
-                .alias("year")
+                pl.col(year_col).dt.year().fill_null(0).cast(pl.Int32).alias("year")
             )
         else:
             df = df.with_columns(pl.lit(0).cast(pl.Int32).alias("year"))

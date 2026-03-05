@@ -1,4 +1,5 @@
 """Training pipeline: build sklearn models from enriched parquet."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -33,28 +34,34 @@ def build_pipeline(
         transformers=[
             (
                 "cat",
-                Pipeline([
-                    (
-                        "impute",
-                        SimpleImputer(strategy="constant", fill_value="__missing__"),
-                    ),
-                    (
-                        "encode",
-                        OrdinalEncoder(
-                            handle_unknown="use_encoded_value",
-                            unknown_value=-1,
+                Pipeline(
+                    [
+                        (
+                            "impute",
+                            SimpleImputer(
+                                strategy="constant", fill_value="__missing__"
+                            ),
                         ),
-                    ),
-                ]),
+                        (
+                            "encode",
+                            OrdinalEncoder(
+                                handle_unknown="use_encoded_value",
+                                unknown_value=-1,
+                            ),
+                        ),
+                    ]
+                ),
                 cat_cols,
             ),
             ("num", "passthrough", num_cols),
         ]
     )
-    return Pipeline([
-        ("preprocessor", preprocessor),
-        ("estimator", estimator),
-    ])
+    return Pipeline(
+        [
+            ("preprocessor", preprocessor),
+            ("estimator", estimator),
+        ]
+    )
 
 
 def train_source(
@@ -110,14 +117,31 @@ def train_all(
     coa_path = data_dir / "enriched" / "coa.parquet"
 
     jobs: list[tuple[Path, str, list[str], list[str], str, bool]] = [
-        (dev_path, "dev_approved", DEV_CAT_COLS, DEV_NUM_COLS,
-         "dev_applications_approved", False),
-        (dev_path, "dev_no_appeal", DEV_CAT_COLS, DEV_NUM_COLS,
-         "dev_applications_no_appeal", False),
-        (coa_path, "coa_approved", COA_CAT_COLS, COA_NUM_COLS,
-         "coa_approved", False),
-        (coa_path, "coa_days_to_approval", COA_CAT_COLS, COA_NUM_COLS,
-         "coa_days_to_approval", True),
+        (
+            dev_path,
+            "dev_approved",
+            DEV_CAT_COLS,
+            DEV_NUM_COLS,
+            "dev_applications_approved",
+            False,
+        ),
+        (
+            dev_path,
+            "dev_no_appeal",
+            DEV_CAT_COLS,
+            DEV_NUM_COLS,
+            "dev_applications_no_appeal",
+            False,
+        ),
+        (coa_path, "coa_approved", COA_CAT_COLS, COA_NUM_COLS, "coa_approved", False),
+        (
+            coa_path,
+            "coa_days_to_approval",
+            COA_CAT_COLS,
+            COA_NUM_COLS,
+            "coa_days_to_approval",
+            True,
+        ),
     ]
 
     results: dict[str, int] = {}
