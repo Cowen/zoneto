@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
 <!-- Freshness: 2026-03-04 -->
-<!-- Last reviewed against: development-outcome-prediction branch (Phase 3) -->
+<!-- Last reviewed against: development-outcome-prediction branch (Phase 4) -->
 
 ## Purpose
 
@@ -17,6 +17,10 @@ just test                  # run pytest
 just lint                  # ruff check + ty check
 just sync                  # fetch all sources -> data/
 just status                # show row counts and last-modified
+just enrich                # enrich raw parquet with spatial + outcome labels
+just train                 # train ML models from enriched parquet
+just score                 # batch inference -> data/scores/
+just pipeline              # enrich -> train -> score in sequence
 ```
 
 The CLI entrypoint is `zoneto` (mapped to `zoneto.cli:app` in pyproject.toml).
@@ -25,7 +29,7 @@ The CLI entrypoint is `zoneto` (mapped to `zoneto.cli:app` in pyproject.toml).
 
 ```
 src/zoneto/
-  cli.py             Typer app: `sync`, `status`, `enrich`, and `train` commands
+  cli.py             Typer app: `sync`, `status`, `enrich`, `train`, `score` commands
   models.py          CKANConfig pydantic model
   storage.py         write_source / source_row_counts / last_modified
   sources/
@@ -37,9 +41,12 @@ src/zoneto/
     features.py      Canonical feature column lists for ML models
     enrich.py        Reference data downloads and enrichment pipelines
     train.py         sklearn pipelines and training functions
+    score.py         Batch and single-application scoring
 ```
 
-Data flows: CLI -> registry -> source.fetch() -> storage.write_source() -> data/<name>/year=YYYY/*.parquet
+Data flows:
+- Ingest: CLI -> registry -> source.fetch() -> storage.write_source() -> data/<name>/year=YYYY/*.parquet
+- Analytics: data/<name>/ -> enrich -> data/enriched/*.parquet -> train -> models/*.joblib -> score -> data/scores/*.parquet
 
 ## Contracts
 
@@ -96,6 +103,8 @@ creates correct Hive directories while pyarrow creates flat files.
   `--fetch-ref` (default). Writes enriched parquet to `data/enriched/`.
 - `zoneto train [--model-dir PATH]` -- trains all 4 outcome-prediction models from
   enriched parquet. Serializes to `models/*.joblib` (default: `./models`).
+- `zoneto score [--model-dir PATH]` -- runs batch inference on enriched parquet using
+  trained models. Writes scored parquet to `data/scores/`.
 
 `DATA_DIR` defaults to `Path("data")` (cwd-relative).
 
@@ -147,6 +156,33 @@ Trains sklearn HistGradientBoosting classifiers and regressors from enriched par
 - `build_pipeline(cat_cols, num_cols, estimator)` -- returns unfitted Pipeline
 - `train_source(enriched_path, label_col, cat_cols, num_cols, model_name, model_dir, *, regressor)` -- trains one model, returns row count
 - `train_all(data_dir, model_dir)` -- trains all 4 models, returns {model_name: row_count}
+
+### Scoring (`analytics/score.py`)
+
+Batch and single-application inference from trained joblib models:
+
+**Batch scoring** (`score_all`):
+- Reads enriched parquet from `data/enriched/`, loads models from `models/`
+- For classifiers: outputs `pred_<label>` (int) and `prob_<label>` (float) columns
+- For regressors: outputs `pred_<label>` (float) column only
+- Writes scored parquet to `data/scores/dev_applications.parquet` and `data/scores/coa.parquet`
+
+**Single scoring** (`score_one`):
+- `score_one(source, features, model_dir)` -- scores one application dict
+- `source` must be `"dev_applications"` or `"coa"`
+- `features` is a dict with keys matching the feature column lists
+- Returns dict of prediction/probability values
+
+**Output columns added by scoring**:
+| Source | Column | Type | Description |
+|---|---|---|---|
+| dev_applications | `pred_dev_approved` | int | 0/1 approval prediction |
+| dev_applications | `prob_dev_approved` | float | approval probability |
+| dev_applications | `pred_dev_no_appeal` | int | 0/1 no-appeal prediction |
+| dev_applications | `prob_dev_no_appeal` | float | no-appeal probability |
+| coa | `pred_coa_approved` | int | 0/1 approval prediction |
+| coa | `prob_coa_approved` | float | approval probability |
+| coa | `pred_coa_days_to_approval` | float | predicted days to approval |
 
 ## Dependencies
 
