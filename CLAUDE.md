@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
 <!-- Freshness: 2026-03-04 -->
-<!-- Last reviewed against: development-outcome-prediction branch (Phase 2) -->
+<!-- Last reviewed against: development-outcome-prediction branch (Phase 3) -->
 
 ## Purpose
 
@@ -25,7 +25,7 @@ The CLI entrypoint is `zoneto` (mapped to `zoneto.cli:app` in pyproject.toml).
 
 ```
 src/zoneto/
-  cli.py             Typer app: `sync`, `status`, and `enrich` commands
+  cli.py             Typer app: `sync`, `status`, `enrich`, and `train` commands
   models.py          CKANConfig pydantic model
   storage.py         write_source / source_row_counts / last_modified
   sources/
@@ -36,6 +36,7 @@ src/zoneto/
     __init__.py      Analytics subpackage (empty)
     features.py      Canonical feature column lists for ML models
     enrich.py        Reference data downloads and enrichment pipelines
+    train.py         sklearn pipelines and training functions
 ```
 
 Data flows: CLI -> registry -> source.fetch() -> storage.write_source() -> data/<name>/year=YYYY/*.parquet
@@ -93,6 +94,8 @@ creates correct Hive directories while pyarrow creates flat files.
 - `zoneto enrich [--fetch-ref/--no-fetch-ref]` -- enriches raw parquet with outcome
   labels and spatial features. Downloads reference datasets to `data/reference/` if
   `--fetch-ref` (default). Writes enriched parquet to `data/enriched/`.
+- `zoneto train [--model-dir PATH]` -- trains all 4 outcome-prediction models from
+  enriched parquet. Serializes to `models/*.joblib` (default: `./models`).
 
 `DATA_DIR` defaults to `Path("data")` (cwd-relative).
 
@@ -122,6 +125,29 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
 - `enrich_dev(data_dir)` -- enriches dev_applications with year_submitted, has_community_meeting,
   spatial features (zoning, heritage, secondary plan), dev_approved and dev_no_appeal labels
 
+### Training (`analytics/train.py`)
+
+Trains sklearn HistGradientBoosting classifiers and regressors from enriched parquet:
+
+**Models**:
+| File | Type | Target | Source | Label filter |
+|---|---|---|---|---|
+| `dev_applications_approved.joblib` | HistGradientBoostingClassifier | `dev_approved` | enriched dev_applications | drop null |
+| `dev_applications_no_appeal.joblib` | HistGradientBoostingClassifier | `dev_no_appeal` | enriched dev_applications | drop null |
+| `coa_approved.joblib` | HistGradientBoostingClassifier | `coa_approved` | enriched coa | drop null |
+| `coa_days_to_approval.joblib` | HistGradientBoostingRegressor | `coa_days_to_approval` | enriched coa | drop null |
+
+**Pipeline architecture**:
+- ColumnTransformer with OrdinalEncoder for categorical features
+  (fills nulls with "__missing__", encodes unknown as -1)
+- Passthrough for numeric features (HistGradientBoosting handles NaN natively)
+- Random seed: 42 for reproducibility
+
+**Functions**:
+- `build_pipeline(cat_cols, num_cols, estimator)` -- returns unfitted Pipeline
+- `train_source(enriched_path, label_col, cat_cols, num_cols, model_name, model_dir, *, regressor)` -- trains one model, returns row count
+- `train_all(data_dir, model_dir)` -- trains all 4 models, returns {model_name: row_count}
+
 ## Dependencies
 
 | Package | Role |
@@ -129,6 +155,7 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
 | duckdb | OLAP database for analytics |
 | httpx | HTTP client for CKAN API |
 | joblib | Serialization and parallel computing for ML models |
+| pandas | DataFrame interchange with scikit-learn |
 | polars | DataFrames + Parquet I/O |
 | pyarrow | Required by polars for Parquet support |
 | pydantic | Config validation |

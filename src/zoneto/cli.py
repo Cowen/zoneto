@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from zoneto.analytics.enrich import enrich_coa, enrich_dev, fetch_reference
+from zoneto.analytics.train import train_all
 from zoneto.sources.registry import SOURCES
 from zoneto.storage import last_modified, source_row_counts, write_source
 
@@ -94,3 +95,21 @@ def enrich(
             console.print(f"  [green]✓[/green] {count:,} rows written")
         except Exception as exc:
             console.print(f"  [red]✗ {exc}[/red]")
+
+
+@app.command()
+def train(
+    model_dir: Annotated[
+        Path,
+        typer.Option(help="Directory to write .joblib model files."),
+    ] = Path("models"),
+) -> None:
+    """Train all outcome-prediction models from enriched Parquet."""
+    console.print("[bold]Training models...[/bold]")
+    try:
+        results = train_all(data_dir=DATA_DIR, model_dir=model_dir)
+        for name, count in results.items():
+            console.print(f"  [green]✓[/green] {name}: {count:,} training rows")
+    except Exception as exc:
+        console.print(f"  [red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
