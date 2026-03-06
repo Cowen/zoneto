@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from sklearn.ensemble import (
     HistGradientBoostingRegressor,
 )
 from sklearn.impute import SimpleImputer
+from sklearn.model_selection import KFold, StratifiedKFold, cross_val_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OrdinalEncoder
 
@@ -108,11 +110,47 @@ def train_source(
     return len(df)
 
 
+def evaluate_source(
+    enriched_path: Path,
+    label_col: str,
+    cat_cols: list[str],
+    num_cols: list[str],
+    *,
+    regressor: bool = False,
+    cv: int = 3,
+) -> dict[str, float | int]:
+    """Cross-validate a model pipeline. Returns {mean, std, n}."""
+    df = pl.read_parquet(enriched_path).filter(pl.col(label_col).is_not_null())
+    all_cols = cat_cols + num_cols
+    for col in cat_cols:
+        if col not in df.columns:
+            df = df.with_columns(pl.lit(None, dtype=pl.Utf8).alias(col))
+    for col in num_cols:
+        if col not in df.columns:
+            df = df.with_columns(pl.lit(None, dtype=pl.Float64).alias(col))
+    X = df.select(all_cols).to_pandas()
+    y = df[label_col].to_pandas()
+    estimator = (
+        HistGradientBoostingRegressor(random_state=42)
+        if regressor
+        else HistGradientBoostingClassifier(random_state=42)
+    )
+    pipeline = build_pipeline(cat_cols, num_cols, estimator)
+    scoring = "r2" if regressor else "roc_auc"
+    cv_obj: KFold | StratifiedKFold = KFold(cv) if regressor else StratifiedKFold(cv)
+    scores = cross_val_score(pipeline, X, y, cv=cv_obj, scoring=scoring)
+    return {"mean": float(scores.mean()), "std": float(scores.std()), "n": len(y)}
+
+
 def train_all(
     data_dir: Path = Path("data"),
     model_dir: Path = Path("models"),
-) -> dict[str, int]:
-    """Train all 4 models. Returns {model_name: row_count}."""
+) -> tuple[dict[str, int], dict[str, dict[str, float | int]]]:
+    """Train all 4 models. Returns (row_counts, metrics).
+
+    First element: {model_name: row_count}
+    Second element: {model_name: {"mean": float, "std": float, "n": int}}
+    """
     dev_path = data_dir / "enriched" / "dev_applications.parquet"
     coa_path = data_dir / "enriched" / "coa.parquet"
 
@@ -144,7 +182,8 @@ def train_all(
         ),
     ]
 
-    results: dict[str, int] = {}
+    counts: dict[str, int] = {}
+    metrics: dict[str, dict[str, float | int]] = {}
     for path, label, cat, num, name, is_reg in jobs:
         count = train_source(
             enriched_path=path,
@@ -155,5 +194,20 @@ def train_all(
             model_dir=model_dir,
             regressor=is_reg,
         )
-        results[name] = count
-    return results
+        counts[name] = count
+        eval_result = evaluate_source(
+            enriched_path=path,
+            label_col=label,
+            cat_cols=cat,
+            num_cols=num,
+            regressor=is_reg,
+        )
+        metrics[name] = eval_result
+
+    # Save metrics.json
+    model_dir.mkdir(parents=True, exist_ok=True)
+    metrics_file = model_dir / "metrics.json"
+    with open(metrics_file, "w") as f:
+        json.dump(metrics, f, indent=2)
+
+    return counts, metrics

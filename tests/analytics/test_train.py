@@ -209,12 +209,63 @@ def test_train_source_drops_null_labels(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# evaluate_source
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_source_classifier(tmp_path: Path) -> None:
+    """evaluate_source returns dict with mean/std/n for classifier."""
+    from zoneto.analytics.train import evaluate_source
+
+    _make_dev_enriched(tmp_path)
+    result = evaluate_source(
+        enriched_path=tmp_path / "enriched" / "dev_applications.parquet",
+        label_col="dev_approved",
+        cat_cols=["application_type", "ward_number", "zoning_class", "secondary_plan_name"],
+        num_cols=[
+            "year_submitted",
+            "in_heritage_register",
+            "in_heritage_district",
+            "in_secondary_plan",
+            "has_community_meeting",
+        ],
+        regressor=False,
+        cv=2,
+    )
+    assert "mean" in result and "std" in result and "n" in result
+    assert 0.0 <= result["mean"] <= 1.0
+    assert result["n"] == 5
+
+
+def test_evaluate_source_regressor(tmp_path: Path) -> None:
+    """evaluate_source returns dict with mean/std/n for regressor."""
+    from zoneto.analytics.train import evaluate_source
+
+    _make_coa_enriched(tmp_path)
+    result = evaluate_source(
+        enriched_path=tmp_path / "enriched" / "coa.parquet",
+        label_col="coa_days_to_approval",
+        cat_cols=["application_type", "sub_type", "ward_number", "zoning_designation"],
+        num_cols=["year_submitted"],
+        regressor=True,
+        cv=2,
+    )
+    assert "mean" in result and "std" in result and "n" in result
+    assert result["n"] == 3  # only 3 non-null coa_days_to_approval rows
+
+
+# ---------------------------------------------------------------------------
+# train_all
+# ---------------------------------------------------------------------------
+
+
 def test_train_all_creates_four_models(tmp_path: Path) -> None:
     """train_all creates all four model files."""
     _make_dev_enriched(tmp_path)
     _make_coa_enriched(tmp_path)
     model_dir = tmp_path / "models"
-    train_all(data_dir=tmp_path, model_dir=model_dir)
+    counts, metrics = train_all(data_dir=tmp_path, model_dir=model_dir)
     expected = [
         "dev_applications_approved.joblib",
         "dev_applications_no_appeal.joblib",
@@ -223,3 +274,25 @@ def test_train_all_creates_four_models(tmp_path: Path) -> None:
     ]
     for name in expected:
         assert (model_dir / name).exists(), f"Missing {name}"
+
+
+def test_train_all_returns_metrics(tmp_path: Path) -> None:
+    """train_all returns a tuple of (row_counts, metrics)."""
+    _make_dev_enriched(tmp_path)
+    _make_coa_enriched(tmp_path)
+    model_dir = tmp_path / "models"
+    counts, metrics = train_all(data_dir=tmp_path, model_dir=model_dir)
+    assert isinstance(counts, dict)
+    assert isinstance(metrics, dict)
+    expected_models = [
+        "dev_applications_approved",
+        "dev_applications_no_appeal",
+        "coa_approved",
+        "coa_days_to_approval",
+    ]
+    for name in expected_models:
+        assert name in metrics
+        assert "mean" in metrics[name]
+        assert "std" in metrics[name]
+        assert "n" in metrics[name]
+    assert (model_dir / "metrics.json").exists()

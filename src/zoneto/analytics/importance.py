@@ -1,4 +1,5 @@
 """Feature importance for trained outcome-prediction models."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,16 +18,28 @@ from zoneto.analytics.features import (
 # Model registry: model_name → (enriched_parquet, label_col, cat_cols, num_cols)
 _MODEL_META: dict[str, tuple[str, str, list[str], list[str]]] = {
     "dev_applications_approved": (
-        "dev_applications", "dev_approved", DEV_CAT_COLS, DEV_NUM_COLS,
+        "dev_applications",
+        "dev_approved",
+        DEV_CAT_COLS,
+        DEV_NUM_COLS,
     ),
     "dev_applications_no_appeal": (
-        "dev_applications", "dev_no_appeal", DEV_CAT_COLS, DEV_NUM_COLS,
+        "dev_applications",
+        "dev_no_appeal",
+        DEV_CAT_COLS,
+        DEV_NUM_COLS,
     ),
     "coa_approved": (
-        "coa", "coa_approved", COA_CAT_COLS, COA_NUM_COLS,
+        "coa",
+        "coa_approved",
+        COA_CAT_COLS,
+        COA_NUM_COLS,
     ),
     "coa_days_to_approval": (
-        "coa", "coa_days_to_approval", COA_CAT_COLS, COA_NUM_COLS,
+        "coa",
+        "coa_days_to_approval",
+        COA_CAT_COLS,
+        COA_NUM_COLS,
     ),
 }
 
@@ -34,9 +47,10 @@ _MODEL_META: dict[str, tuple[str, str, list[str], list[str]]] = {
 def _gain_importances(estimator: object, n_features: int) -> np.ndarray:
     """Compute gain-based feature importances from HistGradientBoosting internals.
 
-    NOTE: This relies on `_predictors`, a private sklearn attribute. It is the
-    only way to get no-data importance for HistGradientBoosting (which does not
-    expose `feature_importances_`). Test against sklearn upgrades.
+    Uses `_predictors`, a private sklearn attribute that has been stable across
+    sklearn 0.24–1.8. Verified against sklearn 1.8.0; re-check on major upgrades.
+    sklearn does not expose a public `feature_importances_` on HistGradientBoosting
+    — use permutation importance (builtin=False) for a fully public alternative.
     """
     if not hasattr(estimator, "_predictors"):
         raise AttributeError(
@@ -52,8 +66,6 @@ def _gain_importances(estimator: object, n_features: int) -> np.ndarray:
                 idx = int(node["feature_idx"])
                 if idx < n_features:
                     gains[idx] += float(node["gain"])
-    # Gains from HistGradientBoosting should be non-negative, but clip defensively
-    # before normalising so a degenerate model doesn't produce negative fractions.
     gains = np.maximum(gains, 0.0)
     total = gains.sum()
     return gains / total if total > 0 else gains
@@ -89,11 +101,13 @@ def feature_importance(
 
     if builtin:
         importances = _gain_importances(pipe.named_steps["estimator"], len(all_cols))
-        result = pl.DataFrame({
-            "feature": all_cols,
-            "importance_mean": importances.tolist(),
-            "importance_std": [0.0] * len(all_cols),
-        })
+        result = pl.DataFrame(
+            {
+                "feature": all_cols,
+                "importance_mean": importances.tolist(),
+                "importance_std": [0.0] * len(all_cols),
+            }
+        )
     else:
         import pandas as pd
         from sklearn.inspection import permutation_importance
@@ -105,16 +119,20 @@ def feature_importance(
 
         scoring = "r2" if "days" in label_col else "roc_auc"
         perm = permutation_importance(
-            pipe, X, y,
+            pipe,
+            X,
+            y,
             n_repeats=n_repeats,
             scoring=scoring,
             random_state=random_state,
             n_jobs=-1,
         )
-        result = pl.DataFrame({
-            "feature": all_cols,
-            "importance_mean": perm.importances_mean.tolist(),
-            "importance_std": perm.importances_std.tolist(),
-        })
+        result = pl.DataFrame(
+            {
+                "feature": all_cols,
+                "importance_mean": perm.importances_mean.tolist(),
+                "importance_std": perm.importances_std.tolist(),
+            }
+        )
 
     return result.sort("importance_mean", descending=True)

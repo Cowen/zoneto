@@ -109,9 +109,21 @@ def train(
     """Train all outcome-prediction models from enriched Parquet."""
     console.print("[bold]Training models...[/bold]")
     try:
-        results = train_all(data_dir=DATA_DIR, model_dir=model_dir)
-        for name, count in results.items():
-            console.print(f"  [green]✓[/green] {name}: {count:,} training rows")
+        counts, metrics = train_all(data_dir=DATA_DIR, model_dir=model_dir)
+
+        # Build and display metrics table
+        table = Table(title="Model Training Results")
+        table.add_column("Model", style="bold")
+        table.add_column("N rows", justify="right")
+        table.add_column("CV Score", justify="right")
+
+        for name, count in counts.items():
+            metric = metrics[name]
+            cv_str = f"{metric['mean']:.4f} ± {metric['std']:.4f}"
+            table.add_row(name, f"{count:,}", cv_str)
+
+        console.print(table)
+        console.print(f"[green]✓[/green] Metrics saved to {model_dir / 'metrics.json'}")
     except Exception as exc:
         console.print(f"  [red]✗ {exc}[/red]")
         raise typer.Exit(code=1)
