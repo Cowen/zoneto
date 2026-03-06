@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from zoneto.analytics.enrich import enrich_coa, enrich_dev, fetch_reference
+from zoneto.analytics.importance import feature_importance
 from zoneto.analytics.score import score_all
 from zoneto.analytics.train import train_all
 from zoneto.sources.registry import SOURCES
@@ -114,6 +115,61 @@ def train(
     except Exception as exc:
         console.print(f"  [red]✗ {exc}[/red]")
         raise typer.Exit(code=1)
+
+
+@app.command()
+def importance(
+    model: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Model name. One of: dev_applications_approved,"
+                " dev_applications_no_appeal, coa_approved, coa_days_to_approval."
+            )
+        ),
+    ],
+    model_dir: Annotated[
+        Path,
+        typer.Option(help="Directory containing .joblib model files."),
+    ] = Path("models"),
+    builtin: Annotated[
+        bool,
+        typer.Option(
+            "--builtin/--permutation",
+            help="Use built-in impurity importance (fast) instead of permutation.",
+        ),
+    ] = False,
+) -> None:
+    """Rank input features by their contribution to a model's predictions."""
+    try:
+        df = feature_importance(
+            model,
+            data_dir=DATA_DIR,
+            model_dir=model_dir,
+            builtin=builtin,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    method = "built-in impurity" if builtin else "permutation (roc_auc/r2)"
+    console.print(f"[bold]Feature importance — {model}[/bold] ({method})\n")
+
+    table = Table()
+    table.add_column("Rank", justify="right", style="dim")
+    table.add_column("Feature", style="bold")
+    table.add_column("Importance", justify="right")
+    table.add_column("± Std", justify="right", style="dim")
+
+    for i, row in enumerate(df.iter_rows(named=True), 1):
+        table.add_row(
+            str(i),
+            row["feature"],
+            f"{row['importance_mean']:.4f}",
+            f"{row['importance_std']:.4f}",
+        )
+
+    console.print(table)
 
 
 @app.command()

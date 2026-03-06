@@ -13,6 +13,9 @@ train:
 score:
     uv run zoneto score
 
+importance model:
+    uv run zoneto importance {{model}}
+
 # Run the full analytics pipeline: enrich → train → score
 pipeline:
     just enrich
