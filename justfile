@@ -1,18 +1,30 @@
+default:
+	@just --list
+
+# Pull all data sources
 sync:
     uv run zoneto sync
 
 status:
     uv run zoneto status
 
+# Enrich data
 enrich:
     uv run zoneto enrich
 
+# Train models
 train:
     uv run zoneto train
 
+# Score models
 score:
     uv run zoneto score
 
+# Measure importance of all model input features
+importance-all:
+	ls models/*.joblib | sed 's/.joblib//g' | xargs -n1 just importance
+
+# Measure importance of model input features
 importance model:
     uv run zoneto importance {{model}}
 
