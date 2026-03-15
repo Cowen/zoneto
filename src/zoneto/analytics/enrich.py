@@ -195,8 +195,11 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     """
     ref = data_dir / "reference"
 
-    # Reproject x/y from EPSG:26917 → EPSG:4326
-    transformer = pyproj.Transformer.from_crs("EPSG:26917", "EPSG:4326", always_xy=True)
+    # Reproject x/y from EPSG:2952 (NAD83 / MTM Zone 10, City of Toronto internal CRS)
+    # to EPSG:4326. Median dev application x ≈ 313,000 (MTM false easting 304,800),
+    # confirming EPSG:2952 — not EPSG:26917 (UTM 17N, false easting 500,000) which
+    # would map Toronto parcels to Michigan.
+    transformer = pyproj.Transformer.from_crs("EPSG:2952", "EPSG:4326", always_xy=True)
     xs = df["x"].cast(pl.Float64, strict=False).to_list()
     ys = df["y"].cast(pl.Float64, strict=False).to_list()
 
@@ -366,10 +369,14 @@ def enrich_permits(data_dir: Path = Path("data")) -> int:
     for _col in _str_num_cols:
         if _col in df.columns and df[_col].dtype == pl.Utf8:
             df = df.with_columns(
-                pl.col(_col)
-                .str.replace_all(",", "")
-                .cast(pl.Float64, strict=False)
+                pl.col(_col).str.replace_all(",", "").cast(pl.Float64, strict=False)
             )
+
+    # application_year captures temporal queue-depth signal (permit office staffing
+    # and backlog vary strongly by year — COVID slowdowns, policy changes, etc.)
+    df = df.with_columns(
+        pl.col("application_date").dt.year().cast(pl.Int32).alias("application_year")
+    )
 
     days = (
         (pl.col("issued_date") - pl.col("application_date"))

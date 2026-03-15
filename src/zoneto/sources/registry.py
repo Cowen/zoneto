@@ -23,7 +23,7 @@ SOURCES: dict[str, Source] = {
         CKANConfig(
             dataset_id="committee-of-adjustment-applications",
             access_mode="bulk_csv",
-            year_start=2015,
+            year_start=2018,
         )
     ),
     "dev_applications": CKANSource(

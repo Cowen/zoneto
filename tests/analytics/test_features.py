@@ -58,4 +58,5 @@ def test_permit_num_cols() -> None:
         "residential",
         "industrial",
         "institutional",
+        "application_year",
     ]

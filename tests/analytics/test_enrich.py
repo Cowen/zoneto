@@ -345,61 +345,84 @@ def test_enrich_coa_deduplicates_on_reference_file(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_spatial_join_dev_reads_zoning_geojson(tmp_path: Path) -> None:
-    """_spatial_join_dev must assign zoning_class by reading zoning.geojson via
-    DuckDB ST_Read (not a polars CSV pre-read). This validates the P2 code path.
+def _setup_spatial_ref(ref: Path, zoning_zone: str = "CR3") -> None:
+    """Create minimal reference files for _spatial_join_dev integration tests.
 
-    Uses x=630000, y=4840000 (UTM 17N) which projects to ~(-79.38, 43.66) WGS84,
-    inside the test polygon covering (-80,-78) × (43,45).
+    Zoning polygon covers Toronto WGS84 (-80,-79) × (43,44).
+    Secondary plans polygon is placed at (0,0)-(1,1) so it never matches.
+    Heritage SHPs are empty (no features → default 0 enrichment).
     """
-    ref = tmp_path / "reference"
     hr_dir = ref / "heritage_register"
     hd_dir = ref / "heritage_districts"
     hr_dir.mkdir(parents=True)
     hd_dir.mkdir(parents=True)
 
-    # Zoning polygon covering the test point in WGS84
     zoning = {
         "type": "FeatureCollection",
-        "features": [
-            {
-                "type": "Feature",
-                "properties": {"ZN_ZONE": "CR3"},
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [[
-                        [-80.0, 43.0], [-78.0, 43.0],
-                        [-78.0, 45.0], [-80.0, 45.0], [-80.0, 43.0],
-                    ]],
-                },
-            }
-        ],
+        "features": [{
+            "type": "Feature",
+            "properties": {"ZN_ZONE": zoning_zone},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [-80.0, 43.0], [-79.0, 43.0],
+                    [-79.0, 44.0], [-80.0, 44.0], [-80.0, 43.0],
+                ]],
+            },
+        }],
     }
     (ref / "zoning.geojson").write_text(json.dumps(zoning))
-
-    # Empty heritage/district shapefiles (no features → null enrichment, default 0)
     _write_minimal_shp(hr_dir / "register.shp")
     _write_minimal_shp(hd_dir / "districts.shp")
+    (ref / "secondary_plans.geojson").write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {"SECONDARY_PLAN_NAME": "Nowhere Plan"},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
+                ],
+            },
+        }],
+    }))
 
-    # Secondary plans with one feature far from the test point so it won't match.
-    # Must have at least one feature so DuckDB can infer SECONDARY_PLAN_NAME column.
-    (ref / "secondary_plans.geojson").write_text(
-        json.dumps({
-            "type": "FeatureCollection",
-            "features": [{
-                "type": "Feature",
-                "properties": {"SECONDARY_PLAN_NAME": "Nowhere Plan"},
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [
-                        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
-                    ],
-                },
-            }],
-        })
+
+def test_spatial_join_dev_uses_mtm_zone10_crs(tmp_path: Path) -> None:
+    """_spatial_join_dev must reproject from EPSG:2952 (MTM Zone 10), not EPSG:26917.
+
+    99.8% of dev application coordinates have x~302k-326k, which is MTM Zone 10
+    (false easting 304,800). Treating these as UTM Zone 17N (false easting 500,000)
+    places every Toronto parcel in Michigan (~-83° lon), outside any zoning polygon.
+
+    x=313,000, y=4,834,000 in EPSG:2952 → ~(-79.4°, 43.65°) WGS84 (downtown Toronto).
+    x=313,000, y=4,834,000 in EPSG:26917 → ~(-83.3°, 43.65°) WGS84 (Michigan).
+    """
+    ref = tmp_path / "reference"
+    _setup_spatial_ref(ref)
+
+    # MTM Zone 10 coordinates for a downtown Toronto parcel
+    df = pl.DataFrame({"x": ["313000.0", None], "y": ["4834000.0", None]})
+    result = _spatial_join_dev(df, tmp_path)
+
+    # With correct CRS (EPSG:2952), point lands in Toronto → zoning_class assigned
+    assert result["zoning_class"][0] == "CR3", (
+        "zoning_class is null — CRS may be wrong (EPSG:26917 maps x=313k to Michigan)"
     )
+    assert result["zoning_class"][1] is None  # null coords → null zoning
 
-    df = pl.DataFrame({"x": ["630000.0", None], "y": ["4840000.0", None]})
+
+def test_spatial_join_dev_reads_zoning_geojson(tmp_path: Path) -> None:
+    """_spatial_join_dev reads zoning from zoning.geojson via DuckDB ST_Read.
+
+    Uses x=313000, y=4834000 (EPSG:2952 MTM Zone 10) which projects to
+    ~(-79.4°, 43.65°) WGS84, inside the test polygon covering (-80,-79) × (43,44).
+    """
+    ref = tmp_path / "reference"
+    _setup_spatial_ref(ref)
+
+    df = pl.DataFrame({"x": ["313000.0", None], "y": ["4834000.0", None]})
     result = _spatial_join_dev(df, tmp_path)
 
     # Point inside polygon → zoning_class assigned
@@ -489,3 +512,13 @@ def test_enrich_permits_row_count(tmp_path: Path) -> None:
     _make_permits_parquet(tmp_path)
     count = enrich_permits(data_dir=tmp_path)
     assert count == 4  # all 4 rows preserved (null issuance_days kept)
+
+
+def test_enrich_permits_application_year(tmp_path: Path) -> None:
+    """enrich_permits derives application_year (Int32) from application_date."""
+    _make_permits_parquet(tmp_path)
+    enrich_permits(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "permits_cleared.parquet")
+    assert "application_year" in df.columns
+    assert df["application_year"].dtype == pl.Int32
+    assert df["application_year"][0] == 2022

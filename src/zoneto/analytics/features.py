@@ -38,4 +38,5 @@ PERMIT_NUM_COLS: list[str] = [
     "residential",
     "industrial",
     "institutional",
+    "application_year",
 ]

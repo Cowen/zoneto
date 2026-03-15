@@ -139,6 +139,7 @@ def _make_permits_enriched(tmp_path: Path) -> None:
             "commercial": [0, 0],
             "industrial": [0, 0],
             "institutional": [0, 0],
+            "application_year": [2022, 2023],
             "permit_issuance_days": [100, 45],
         }
     )
@@ -167,9 +168,11 @@ def test_score_all_dev_columns(tmp_path: Path) -> None:
     model_dir = _setup_models(tmp_path)
     score_all(data_dir=tmp_path, model_dir=model_dir)
     df = pl.read_parquet(tmp_path / "scores" / "dev_applications.parquet")
-    assert "pred_dev_approved" in df.columns
+    # dev_approved is retired (dataset retired, class imbalance 97.3%)
+    assert "pred_dev_approved" not in df.columns
+    assert "prob_dev_approved" not in df.columns
+    # dev_appealed remains the primary product model
     assert "pred_dev_appealed" in df.columns
-    assert "prob_dev_approved" in df.columns
     assert "prob_dev_appealed" in df.columns
 
 
@@ -191,8 +194,8 @@ def test_score_all_prob_range(tmp_path: Path) -> None:
     model_dir = _setup_models(tmp_path)
     score_all(data_dir=tmp_path, model_dir=model_dir)
     df = pl.read_parquet(tmp_path / "scores" / "dev_applications.parquet")
-    assert df["prob_dev_approved"].min() >= 0.0
-    assert df["prob_dev_approved"].max() <= 1.0
+    assert df["prob_dev_appealed"].min() >= 0.0
+    assert df["prob_dev_appealed"].max() <= 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -219,9 +222,11 @@ def test_score_one_returns_dict(tmp_path: Path) -> None:
         },
         model_dir=model_dir,
     )
-    assert "pred_dev_approved" in result
-    assert "prob_dev_approved" in result
+    # dev_approved retired — only dev_appealed is scored
+    assert "pred_dev_approved" not in result
+    assert "prob_dev_approved" not in result
     assert "pred_dev_appealed" in result
+    assert "prob_dev_appealed" in result
 
 
 def test_score_one_coa(tmp_path: Path) -> None:
@@ -297,6 +302,7 @@ def test_score_one_permits(tmp_path: Path) -> None:
             "commercial": 0,
             "industrial": 0,
             "institutional": 0,
+            "application_year": 2022,
         },
         model_dir=model_dir,
     )

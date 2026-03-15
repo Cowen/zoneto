@@ -121,7 +121,7 @@ Canonical feature column lists for machine learning models:
 - `COA_CAT_COLS` -- categorical features for COA (application_type, sub_type, ward_number, zoning_designation, planning_district)
 - `COA_NUM_COLS` -- numeric features for COA (year_submitted)
 - `PERMIT_CAT_COLS` -- categorical features for permits (permit_type, structure_type, ward_grid)
-- `PERMIT_NUM_COLS` -- numeric features for permits (est_const_cost, dwelling_units_created, dwelling_units_lost, residential, commercial, industrial, institutional)
+- `PERMIT_NUM_COLS` -- numeric features for permits (est_const_cost, dwelling_units_created, dwelling_units_lost, residential, industrial, institutional, application_year)
 
 ### Enrichment (`analytics/enrich.py`)
 
@@ -139,10 +139,13 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
   enriches COA with outcome labels, ward_number, year_submitted,
   planning_district (preserved from source), coa_approved (1/0/null), coa_days_to_approval regression target
 - `enrich_dev(data_dir)` -- enriches dev_applications with year_submitted,
-  has_community_meeting, spatial features (zoning, heritage, secondary plan), dev_approved and dev_appealed labels
-- `enrich_permits(data_dir)` -- enriches permits_cleared with permit_issuance_days
-  (Int32, issued_date - application_date in calendar days). Drops rows with non-positive
-  issuance days. Writes data/enriched/permits_cleared.parquet. Returns row count
+  has_community_meeting, spatial features (zoning, heritage, secondary plan), dev_approved and dev_appealed labels.
+  Dev application x/y are in EPSG:2952 (NAD83 / MTM Zone 10, City of Toronto internal CRS);
+  `_spatial_join_dev` reprojects from EPSG:2952 → EPSG:4326 before joining zoning polygons.
+- `enrich_permits(data_dir)` -- enriches permits_cleared with application_year (Int32,
+  from application_date year) and permit_issuance_days (Int32, issued_date - application_date
+  in calendar days). Drops rows with non-positive issuance days. Writes
+  data/enriched/permits_cleared.parquet. Returns row count
 
 ### Training (`analytics/train.py`)
 
@@ -191,8 +194,6 @@ Batch and single-application inference from trained joblib models:
 **Output columns added by scoring**:
 | Source | Column | Type | Description |
 |---|---|---|---|
-| dev_applications | `pred_dev_approved` | int | 0/1 approval prediction |
-| dev_applications | `prob_dev_approved` | float | approval probability |
 | dev_applications | `pred_dev_appealed` | int | 0/1 appeal prediction |
 | dev_applications | `prob_dev_appealed` | float | appeal probability |
 | coa | `pred_coa_approved` | int | 0/1 approval prediction |

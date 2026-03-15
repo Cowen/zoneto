@@ -19,8 +19,10 @@ from zoneto.analytics.features import (
 )
 
 # Model registry: source → list of (model_name, pred_col, is_regressor)
+# dev_applications_approved retired: dataset is frozen (no new records), class
+# imbalance is 97.3% approved, and CV variance (±0.178 AUC) is too high for
+# reliable predictions. Re-enable when a live replacement dataset is found.
 _DEV_MODELS: list[tuple[str, str, bool]] = [
-    ("dev_applications_approved", "pred_dev_approved", False),
     ("dev_applications_appealed", "pred_dev_appealed", False),
 ]
 _COA_MODELS: list[tuple[str, str, bool]] = [
