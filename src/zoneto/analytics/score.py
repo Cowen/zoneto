@@ -16,10 +16,10 @@ from zoneto.analytics.features import (
     DEV_NUM_COLS,
 )
 
-# Model registry: source → list of (model_name, label_col, is_regressor)
+# Model registry: source → list of (model_name, pred_col, is_regressor)
 _DEV_MODELS: list[tuple[str, str, bool]] = [
     ("dev_applications_approved", "pred_dev_approved", False),
-    ("dev_applications_no_appeal", "pred_dev_no_appeal", False),
+    ("dev_applications_appealed", "pred_dev_appealed", False),
 ]
 _COA_MODELS: list[tuple[str, str, bool]] = [
     ("coa_approved", "pred_coa_approved", False),

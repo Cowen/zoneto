@@ -23,9 +23,9 @@ _MODEL_META: dict[str, tuple[str, str, list[str], list[str]]] = {
         DEV_CAT_COLS,
         DEV_NUM_COLS,
     ),
-    "dev_applications_no_appeal": (
+    "dev_applications_appealed": (
         "dev_applications",
-        "dev_no_appeal",
+        "dev_appealed",
         DEV_CAT_COLS,
         DEV_NUM_COLS,
     ),

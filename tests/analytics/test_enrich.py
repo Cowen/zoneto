@@ -9,6 +9,21 @@ import pytest
 
 from zoneto.analytics.enrich import enrich_coa, enrich_dev, fetch_reference
 
+
+def _fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
+    return df.with_columns(
+        pl.lit(None, dtype=pl.Utf8).alias("zoning_class"),
+        pl.lit(None, dtype=pl.Utf8).alias("secondary_plan_name"),
+        pl.lit(0, dtype=pl.Int8).alias("in_heritage_register"),
+        pl.lit(0, dtype=pl.Int8).alias("in_heritage_district"),
+        pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
+    )
+
+
+@pytest.fixture()
+def stub_spatial_join(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("zoneto.analytics.enrich._spatial_join_dev", _fake_spatial_join)
+
 # ---------------------------------------------------------------------------
 # fetch_reference
 # ---------------------------------------------------------------------------
@@ -152,95 +167,68 @@ def _make_dev_parquet(tmp_path: Path) -> None:
 
 def test_enrich_dev_creates_output(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    stub_spatial_join: None,
 ) -> None:
     _make_dev_parquet(tmp_path)
-    # Stub spatial join to return empty enrichment columns
-    def fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
-        return df.with_columns(
-            pl.lit(None, dtype=pl.Utf8).alias("zoning_class"),
-            pl.lit(None, dtype=pl.Utf8).alias("secondary_plan_name"),
-            pl.lit(0, dtype=pl.Int8).alias("in_heritage_register"),
-            pl.lit(0, dtype=pl.Int8).alias("in_heritage_district"),
-            pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
-        )
-    monkeypatch.setattr("zoneto.analytics.enrich._spatial_join_dev", fake_spatial_join)
     enrich_dev(data_dir=tmp_path)
     assert (tmp_path / "enriched" / "dev_applications.parquet").exists()
 
 
 def test_enrich_dev_approved_label(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    stub_spatial_join: None,
 ) -> None:
     _make_dev_parquet(tmp_path)
-    def fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
-        return df.with_columns(
-            pl.lit(None, dtype=pl.Utf8).alias("zoning_class"),
-            pl.lit(None, dtype=pl.Utf8).alias("secondary_plan_name"),
-            pl.lit(0, dtype=pl.Int8).alias("in_heritage_register"),
-            pl.lit(0, dtype=pl.Int8).alias("in_heritage_district"),
-            pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
-        )
-    monkeypatch.setattr("zoneto.analytics.enrich._spatial_join_dev", fake_spatial_join)
     enrich_dev(data_dir=tmp_path)
     df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
-    # "Closed" → approved = 1
+    # "Closed" is no longer in approved set → null (ambiguous status)
     assert df.filter(pl.col("application_type") == "Rezoning").filter(
         pl.col("year_submitted") == 2021
-    )["dev_approved"][0] == 1
+    )["dev_approved"][0] is None
     # "Refused" → approved = 0
     assert df.filter(pl.col("application_type") == "Site Plan")["dev_approved"][0] == 0
     # "Under Review" → null
     assert df.filter(pl.col("year_submitted") == 2022)["dev_approved"][0] is None
 
 
-def test_enrich_dev_no_appeal_label(
+def test_enrich_dev_appealed_label(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    stub_spatial_join: None,
 ) -> None:
-    """Test dev_no_appeal label logic."""
+    """Test dev_appealed label logic (1 = appeal filed, 0 = approved without appeal)."""
     _make_dev_parquet(tmp_path)
-
-    def fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
-        return df.with_columns(
-            pl.lit(None, dtype=pl.Utf8).alias("zoning_class"),
-            pl.lit(None, dtype=pl.Utf8).alias("secondary_plan_name"),
-            pl.lit(0, dtype=pl.Int8).alias("in_heritage_register"),
-            pl.lit(0, dtype=pl.Int8).alias("in_heritage_district"),
-            pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
-        )
-
-    monkeypatch.setattr("zoneto.analytics.enrich._spatial_join_dev",
-                        fake_spatial_join)
     enrich_dev(data_dir=tmp_path)
     df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
-    # "Closed" is in approved set, not in appealed → 0
+    # "Closed" removed from approved set → not in any set → None
     assert df.filter(pl.col("application_type") == "Rezoning").filter(
         pl.col("year_submitted") == 2021
-    )["dev_no_appeal"][0] == 0
-    # "Refused" is in refused set, neither in approved nor appealed → None
+    )["dev_appealed"][0] is None
+    # "Refused" is in refused set, not in approved or appealed → None
     assert df.filter(pl.col("application_type") == "Site Plan")[
-        "dev_no_appeal"
+        "dev_appealed"
     ][0] is None
     # "Under Review" not in any set → None
-    assert df.filter(pl.col("year_submitted") == 2022)["dev_no_appeal"][0] is None
+    assert df.filter(pl.col("year_submitted") == 2022)["dev_appealed"][0] is None
+
+
+def test_enrich_dev_is_tlab_era(
+    tmp_path: Path,
+    stub_spatial_join: None,
+) -> None:
+    """is_tlab_era should be 1 for year_submitted >= 2017."""
+    _make_dev_parquet(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+    assert "is_tlab_era" in df.columns
+    # All fixture rows have year_submitted 2021 or 2022, both >= 2017
+    assert df["is_tlab_era"].to_list() == [1, 1, 1]
 
 
 def test_enrich_dev_has_community_meeting(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    stub_spatial_join: None,
 ) -> None:
     _make_dev_parquet(tmp_path)
-    def fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
-        return df.with_columns(
-            pl.lit(None, dtype=pl.Utf8).alias("zoning_class"),
-            pl.lit(None, dtype=pl.Utf8).alias("secondary_plan_name"),
-            pl.lit(0, dtype=pl.Int8).alias("in_heritage_register"),
-            pl.lit(0, dtype=pl.Int8).alias("in_heritage_district"),
-            pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
-        )
-    monkeypatch.setattr("zoneto.analytics.enrich._spatial_join_dev", fake_spatial_join)
     enrich_dev(data_dir=tmp_path)
     df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
     # Row 0 has community_meeting_date → 1

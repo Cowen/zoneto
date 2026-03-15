@@ -8,12 +8,19 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
-from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
+from sklearn.ensemble import (
+    HistGradientBoostingClassifier,
+    HistGradientBoostingRegressor,
+)
 
-from zoneto.analytics.features import COA_CAT_COLS, COA_NUM_COLS, DEV_CAT_COLS, DEV_NUM_COLS
+from zoneto.analytics.features import (
+    COA_CAT_COLS,
+    COA_NUM_COLS,
+    DEV_CAT_COLS,
+    DEV_NUM_COLS,
+)
 from zoneto.analytics.importance import feature_importance
 from zoneto.analytics.train import build_pipeline
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -39,7 +46,7 @@ def model_dir(tmp_path: Path) -> Path:
     )
     dev_pipe.fit(X_dev, y_binary)
     joblib.dump(dev_pipe, d / "dev_applications_approved.joblib")
-    joblib.dump(dev_pipe, d / "dev_applications_no_appeal.joblib")
+    joblib.dump(dev_pipe, d / "dev_applications_appealed.joblib")
 
     # COA classifier
     X_coa = pd.DataFrame({c: [str(i % 3) for i in range(n)] for c in COA_CAT_COLS})
@@ -83,8 +90,9 @@ def enriched_dir(tmp_path: Path) -> Path:
         "in_heritage_district": [0, 0] * 5,
         "in_secondary_plan": [0, 1] * 5,
         "has_community_meeting": [1, 0] * 5,
+        "is_tlab_era": [1, 1] * 5,
         "dev_approved": [1, 0] * 5,
-        "dev_no_appeal": [0, 1] * 5,
+        "dev_appealed": [0, 1] * 5,
     }).write_parquet(out / "dev_applications.parquet")
 
     # COA enriched
@@ -125,7 +133,9 @@ def test_feature_importance_row_count(model_dir: Path, enriched_dir: Path) -> No
     assert len(result) == len(DEV_CAT_COLS) + len(DEV_NUM_COLS)
 
 
-def test_feature_importance_sorted_descending(model_dir: Path, enriched_dir: Path) -> None:
+def test_feature_importance_sorted_descending(
+    model_dir: Path, enriched_dir: Path
+) -> None:
     result = feature_importance(
         "dev_applications_approved",
         data_dir=enriched_dir,
@@ -138,7 +148,7 @@ def test_feature_importance_sorted_descending(model_dir: Path, enriched_dir: Pat
 def test_feature_importance_builtin(model_dir: Path, tmp_path: Path) -> None:
     """Builtin flag works without enriched data."""
     result = feature_importance(
-        "dev_applications_no_appeal",
+        "dev_applications_appealed",
         data_dir=tmp_path,
         model_dir=model_dir,
         builtin=True,

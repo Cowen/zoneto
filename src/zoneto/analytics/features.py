@@ -9,6 +9,7 @@ DEV_CAT_COLS: list[str] = [
 
 DEV_NUM_COLS: list[str] = [
     "year_submitted",
+    "is_tlab_era",
     "in_heritage_register",
     "in_heritage_district",
     "in_secondary_plan",

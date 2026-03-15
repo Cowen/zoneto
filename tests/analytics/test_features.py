@@ -18,6 +18,7 @@ def test_dev_cat_cols() -> None:
 def test_dev_num_cols() -> None:
     assert DEV_NUM_COLS == [
         "year_submitted",
+        "is_tlab_era",
         "in_heritage_register",
         "in_heritage_district",
         "in_secondary_plan",

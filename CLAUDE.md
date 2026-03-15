@@ -92,7 +92,7 @@ creates correct Hive directories while pyarrow creates flat files.
 |---|---|---|---|---|
 | `permits_active` | building-permits-active-permits | datastore | 2020 | `application_date` (default) |
 | `permits_cleared` | building-permits-cleared-permits | datastore | 2020 | `application_date` (default) |
-| `coa` | committee-of-adjustment-applications | bulk_csv | 2020 | `application_date` (default) |
+| `coa` | committee-of-adjustment-applications | bulk_csv | 2015 | `application_date` (default) |
 | `dev_applications` | development-applications | datastore | 2000 | `date_submitted` |
 
 ### CLI (`cli.py`)
@@ -133,8 +133,8 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
 - `fetch_reference(data_dir)` -- downloads/extracts all reference datasets (idempotent)
 - `enrich_coa(data_dir)` -- enriches COA with outcome labels, ward_number, year_submitted,
   coa_approved (1/0/null), coa_days_to_approval regression target
-- `enrich_dev(data_dir)` -- enriches dev_applications with year_submitted, has_community_meeting,
-  spatial features (zoning, heritage, secondary plan), dev_approved and dev_no_appeal labels
+- `enrich_dev(data_dir)` -- enriches dev_applications with year_submitted, is_tlab_era (1 if year >= 2017),
+  has_community_meeting, spatial features (zoning, heritage, secondary plan), dev_approved and dev_appealed labels
 
 ### Training (`analytics/train.py`)
 
@@ -144,7 +144,7 @@ Trains sklearn HistGradientBoosting classifiers and regressors from enriched par
 | File | Type | Target | Source | Label filter |
 |---|---|---|---|---|
 | `dev_applications_approved.joblib` | HistGradientBoostingClassifier | `dev_approved` | enriched dev_applications | drop null |
-| `dev_applications_no_appeal.joblib` | HistGradientBoostingClassifier | `dev_no_appeal` | enriched dev_applications | drop null |
+| `dev_applications_appealed.joblib` | HistGradientBoostingClassifier | `dev_appealed` | enriched dev_applications | drop null |
 | `coa_approved.joblib` | HistGradientBoostingClassifier | `coa_approved` | enriched coa | drop null |
 | `coa_days_to_approval.joblib` | HistGradientBoostingRegressor | `coa_days_to_approval` | enriched coa | drop null |
 
@@ -157,7 +157,8 @@ Trains sklearn HistGradientBoosting classifiers and regressors from enriched par
 **Functions**:
 - `build_pipeline(cat_cols, num_cols, estimator)` -- returns unfitted Pipeline
 - `train_source(enriched_path, label_col, cat_cols, num_cols, model_name, model_dir, *, regressor)` -- trains one model, returns row count
-- `train_all(data_dir, model_dir)` -- trains all 4 models, returns {model_name: row_count}
+- `evaluate_source(enriched_path, label_col, cat_cols, num_cols, *, regressor, cv, year_col)` -- temporal CV evaluation; returns per-metric mean/std dict. Uses `TimeSeriesSplit` when `year_col` is set and present (avoids future-data leakage). Classifiers return roc_auc, neg_brier_score, avg_precision; regressors return r2, neg_mae, neg_rmse.
+- `train_all(data_dir, model_dir)` -- trains all 4 models, evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict})
 
 ### Scoring (`analytics/score.py`)
 
@@ -180,8 +181,8 @@ Batch and single-application inference from trained joblib models:
 |---|---|---|---|
 | dev_applications | `pred_dev_approved` | int | 0/1 approval prediction |
 | dev_applications | `prob_dev_approved` | float | approval probability |
-| dev_applications | `pred_dev_no_appeal` | int | 0/1 no-appeal prediction |
-| dev_applications | `prob_dev_no_appeal` | float | no-appeal probability |
+| dev_applications | `pred_dev_appealed` | int | 0/1 appeal prediction |
+| dev_applications | `prob_dev_appealed` | float | appeal probability |
 | coa | `pred_coa_approved` | int | 0/1 approval prediction |
 | coa | `prob_coa_approved` | float | approval probability |
 | coa | `pred_coa_days_to_approval` | float | predicted days to approval |

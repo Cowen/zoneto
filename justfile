@@ -22,7 +22,7 @@ score:
 
 # Measure importance of all model input features
 importance-all:
-	ls models/*.joblib | sed 's/.joblib//g' | xargs -n1 just importance
+	ls models/ | grep joblib | sed 's/.joblib//g' | xargs -n1 just importance
 
 # Measure importance of model input features
 importance model:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import joblib
+import numpy as np
 import polars as pl
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import (
@@ -14,7 +15,12 @@ from sklearn.ensemble import (
     HistGradientBoostingRegressor,
 )
 from sklearn.impute import SimpleImputer
-from sklearn.model_selection import KFold, StratifiedKFold, cross_val_score
+from sklearn.model_selection import (
+    KFold,
+    StratifiedKFold,
+    TimeSeriesSplit,
+    cross_validate,
+)
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OrdinalEncoder
 
@@ -24,6 +30,21 @@ from zoneto.analytics.features import (
     DEV_CAT_COLS,
     DEV_NUM_COLS,
 )
+
+
+def _fill_missing_cols(
+    df: pl.DataFrame,
+    cat_cols: list[str],
+    num_cols: list[str],
+) -> pl.DataFrame:
+    """Add null columns for any cat/num features absent from df."""
+    for col in cat_cols:
+        if col not in df.columns:
+            df = df.with_columns(pl.lit(None, dtype=pl.Utf8).alias(col))
+    for col in num_cols:
+        if col not in df.columns:
+            df = df.with_columns(pl.lit(None, dtype=pl.Float64).alias(col))
+    return df
 
 
 def build_pipeline(
@@ -86,14 +107,7 @@ def train_source(
     df = df.filter(pl.col(label_col).is_not_null())
 
     all_cols = cat_cols + num_cols
-    # Fill missing cat columns with None (polars), num columns left as-is
-    for col in cat_cols:
-        if col not in df.columns:
-            df = df.with_columns(pl.lit(None, dtype=pl.Utf8).alias(col))
-    for col in num_cols:
-        if col not in df.columns:
-            df = df.with_columns(pl.lit(None, dtype=pl.Float64).alias(col))
-
+    df = _fill_missing_cols(df, cat_cols, num_cols)
     X = df.select(all_cols).to_pandas()
     y = df[label_col].to_numpy()
 
@@ -117,29 +131,71 @@ def evaluate_source(
     num_cols: list[str],
     *,
     regressor: bool = False,
-    cv: int = 3,
+    cv: int = 5,
+    year_col: str | None = "year_submitted",
 ) -> dict[str, float | int]:
-    """Cross-validate a model pipeline. Returns {mean, std, n}."""
+    """Cross-validate a model pipeline. Returns a metrics dict with mean/std per metric.
+
+    Classifiers: roc_auc_mean/std, brier_score_mean/std, avg_precision_mean/std, n
+    Regressors: r2_mean/std, mae_mean/std, rmse_mean/std, n
+
+    Sklearn's negated loss metrics (neg_brier_score, neg_mae, neg_rmse) are
+    sign-flipped before returning so callers always get positive values.
+
+    If year_col is set and present in the data, uses TimeSeriesSplit (temporal CV)
+    to avoid leaking future data into past folds. Falls back to shuffled CV otherwise.
+    """
     df = pl.read_parquet(enriched_path).filter(pl.col(label_col).is_not_null())
     all_cols = cat_cols + num_cols
-    for col in cat_cols:
-        if col not in df.columns:
-            df = df.with_columns(pl.lit(None, dtype=pl.Utf8).alias(col))
-    for col in num_cols:
-        if col not in df.columns:
-            df = df.with_columns(pl.lit(None, dtype=pl.Float64).alias(col))
+    df = _fill_missing_cols(df, cat_cols, num_cols)
+
+    if year_col is not None and year_col in df.columns:
+        df = df.sort(year_col)
+        # TimeSeriesSplit requires n_samples >= n_splits + 1
+        effective_cv = min(cv, len(df) - 1)
+        cv_obj: KFold | StratifiedKFold | TimeSeriesSplit = TimeSeriesSplit(
+            n_splits=effective_cv
+        )
+    else:
+        cv_obj = KFold(cv) if regressor else StratifiedKFold(cv)
+
     X = df.select(all_cols).to_pandas()
     y = df[label_col].to_pandas()
+
     estimator = (
         HistGradientBoostingRegressor(random_state=42)
         if regressor
         else HistGradientBoostingClassifier(random_state=42)
     )
     pipeline = build_pipeline(cat_cols, num_cols, estimator)
-    scoring = "r2" if regressor else "roc_auc"
-    cv_obj: KFold | StratifiedKFold = KFold(cv) if regressor else StratifiedKFold(cv)
-    scores = cross_val_score(pipeline, X, y, cv=cv_obj, scoring=scoring)
-    return {"mean": float(scores.mean()), "std": float(scores.std()), "n": len(y)}
+
+    if regressor:
+        scoring = {
+            "r2": "r2",
+            "neg_mae": "neg_mean_absolute_error",
+            "neg_rmse": "neg_root_mean_squared_error",
+        }
+    else:
+        scoring = {
+            "roc_auc": "roc_auc",
+            "neg_brier_score": "neg_brier_score",
+            "avg_precision": "average_precision",
+        }
+
+    cv_results = cross_validate(
+        pipeline, X, y, cv=cv_obj, scoring=scoring, error_score=np.nan
+    )
+
+    result: dict[str, float | int] = {"n": len(y)}
+    for key in scoring:
+        vals = cv_results[f"test_{key}"]
+        # Strip neg_ prefix and flip sign so returned values are always positive
+        is_neg = key.startswith("neg_")
+        out_key = key[4:] if is_neg else key
+        sign = -1.0 if is_neg else 1.0
+        result[f"{out_key}_mean"] = sign * float(np.nanmean(vals))
+        result[f"{out_key}_std"] = float(np.nanstd(vals))
+    return result
 
 
 def train_all(
@@ -149,7 +205,7 @@ def train_all(
     """Train all 4 models. Returns (row_counts, metrics).
 
     First element: {model_name: row_count}
-    Second element: {model_name: {"mean": float, "std": float, "n": int}}
+    Second element: {model_name: {metric_mean: float, metric_std: float, ..., n: int}}
     """
     dev_path = data_dir / "enriched" / "dev_applications.parquet"
     coa_path = data_dir / "enriched" / "coa.parquet"
@@ -165,10 +221,10 @@ def train_all(
         ),
         (
             dev_path,
-            "dev_no_appeal",
+            "dev_appealed",
             DEV_CAT_COLS,
             DEV_NUM_COLS,
-            "dev_applications_no_appeal",
+            "dev_applications_appealed",
             False,
         ),
         (coa_path, "coa_approved", COA_CAT_COLS, COA_NUM_COLS, "coa_approved", False),
@@ -201,11 +257,11 @@ def train_all(
             cat_cols=cat,
             num_cols=num,
             regressor=is_reg,
+            year_col="year_submitted",
         )
         metrics[name] = eval_result
 
-    # Save metrics.json
-    model_dir.mkdir(parents=True, exist_ok=True)
+    # Save metrics.json (model_dir already created by train_source)
     metrics_file = model_dir / "metrics.json"
     with open(metrics_file, "w") as f:
         json.dump(metrics, f, indent=2)

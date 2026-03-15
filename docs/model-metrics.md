@@ -5,8 +5,8 @@ full enriched dataset at that point in time. Add a new dated section when
 re-running after data updates or model changes.
 
 Metrics are cross-validated (not training-set scores):
-- **Classifiers**: StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-- **Regressor**: KFold(n_splits=5, shuffle=True, random_state=42)
+- **Classifiers**: TimeSeriesSplit(n_splits=5) sorted by year_submitted — avoids future-data leakage. Reports ROC-AUC, Brier score, and Average Precision.
+- **Regressor**: TimeSeriesSplit(n_splits=5) sorted by year_submitted. Reports R², MAE, RMSE.
 
 ---
 
@@ -27,7 +27,7 @@ Metrics are cross-validated (not training-set scores):
 
 ### dev_applications_approved (HistGradientBoostingClassifier)
 
-Target: `dev_approved` — 1 = closed/approved, 0 = refused
+Target: `dev_approved` — 1 = formally approved (noac/council/omb/draft-plan), 0 = refused. "closed" excluded as ambiguous.
 Class balance: 69 negative / 20,621 positive (99.7% positive)
 N = 20,690
 
@@ -44,9 +44,9 @@ N = 20,690
 
 ---
 
-### dev_applications_no_appeal (HistGradientBoostingClassifier)
+### dev_applications_appealed (HistGradientBoostingClassifier)
 
-Target: `dev_no_appeal` — 1 = OMB/TLAB appeal filed, 0 = no appeal
+Target: `dev_appealed` — 1 = OMB/TLAB appeal filed, 0 = no appeal
 Class balance: 19,970 negative / 1,830 positive (8.4% positive)
 N = 21,800
 
@@ -65,7 +65,7 @@ N = 21,800
 
 ### coa_approved (HistGradientBoostingClassifier)
 
-Target: `coa_approved` — 1 = approved (any form), 0 = refused/withdrawn
+Target: `coa_approved` — 1 = approved (any form), 0 = refused. "withdrawn" excluded (developer strategy, not a refusal).
 Class balance: 280 negative / 4,350 positive (94.0% positive)
 N = 4,630
 

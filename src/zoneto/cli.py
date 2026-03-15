@@ -115,12 +115,20 @@ def train(
         table = Table(title="Model Training Results")
         table.add_column("Model", style="bold")
         table.add_column("N rows", justify="right")
-        table.add_column("CV Score", justify="right")
+        table.add_column("Primary metric", justify="right")
+        table.add_column("Secondary metric", justify="right")
 
         for name, count in counts.items():
             metric = metrics[name]
-            cv_str = f"{metric['mean']:.4f} ± {metric['std']:.4f}"
-            table.add_row(name, f"{count:,}", cv_str)
+            if "roc_auc_mean" in metric:
+                primary = (
+                    f"AUC {metric['roc_auc_mean']:.3f}±{metric['roc_auc_std']:.3f}"
+                )
+                secondary = f"Brier {metric['brier_score_mean']:.3f}"
+            else:
+                primary = f"R² {metric['r2_mean']:.3f}±{metric['r2_std']:.3f}"
+                secondary = f"MAE {metric['mae_mean']:.0f}d"
+            table.add_row(name, f"{count:,}", primary, secondary)
 
         console.print(table)
         console.print(f"[green]✓[/green] Metrics saved to {model_dir / 'metrics.json'}")
@@ -136,7 +144,7 @@ def importance(
         typer.Argument(
             help=(
                 "Model name. One of: dev_applications_approved,"
-                " dev_applications_no_appeal, coa_approved, coa_days_to_approval."
+                " dev_applications_appealed, coa_approved, coa_days_to_approval."
             )
         ),
     ],

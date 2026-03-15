@@ -40,7 +40,6 @@ _SECONDARY_PLANS_URL = (
 # ---------------------------------------------------------------------------
 _DEV_APPROVED_SET: frozenset[str] = frozenset(
     {
-        "closed",
         "noac issued",
         "council approved",
         "draft plan approved",
@@ -68,7 +67,27 @@ _COA_APPROVED_SET: frozenset[str] = frozenset(
         "approved on condition",
     }
 )
-_COA_REFUSED_SET: frozenset[str] = frozenset({"refused", "withdrawn"})
+_COA_REFUSED_SET: frozenset[str] = frozenset({"refused"})
+
+
+def _label_from_sets(
+    val: str | None,
+    positive_set: frozenset[str],
+    negative_set: frozenset[str],
+) -> int | None:
+    """Map a status string to 1/0/null via two frozensets.
+
+    Returns 1 if val (stripped, lowercased) is in positive_set,
+    0 if in negative_set, None otherwise.
+    """
+    if val is None:
+        return None
+    v = val.strip().lower()
+    if v in positive_set:
+        return 1
+    if v in negative_set:
+        return 0
+    return None
 
 
 def _download(url: str, dest: Path) -> None:
@@ -138,20 +157,12 @@ def enrich_coa(data_dir: Path = Path("data")) -> int:
     )
 
     # coa_approved label
-    def _coa_approved(val: str | None) -> int | None:
-        if val is None:
-            return None
-        v = val.strip().lower()
-        if v in _COA_APPROVED_SET:
-            return 1
-        if v in _COA_REFUSED_SET:
-            return 0
-        return None
-
-    # Use polars map_elements for label derivation
     df = df.with_columns(
         pl.col("c_of_a_descision")
-        .map_elements(_coa_approved, return_dtype=pl.Int8)
+        .map_elements(
+            lambda v: _label_from_sets(v, _COA_APPROVED_SET, _COA_REFUSED_SET),
+            return_dtype=pl.Int8,
+        )
         .alias("coa_approved")
     )
 
@@ -305,46 +316,32 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         )
     df = df.with_columns(_year_expr.alias("year_submitted"))
 
-    # has_community_meeting
+    # is_tlab_era (OMB → TLAB switch in 2017) and has_community_meeting
     df = df.with_columns(
+        (pl.col("year_submitted") >= 2017).cast(pl.Int8).alias("is_tlab_era"),
         pl.col("community_meeting_date")
         .is_not_null()
         .cast(pl.Int8)
-        .alias("has_community_meeting")
+        .alias("has_community_meeting"),
     )
 
     # Spatial enrichment (monkeypatchable)
     df = _spatial_join_dev(df, data_dir)
 
-    # dev_approved label
-    def _dev_approved(val: str | None) -> int | None:
-        if val is None:
-            return None
-        v = val.strip().lower()
-        if v in _DEV_APPROVED_SET:
-            return 1
-        if v in _DEV_REFUSED_SET:
-            return 0
-        return None
-
-    # dev_no_appeal label
-    def _dev_no_appeal(val: str | None) -> int | None:
-        if val is None:
-            return None
-        v = val.strip().lower()
-        if v in _DEV_APPEALED_SET:
-            return 1
-        if v in _DEV_APPROVED_SET and v not in _DEV_APPEALED_SET:
-            return 0
-        return None
-
     df = df.with_columns(
         pl.col("status")
-        .map_elements(_dev_approved, return_dtype=pl.Int8)
+        .map_elements(
+            lambda v: _label_from_sets(v, _DEV_APPROVED_SET, _DEV_REFUSED_SET),
+            return_dtype=pl.Int8,
+        )
         .alias("dev_approved"),
         pl.col("status")
-        .map_elements(_dev_no_appeal, return_dtype=pl.Int8)
-        .alias("dev_no_appeal"),
+        .map_elements(
+            # 1 = appeal filed, 0 = approved without appeal
+            lambda v: _label_from_sets(v, _DEV_APPEALED_SET, _DEV_APPROVED_SET),
+            return_dtype=pl.Int8,
+        )
+        .alias("dev_appealed"),
     )
 
     out = data_dir / "enriched"

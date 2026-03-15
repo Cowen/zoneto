@@ -24,9 +24,10 @@ def _make_dev_enriched(tmp_path: Path) -> Path:
             "in_heritage_register": [0, 1, 0, 0, 1],
             "in_heritage_district": [0, 0, 0, 1, 0],
             "in_secondary_plan": [0, 1, 0, 1, 0],
+            "is_tlab_era": [1, 1, 1, 1, 1],
             "has_community_meeting": [1, 0, 0, 1, 0],
             "dev_approved": [1, 0, 1, 1, 0],
-            "dev_no_appeal": [0, None, 0, 1, 0],
+            "dev_appealed": [0, None, 0, 1, 0],
         }
     )
     out = tmp_path / "enriched"
@@ -180,10 +181,10 @@ def test_train_source_drops_null_labels(tmp_path: Path) -> None:
     """train_source must not fail when some label rows are null."""
     _make_dev_enriched(tmp_path)
     model_dir = tmp_path / "models"
-    # dev_no_appeal has one null row — should still train on non-null rows
+    # dev_appealed has one null row — should still train on non-null rows
     train_source(
         enriched_path=tmp_path / "enriched" / "dev_applications.parquet",
-        label_col="dev_no_appeal",
+        label_col="dev_appealed",
         cat_cols=[
             "application_type",
             "ward_number",
@@ -197,11 +198,11 @@ def test_train_source_drops_null_labels(tmp_path: Path) -> None:
             "in_secondary_plan",
             "has_community_meeting",
         ],
-        model_name="dev_applications_no_appeal",
+        model_name="dev_applications_appealed",
         model_dir=model_dir,
         regressor=False,
     )
-    assert (model_dir / "dev_applications_no_appeal.joblib").exists()
+    assert (model_dir / "dev_applications_appealed.joblib").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -215,14 +216,16 @@ def test_train_source_drops_null_labels(tmp_path: Path) -> None:
 
 
 def test_evaluate_source_classifier(tmp_path: Path) -> None:
-    """evaluate_source returns dict with mean/std/n for classifier."""
+    """evaluate_source returns dict with per-metric mean/std/n for classifier."""
     from zoneto.analytics.train import evaluate_source
 
     _make_dev_enriched(tmp_path)
     result = evaluate_source(
         enriched_path=tmp_path / "enriched" / "dev_applications.parquet",
         label_col="dev_approved",
-        cat_cols=["application_type", "ward_number", "zoning_class", "secondary_plan_name"],
+        cat_cols=[
+            "application_type", "ward_number", "zoning_class", "secondary_plan_name"
+        ],
         num_cols=[
             "year_submitted",
             "in_heritage_register",
@@ -232,14 +235,18 @@ def test_evaluate_source_classifier(tmp_path: Path) -> None:
         ],
         regressor=False,
         cv=2,
+        year_col=None,  # shuffled CV for small test dataset
     )
-    assert "mean" in result and "std" in result and "n" in result
-    assert 0.0 <= result["mean"] <= 1.0
+    assert "n" in result
     assert result["n"] == 5
+    assert "roc_auc_mean" in result
+    assert "roc_auc_std" in result
+    assert "brier_score_mean" in result
+    assert "avg_precision_mean" in result
 
 
 def test_evaluate_source_regressor(tmp_path: Path) -> None:
-    """evaluate_source returns dict with mean/std/n for regressor."""
+    """evaluate_source returns dict with per-metric mean/std/n for regressor."""
     from zoneto.analytics.train import evaluate_source
 
     _make_coa_enriched(tmp_path)
@@ -250,9 +257,13 @@ def test_evaluate_source_regressor(tmp_path: Path) -> None:
         num_cols=["year_submitted"],
         regressor=True,
         cv=2,
+        year_col=None,  # shuffled CV for small test dataset
     )
-    assert "mean" in result and "std" in result and "n" in result
+    assert "n" in result
     assert result["n"] == 3  # only 3 non-null coa_days_to_approval rows
+    assert "r2_mean" in result
+    assert "mae_mean" in result
+    assert "rmse_mean" in result
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +279,7 @@ def test_train_all_creates_four_models(tmp_path: Path) -> None:
     counts, metrics = train_all(data_dir=tmp_path, model_dir=model_dir)
     expected = [
         "dev_applications_approved.joblib",
-        "dev_applications_no_appeal.joblib",
+        "dev_applications_appealed.joblib",
         "coa_approved.joblib",
         "coa_days_to_approval.joblib",
     ]
@@ -277,7 +288,7 @@ def test_train_all_creates_four_models(tmp_path: Path) -> None:
 
 
 def test_train_all_returns_metrics(tmp_path: Path) -> None:
-    """train_all returns a tuple of (row_counts, metrics)."""
+    """train_all returns a tuple of (row_counts, metrics) with per-metric keys."""
     _make_dev_enriched(tmp_path)
     _make_coa_enriched(tmp_path)
     model_dir = tmp_path / "models"
@@ -286,13 +297,13 @@ def test_train_all_returns_metrics(tmp_path: Path) -> None:
     assert isinstance(metrics, dict)
     expected_models = [
         "dev_applications_approved",
-        "dev_applications_no_appeal",
+        "dev_applications_appealed",
         "coa_approved",
         "coa_days_to_approval",
     ]
     for name in expected_models:
         assert name in metrics
-        assert "mean" in metrics[name]
-        assert "std" in metrics[name]
         assert "n" in metrics[name]
+        # Classifiers have roc_auc; regressors have r2
+        assert "roc_auc_mean" in metrics[name] or "r2_mean" in metrics[name]
     assert (model_dir / "metrics.json").exists()

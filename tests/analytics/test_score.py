@@ -65,7 +65,7 @@ def _setup_models(tmp_path: Path) -> Path:
         model_dir, "dev_applications_approved", DEV_CAT_COLS, DEV_NUM_COLS
     )
     _train_dummy_model(
-        model_dir, "dev_applications_no_appeal", DEV_CAT_COLS, DEV_NUM_COLS
+        model_dir, "dev_applications_appealed", DEV_CAT_COLS, DEV_NUM_COLS
     )
     _train_dummy_model(model_dir, "coa_approved", COA_CAT_COLS, COA_NUM_COLS)
     _train_dummy_model(
@@ -86,12 +86,13 @@ def _make_dev_enriched(tmp_path: Path) -> None:
             "zoning_class": ["RS", None],
             "secondary_plan_name": [None, "Midtown"],
             "year_submitted": [2021, 2022],
+            "is_tlab_era": [1, 1],
             "in_heritage_register": [0, 1],
             "in_heritage_district": [0, 0],
             "in_secondary_plan": [0, 1],
             "has_community_meeting": [1, 0],
             "dev_approved": [1, 0],
-            "dev_no_appeal": [0, 1],
+            "dev_appealed": [0, 1],
         }
     )
     out = tmp_path / "enriched"
@@ -137,9 +138,9 @@ def test_score_all_dev_columns(tmp_path: Path) -> None:
     score_all(data_dir=tmp_path, model_dir=model_dir)
     df = pl.read_parquet(tmp_path / "scores" / "dev_applications.parquet")
     assert "pred_dev_approved" in df.columns
-    assert "pred_dev_no_appeal" in df.columns
+    assert "pred_dev_appealed" in df.columns
     assert "prob_dev_approved" in df.columns
-    assert "prob_dev_no_appeal" in df.columns
+    assert "prob_dev_appealed" in df.columns
 
 
 def test_score_all_coa_columns(tmp_path: Path) -> None:
@@ -190,7 +191,7 @@ def test_score_one_returns_dict(tmp_path: Path) -> None:
     )
     assert "pred_dev_approved" in result
     assert "prob_dev_approved" in result
-    assert "pred_dev_no_appeal" in result
+    assert "pred_dev_appealed" in result
 
 
 def test_score_one_coa(tmp_path: Path) -> None:
