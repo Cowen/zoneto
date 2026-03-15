@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import struct
 import zipfile
 from pathlib import Path
 
@@ -9,11 +11,36 @@ import polars as pl
 import pytest
 
 from zoneto.analytics.enrich import (
+    _spatial_join_dev,
     enrich_coa,
     enrich_dev,
     enrich_permits,
     fetch_reference,
 )
+
+
+def _write_minimal_shp(shp_path: Path) -> None:
+    """Write a valid empty Shapefile (null shape type, no features)."""
+    # SHP/SHX header: 100 bytes — file code, unused×5, file length, version,
+    # shape type, bounding box (8 doubles).
+    header = (
+        struct.pack(">iiiiii", 9994, 0, 0, 0, 0, 0)  # file code + 5 unused
+        + struct.pack(">i", 50)  # file length in 16-bit words (100 bytes)
+        + struct.pack("<i", 1000)  # version
+        + struct.pack("<i", 0)  # shape type: null
+        + struct.pack("<8d", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)  # bbox
+    )
+    shp_path.write_bytes(header)
+    shp_path.with_suffix(".shx").write_bytes(header)
+    # Minimal DBF: no field descriptors, no records.
+    dbf = (
+        bytes([3, 25, 3, 14])  # version, year, month, day
+        + struct.pack("<i", 0)  # number of records
+        + struct.pack("<hh", 33, 1)  # header size (32+terminator), record size
+        + bytes(20)  # reserved
+        + bytes([0x0D])  # field descriptor terminator
+    )
+    shp_path.with_suffix(".dbf").write_bytes(dbf)
 
 
 def _fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
@@ -311,6 +338,74 @@ def test_enrich_coa_deduplicates_on_reference_file(tmp_path: Path) -> None:
     enrich_coa(data_dir=tmp_path)
     result = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
     assert len(result) == 2  # REF-001 deduplicated to 1 row, REF-002 kept
+
+
+# ---------------------------------------------------------------------------
+# _spatial_join_dev integration (real DuckDB spatial, minimal reference files)
+# ---------------------------------------------------------------------------
+
+
+def test_spatial_join_dev_reads_zoning_geojson(tmp_path: Path) -> None:
+    """_spatial_join_dev must assign zoning_class by reading zoning.geojson via
+    DuckDB ST_Read (not a polars CSV pre-read). This validates the P2 code path.
+
+    Uses x=630000, y=4840000 (UTM 17N) which projects to ~(-79.38, 43.66) WGS84,
+    inside the test polygon covering (-80,-78) × (43,45).
+    """
+    ref = tmp_path / "reference"
+    hr_dir = ref / "heritage_register"
+    hd_dir = ref / "heritage_districts"
+    hr_dir.mkdir(parents=True)
+    hd_dir.mkdir(parents=True)
+
+    # Zoning polygon covering the test point in WGS84
+    zoning = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"ZN_ZONE": "CR3"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [-80.0, 43.0], [-78.0, 43.0],
+                        [-78.0, 45.0], [-80.0, 45.0], [-80.0, 43.0],
+                    ]],
+                },
+            }
+        ],
+    }
+    (ref / "zoning.geojson").write_text(json.dumps(zoning))
+
+    # Empty heritage/district shapefiles (no features → null enrichment, default 0)
+    _write_minimal_shp(hr_dir / "register.shp")
+    _write_minimal_shp(hd_dir / "districts.shp")
+
+    # Secondary plans with one feature far from the test point so it won't match.
+    # Must have at least one feature so DuckDB can infer SECONDARY_PLAN_NAME column.
+    (ref / "secondary_plans.geojson").write_text(
+        json.dumps({
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "properties": {"SECONDARY_PLAN_NAME": "Nowhere Plan"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
+                    ],
+                },
+            }],
+        })
+    )
+
+    df = pl.DataFrame({"x": ["630000.0", None], "y": ["4840000.0", None]})
+    result = _spatial_join_dev(df, tmp_path)
+
+    # Point inside polygon → zoning_class assigned
+    assert result["zoning_class"][0] == "CR3"
+    # Null coordinates → null zoning_class
+    assert result["zoning_class"][1] is None
 
 
 # ---------------------------------------------------------------------------
