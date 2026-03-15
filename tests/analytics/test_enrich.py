@@ -218,7 +218,12 @@ def test_enrich_coa_ward_features(
 
     df = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
     # Verify ward profile columns are present
-    ward_cols = ["ward_pct_renters", "ward_median_income", "ward_pop_density", "ward_pct_detached"]
+    ward_cols = [
+        "ward_pct_renters",
+        "ward_median_income",
+        "ward_pop_density",
+        "ward_pct_detached",
+    ]
     for col in ward_cols:
         assert col in df.columns, f"Missing column {col}"
 
@@ -355,7 +360,12 @@ def test_enrich_dev_ward_features(
 
     df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
     # Verify ward profile columns are present
-    ward_cols = ["ward_pct_renters", "ward_median_income", "ward_pop_density", "ward_pct_detached"]
+    ward_cols = [
+        "ward_pct_renters",
+        "ward_median_income",
+        "ward_pop_density",
+        "ward_pct_detached",
+    ]
     for col in ward_cols:
         assert col in df.columns, f"Missing column {col}"
 
@@ -462,34 +472,53 @@ def _setup_spatial_ref(ref: Path, zoning_zone: str = "CR3") -> None:
 
     zoning = {
         "type": "FeatureCollection",
-        "features": [{
-            "type": "Feature",
-            "properties": {"ZN_ZONE": zoning_zone},
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[
-                    [-80.0, 43.0], [-79.0, 43.0],
-                    [-79.0, 44.0], [-80.0, 44.0], [-80.0, 43.0],
-                ]],
-            },
-        }],
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"ZN_ZONE": zoning_zone},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [-80.0, 43.0],
+                            [-79.0, 43.0],
+                            [-79.0, 44.0],
+                            [-80.0, 44.0],
+                            [-80.0, 43.0],
+                        ]
+                    ],
+                },
+            }
+        ],
     }
     (ref / "zoning.geojson").write_text(json.dumps(zoning))
     _write_minimal_shp(hr_dir / "register.shp")
     _write_minimal_shp(hd_dir / "districts.shp")
-    (ref / "secondary_plans.geojson").write_text(json.dumps({
-        "type": "FeatureCollection",
-        "features": [{
-            "type": "Feature",
-            "properties": {"SECONDARY_PLAN_NAME": "Nowhere Plan"},
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [
-                    [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
+    (ref / "secondary_plans.geojson").write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {"SECONDARY_PLAN_NAME": "Nowhere Plan"},
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [
+                                [
+                                    [0.0, 0.0],
+                                    [1.0, 0.0],
+                                    [1.0, 1.0],
+                                    [0.0, 1.0],
+                                    [0.0, 0.0],
+                                ]
+                            ],
+                        },
+                    }
                 ],
-            },
-        }],
-    }))
+            }
+        )
+    )
 
 
 def test_spatial_join_dev_uses_mtm_zone10_crs(tmp_path: Path) -> None:

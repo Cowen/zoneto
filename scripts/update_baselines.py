@@ -19,14 +19,27 @@ from zoneto.analytics.train import evaluate_source
 ENRICHED_DIR = Path("data/enriched")
 BASELINES_PATH = Path("tests/fixtures/model_baselines.json")
 
-_MEAN_KEYS = {"roc_auc_mean", "brier_score_mean", "avg_precision_mean", "r2_mean", "mae_mean", "rmse_mean"}
+_MEAN_KEYS = {
+    "roc_auc_mean",
+    "brier_score_mean",
+    "avg_precision_mean",
+    "r2_mean",
+    "mae_mean",
+    "rmse_mean",
+}
 
 _MODELS: list[tuple[str, str, list[str], list[str], bool]] = [
     ("dev_applications_approved", "dev_approved", DEV_CAT_COLS, DEV_NUM_COLS, False),
     ("dev_applications_appealed", "dev_appealed", DEV_CAT_COLS, DEV_NUM_COLS, False),
     ("coa_approved", "coa_approved", COA_CAT_COLS, COA_NUM_COLS, False),
     ("coa_days_to_approval", "coa_days_to_approval", COA_CAT_COLS, COA_NUM_COLS, True),
-    ("permit_issuance_days", "permit_issuance_days", PERMIT_CAT_COLS, PERMIT_NUM_COLS, True),
+    (
+        "permit_issuance_days",
+        "permit_issuance_days",
+        PERMIT_CAT_COLS,
+        PERMIT_NUM_COLS,
+        True,
+    ),
 ]
 
 _SOURCE_FILE: dict[str, str] = {
@@ -68,7 +81,9 @@ def main() -> None:
             cv=5,
             year_col=_YEAR_COL[model_name],
         )
-        snapshot = {k: round(float(v), 4) for k, v in metrics.items() if k in _MEAN_KEYS}
+        snapshot = {
+            k: round(float(v), 4) for k, v in metrics.items() if k in _MEAN_KEYS
+        }
         baselines[model_name] = snapshot
         print("done", snapshot)
 

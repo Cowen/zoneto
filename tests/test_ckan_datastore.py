@@ -186,7 +186,9 @@ def test_year_filter_excludes_records_before_year_start(
 def test_null_date_records_preserved_despite_year_filter(
     httpx_mock: HTTPXMock,
 ) -> None:
-    """Records with null application dates (year=0) are kept regardless of year_start."""
+    """
+    Records with null application dates (year=0) are kept regardless of year_start.
+    """
     filtered_source = CKANSource(
         CKANConfig(
             dataset_id="building-permits-active-permits",

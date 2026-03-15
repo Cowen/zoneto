@@ -48,7 +48,9 @@ def _make_dev_enriched(tmp_path: Path) -> Path:
 
 
 def _make_dev_enriched_large(tmp_path: Path) -> Path:
-    """Write a larger enriched dev_applications.parquet for calibration tests (30 rows)."""
+    """
+    Write a larger enriched dev_applications.parquet for calibration tests (30 rows)
+    """
     n = 30
     df = pl.DataFrame(
         {
@@ -128,7 +130,18 @@ def _make_coa_enriched(tmp_path: Path) -> Path:
             ],
             "sub_type": ["A", "B", "A", "C", "B", "A", "B", "C", "A", "B"],
             "ward_number": ["1", "2", "3", "4", "5", "1", "2", "3", "4", "5"],
-            "zoning_designation": ["RS", "RM", None, "CR", "RS", "RS", "RM", None, "CR", "RS"],
+            "zoning_designation": [
+                "RS",
+                "RM",
+                None,
+                "CR",
+                "RS",
+                "RS",
+                "RM",
+                None,
+                "CR",
+                "RS",
+            ],
             "planning_district": [
                 "Toronto & East York",
                 "North York",
@@ -153,11 +166,66 @@ def _make_coa_enriched(tmp_path: Path) -> Path:
                 "Construction",
                 "Change of Use",
             ],
-            "year_submitted": [2019, 2020, 2021, 2022, 2022, 2019, 2020, 2021, 2022, 2022],
-            "ward_pct_renters": [45.5, 50.2, 48.0, 52.0, 55.0, 45.5, 50.2, 48.0, 52.0, 55.0],
-            "ward_median_income": [75000.0, 80000.0, 78000.0, 70000.0, 68000.0, 75000.0, 80000.0, 78000.0, 70000.0, 68000.0],
-            "ward_pop_density": [3500.0, 4200.0, 3800.0, 4500.0, 4800.0, 3500.0, 4200.0, 3800.0, 4500.0, 4800.0],
-            "ward_pct_detached": [25.5, 20.0, 30.0, 18.5, 15.0, 25.5, 20.0, 30.0, 18.5, 15.0],
+            "year_submitted": [
+                2019,
+                2020,
+                2021,
+                2022,
+                2022,
+                2019,
+                2020,
+                2021,
+                2022,
+                2022,
+            ],
+            "ward_pct_renters": [
+                45.5,
+                50.2,
+                48.0,
+                52.0,
+                55.0,
+                45.5,
+                50.2,
+                48.0,
+                52.0,
+                55.0,
+            ],
+            "ward_median_income": [
+                75000.0,
+                80000.0,
+                78000.0,
+                70000.0,
+                68000.0,
+                75000.0,
+                80000.0,
+                78000.0,
+                70000.0,
+                68000.0,
+            ],
+            "ward_pop_density": [
+                3500.0,
+                4200.0,
+                3800.0,
+                4500.0,
+                4800.0,
+                3500.0,
+                4200.0,
+                3800.0,
+                4500.0,
+                4800.0,
+            ],
+            "ward_pct_detached": [
+                25.5,
+                20.0,
+                30.0,
+                18.5,
+                15.0,
+                25.5,
+                20.0,
+                30.0,
+                18.5,
+                15.0,
+            ],
             "hearing_month": [3, 6, 9, 11, 4, 3, 6, 9, 11, 4],
             "coa_approved": [1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
             "coa_days_to_approval": [95, None, 120, None, 60, 100, 50, 110, 70, 80],
@@ -317,7 +385,9 @@ def test_train_source_drops_null_labels(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_train_all_coa_uses_kfold_cv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_train_all_coa_uses_kfold_cv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """COA models use KFold (year_col=None), dev_appealed uses TimeSeriesSplit."""
     from zoneto.analytics.train import evaluate_source
 
@@ -364,15 +434,23 @@ def test_train_all_coa_uses_kfold_cv(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     # Find the calls for COA and dev_appealed models
     coa_approved_call = next(c for c in call_args if c["label_col"] == "coa_approved")
-    coa_days_call = next(c for c in call_args if c["label_col"] == "coa_days_to_approval")
+    coa_days_call = next(
+        c for c in call_args if c["label_col"] == "coa_days_to_approval"
+    )
     dev_appealed_call = next(c for c in call_args if c["label_col"] == "dev_appealed")
 
     # COA models must use year_col=None (KFold)
-    assert coa_approved_call["year_col"] is None, "coa_approved should use KFold (year_col=None)"
-    assert coa_days_call["year_col"] is None, "coa_days_to_approval should use KFold (year_col=None)"
+    assert coa_approved_call["year_col"] is None, (
+        "coa_approved should use KFold (year_col=None)"
+    )
+    assert coa_days_call["year_col"] is None, (
+        "coa_days_to_approval should use KFold (year_col=None)"
+    )
 
     # dev_appealed must use year_col="year_submitted" (TimeSeriesSplit)
-    assert dev_appealed_call["year_col"] == "year_submitted", "dev_appealed should use TimeSeriesSplit"
+    assert dev_appealed_call["year_col"] == "year_submitted", (
+        "dev_appealed should use TimeSeriesSplit"
+    )
 
 
 # ---------------------------------------------------------------------------
