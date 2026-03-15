@@ -97,7 +97,7 @@ def _make_permits_enriched(tmp_path: Path) -> Path:
             "dwelling_units_created": [1, 0, 0, 2],
             "dwelling_units_lost": [0, 0, 0, 0],
             "residential": [1, 1, 0, 1],
-            "commercial": [0, 0, 1, 0],
+            "mercantile": [0, 0, 1, 0],
             "industrial": [0, 0, 0, 0],
             "institutional": [0, 0, 0, 0],
             "permit_issuance_days": [100, 45, 200, 80],

@@ -73,24 +73,24 @@ def test_fetch_reference_creates_dirs(
     """
 
     def fake_download(url: str, dest: Path) -> None:
-        # Write a minimal ZIP for ZIP URLs, CSV for ward profiles, GeoJSON for others
         if url.endswith(".zip"):
             with zipfile.ZipFile(dest, "w") as zf:
                 zf.writestr("dummy.shp", b"")
-        elif "ward" in dest.name:
-            # Write minimal ward profiles CSV (transposed format)
-            csv_content = (
-                "Characteristic,Ward 1,Ward 2\n"
-                "% Renter households,45.5,50.2\n"
-                "Median total income of households in 2020 ($),75000,80000\n"
-                "Population density per square kilometre,3500,4200\n"
-                "% Single-detached house,25.5,20.1\n"
-            )
-            dest.write_text(csv_content)
         else:
             dest.write_bytes(b'{"type":"FeatureCollection","features":[]}')
 
+    def fake_fetch_ward_profiles_csv(ref: Path) -> None:
+        (ref / "ward_profiles.csv").write_text(
+            "ward_number,ward_pct_renters,ward_median_income,ward_pop_density,ward_pct_detached\n"
+            "1,42.3,81000,2380.5,29.5\n"
+            "2,48.7,100000,3140.2,48.2\n"
+        )
+
     monkeypatch.setattr("zoneto.analytics.enrich._download", fake_download)
+    monkeypatch.setattr(
+        "zoneto.analytics.enrich._fetch_ward_profiles_csv",
+        fake_fetch_ward_profiles_csv,
+    )
     fetch_reference(data_dir=tmp_path)
 
     ref = tmp_path / "reference"
@@ -199,32 +199,20 @@ def test_enrich_coa_year_submitted(tmp_path: Path) -> None:
 
 def test_enrich_coa_ward_features(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """enrich_coa adds ward profile features (ward_pct_renters, etc.)."""
     _make_coa_parquet(tmp_path)
 
-    # Mock _download to write ward profiles CSV when called for ward profiles
-    def mock_download(url: str, dest: Path) -> None:
-        if "ward" in dest.name:
-            csv_content = (
-                "Characteristic,Ward 1,Ward 5,Ward 10,Ward 15,Ward 20\n"
-                "% Renter households,45.5,52.0,48.0,55.0,42.0\n"
-                "Median total income of households in 2020 ($),75000,70000,80000,68000,85000\n"
-                "Population density per square kilometre,3500,4200,3800,4500,3200\n"
-                "% Single-detached house,25.5,20.0,30.0,18.5,35.0\n"
-            )
-            dest.write_text(csv_content)
-        elif url.endswith(".zip"):
-            with zipfile.ZipFile(dest, "w") as zf:
-                zf.writestr("dummy.shp", b"")
-        else:
-            dest.write_bytes(b'{"type":"FeatureCollection","features":[]}')
-
-    monkeypatch.setattr("zoneto.analytics.enrich._download", mock_download)
-
-    # Fetch reference to ensure ward profiles exist
-    fetch_reference(data_dir=tmp_path)
+    # Write ward_profiles.csv directly (simple format)
+    ref = tmp_path / "reference"
+    ref.mkdir(parents=True, exist_ok=True)
+    (ref / "ward_profiles.csv").write_text(
+        "ward_number,ward_pct_renters,ward_median_income,ward_pop_density,ward_pct_detached\n"
+        "5,52.0,70000,4200.0,20.0\n"
+        "10,48.0,80000,3800.0,30.0\n"
+        "15,55.0,68000,4500.0,18.5\n"
+        "20,42.0,85000,3200.0,35.0\n"
+    )
 
     enrich_coa(data_dir=tmp_path)
 
@@ -347,32 +335,19 @@ def test_enrich_dev_has_community_meeting(
 def test_enrich_dev_ward_features(
     tmp_path: Path,
     stub_spatial_join: None,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """enrich_dev adds ward profile features."""
     _make_dev_parquet(tmp_path)
 
-    # Mock _download to write ward profiles CSV when called for ward profiles
-    def mock_download(url: str, dest: Path) -> None:
-        if "ward" in dest.name:
-            csv_content = (
-                "Characteristic,Ward 1,Ward 5,Ward 10\n"
-                "% Renter households,45.5,52.0,48.0\n"
-                "Median total income of households in 2020 ($),75000,70000,80000\n"
-                "Population density per square kilometre,3500,4200,3800\n"
-                "% Single-detached house,25.5,20.0,30.0\n"
-            )
-            dest.write_text(csv_content)
-        elif url.endswith(".zip"):
-            with zipfile.ZipFile(dest, "w") as zf:
-                zf.writestr("dummy.shp", b"")
-        else:
-            dest.write_bytes(b'{"type":"FeatureCollection","features":[]}')
-
-    monkeypatch.setattr("zoneto.analytics.enrich._download", mock_download)
-
-    # Fetch reference to ensure ward profiles exist
-    fetch_reference(data_dir=tmp_path)
+    # Write ward_profiles.csv directly (simple format)
+    ref = tmp_path / "reference"
+    ref.mkdir(parents=True, exist_ok=True)
+    (ref / "ward_profiles.csv").write_text(
+        "ward_number,ward_pct_renters,ward_median_income,ward_pop_density,ward_pct_detached\n"
+        "1,45.5,75000,3500.0,25.5\n"
+        "5,52.0,70000,4200.0,20.0\n"
+        "10,48.0,80000,3800.0,30.0\n"
+    )
 
     enrich_dev(data_dir=tmp_path)
 
@@ -563,7 +538,7 @@ def _make_permits_parquet(tmp_path: Path) -> None:
             "dwelling_units_created": [1, 0, 2, 0],
             "dwelling_units_lost": [0, 0, 0, 0],
             "residential": [1, 1, 1, 0],
-            "commercial": [0, 0, 0, 1],
+            "mercantile": [0, 0, 0, 1],
             "industrial": [0, 0, 0, 0],
             "institutional": [0, 0, 0, 0],
             "source_name": ["permits_cleared"] * 4,

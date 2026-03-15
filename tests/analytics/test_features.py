@@ -67,7 +67,7 @@ def test_permit_num_cols() -> None:
         "dwelling_units_created",
         "dwelling_units_lost",
         "residential",
-        "commercial",
+        "mercantile",
         "industrial",
         "institutional",
         "application_year",
