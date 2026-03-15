@@ -156,6 +156,14 @@ def enrich_coa(data_dir: Path = Path("data")) -> int:
         pl.col("in_date").dt.year().cast(pl.Int32).alias("year_submitted")
     )
 
+    # hearing_month from hearing_date (1–12); null if column absent or date null
+    if "hearing_date" in df.columns:
+        df = df.with_columns(
+            pl.col("hearing_date").dt.month().cast(pl.Int32).alias("hearing_month")
+        )
+    else:
+        df = df.with_columns(pl.lit(None, dtype=pl.Int32).alias("hearing_month"))
+
     # coa_approved label
     df = df.with_columns(
         pl.col("c_of_a_descision")
@@ -316,9 +324,8 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         )
     df = df.with_columns(_year_expr.alias("year_submitted"))
 
-    # is_tlab_era (OMB → TLAB switch in 2017) and has_community_meeting
+    # has_community_meeting
     df = df.with_columns(
-        (pl.col("year_submitted") >= 2017).cast(pl.Int8).alias("is_tlab_era"),
         pl.col("community_meeting_date")
         .is_not_null()
         .cast(pl.Int8)
@@ -347,4 +354,38 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
     out = data_dir / "enriched"
     out.mkdir(parents=True, exist_ok=True)
     df.write_parquet(out / "dev_applications.parquet")
+    return len(df)
+
+
+def enrich_permits(data_dir: Path = Path("data")) -> int:
+    """Enrich permits_cleared parquet with issuance timeline label.
+
+    Computes permit_issuance_days = issued_date - application_date (calendar days).
+    Rows with null issued_date or application_date get null permit_issuance_days.
+    Rows where issuance_days <= 0 are dropped (data quality).
+
+    Writes data/enriched/permits_cleared.parquet. Returns row count written.
+    """
+    df = pl.read_parquet(data_dir / "permits_cleared", hive_partitioning=True)
+
+    days = (
+        (pl.col("issued_date") - pl.col("application_date"))
+        .dt.total_days()
+        .cast(pl.Int32)
+    )
+    has_both = (
+        pl.col("issued_date").is_not_null() & pl.col("application_date").is_not_null()
+    )
+    df = df.with_columns(
+        pl.when(has_both).then(days).otherwise(None).alias("permit_issuance_days")
+    )
+
+    # Drop rows where issuance days is computed but non-positive (bad data)
+    df = df.filter(
+        pl.col("permit_issuance_days").is_null() | (pl.col("permit_issuance_days") > 0)
+    )
+
+    out = data_dir / "enriched"
+    out.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(out / "permits_cleared.parquet")
     return len(df)

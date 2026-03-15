@@ -7,12 +7,15 @@ from pathlib import Path
 import joblib
 import numpy as np
 import polars as pl
+from sklearn.calibration import CalibratedClassifierCV
 
 from zoneto.analytics.features import (
     COA_CAT_COLS,
     COA_NUM_COLS,
     DEV_CAT_COLS,
     DEV_NUM_COLS,
+    PERMIT_CAT_COLS,
+    PERMIT_NUM_COLS,
 )
 
 # Model registry: model_name → (enriched_parquet, label_col, cat_cols, num_cols)
@@ -40,6 +43,12 @@ _MODEL_META: dict[str, tuple[str, str, list[str], list[str]]] = {
         "coa_days_to_approval",
         COA_CAT_COLS,
         COA_NUM_COLS,
+    ),
+    "permit_issuance_days": (
+        "permits_cleared",
+        "permit_issuance_days",
+        PERMIT_CAT_COLS,
+        PERMIT_NUM_COLS,
     ),
 }
 
@@ -100,7 +109,13 @@ def feature_importance(
     pipe = joblib.load(model_dir / f"{model_name}.joblib")
 
     if builtin:
-        importances = _gain_importances(pipe.named_steps["estimator"], len(all_cols))
+        # Unwrap CalibratedClassifierCV to access the base pipeline
+        actual_pipe = pipe
+        if isinstance(actual_pipe, CalibratedClassifierCV):
+            actual_pipe = actual_pipe.calibrated_classifiers_[0].estimator
+        importances = _gain_importances(
+            actual_pipe.named_steps["estimator"], len(all_cols)
+        )
         result = pl.DataFrame(
             {
                 "feature": all_cols,

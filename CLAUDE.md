@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
-<!-- Freshness: 2026-03-04 -->
-<!-- Last reviewed against: development-outcome-prediction branch (all phases) -->
+<!-- Freshness: 2026-03-14 -->
+<!-- Last reviewed against: main branch (permits model, calibration, feature updates) -->
 
 ## Purpose
 
@@ -42,6 +42,7 @@ src/zoneto/
     __init__.py      Analytics subpackage (empty)
     features.py      Canonical feature column lists for ML models
     enrich.py        Reference data downloads and enrichment pipelines
+    importance.py    Feature importance (permutation + built-in gain)
     train.py         sklearn pipelines and training functions
     score.py         Batch and single-application scoring
 ```
@@ -102,9 +103,10 @@ creates correct Hive directories while pyarrow creates flat files.
 - `zoneto status` -- prints a Rich table of row counts and last-modified times.
 - `zoneto enrich [--fetch-ref/--no-fetch-ref]` -- enriches raw parquet with outcome
   labels and spatial features. Downloads reference datasets to `data/reference/` if
-  `--fetch-ref` (default). Writes enriched parquet to `data/enriched/`.
-- `zoneto train [--model-dir PATH]` -- trains all 4 outcome-prediction models from
-  enriched parquet. Serializes to `models/*.joblib` (default: `./models`).
+  `--fetch-ref` (default). Enriches COA, dev_applications, and permits_cleared.
+  Writes enriched parquet to `data/enriched/`.
+- `zoneto train [--model-dir PATH]` -- trains 4-5 outcome-prediction models from
+  enriched parquet (permit model optional). Serializes to `models/*.joblib` (default: `./models`).
 - `zoneto score [--model-dir PATH]` -- runs batch inference on enriched parquet using
   trained models. Writes scored parquet to `data/scores/`.
 
@@ -115,9 +117,11 @@ creates correct Hive directories while pyarrow creates flat files.
 Canonical feature column lists for machine learning models:
 
 - `DEV_CAT_COLS` -- categorical features for development applications
-- `DEV_NUM_COLS` -- numeric features for development applications
-- `COA_CAT_COLS` -- categorical features for committee-of-adjustment applications
-- `COA_NUM_COLS` -- numeric features for committee-of-adjustment applications
+- `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting)
+- `COA_CAT_COLS` -- categorical features for COA (application_type, sub_type, ward_number, zoning_designation, planning_district)
+- `COA_NUM_COLS` -- numeric features for COA (year_submitted, hearing_month)
+- `PERMIT_CAT_COLS` -- categorical features for permits (permit_type, structure_type, ward_grid)
+- `PERMIT_NUM_COLS` -- numeric features for permits (est_const_cost, dwelling_units_created, dwelling_units_lost, residential, commercial, industrial, institutional)
 
 ### Enrichment (`analytics/enrich.py`)
 
@@ -132,9 +136,13 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
 **Enrichment functions**:
 - `fetch_reference(data_dir)` -- downloads/extracts all reference datasets (idempotent)
 - `enrich_coa(data_dir)` -- enriches COA with outcome labels, ward_number, year_submitted,
+  hearing_month (Int32, from hearing_date month), planning_district (preserved from source),
   coa_approved (1/0/null), coa_days_to_approval regression target
-- `enrich_dev(data_dir)` -- enriches dev_applications with year_submitted, is_tlab_era (1 if year >= 2017),
+- `enrich_dev(data_dir)` -- enriches dev_applications with year_submitted,
   has_community_meeting, spatial features (zoning, heritage, secondary plan), dev_approved and dev_appealed labels
+- `enrich_permits(data_dir)` -- enriches permits_cleared with permit_issuance_days
+  (Int32, issued_date - application_date in calendar days). Drops rows with non-positive
+  issuance days. Writes data/enriched/permits_cleared.parquet. Returns row count
 
 ### Training (`analytics/train.py`)
 
@@ -143,22 +151,25 @@ Trains sklearn HistGradientBoosting classifiers and regressors from enriched par
 **Models**:
 | File | Type | Target | Source | Label filter |
 |---|---|---|---|---|
-| `dev_applications_approved.joblib` | HistGradientBoostingClassifier | `dev_approved` | enriched dev_applications | drop null |
-| `dev_applications_appealed.joblib` | HistGradientBoostingClassifier | `dev_appealed` | enriched dev_applications | drop null |
-| `coa_approved.joblib` | HistGradientBoostingClassifier | `coa_approved` | enriched coa | drop null |
+| `dev_applications_approved.joblib` | CalibratedClassifierCV(HistGradientBoostingClassifier) | `dev_approved` | enriched dev_applications | drop null |
+| `dev_applications_appealed.joblib` | CalibratedClassifierCV(HistGradientBoostingClassifier) | `dev_appealed` | enriched dev_applications | drop null |
+| `coa_approved.joblib` | CalibratedClassifierCV(HistGradientBoostingClassifier) | `coa_approved` | enriched coa | drop null |
 | `coa_days_to_approval.joblib` | HistGradientBoostingRegressor | `coa_days_to_approval` | enriched coa | drop null |
+| `permit_issuance_days.joblib` | HistGradientBoostingRegressor | `permit_issuance_days` | enriched permits_cleared | drop null (optional, skip if absent) |
 
 **Pipeline architecture**:
 - ColumnTransformer with OrdinalEncoder for categorical features
   (fills nulls with "__missing__", encodes unknown as -1)
 - Passthrough for numeric features (HistGradientBoosting handles NaN natively)
+- Classifiers are wrapped in `CalibratedClassifierCV(cv=5, method='isotonic')` by default
+  (when calibrate=True and >= 20 rows). Regressors are never calibrated.
 - Random seed: 42 for reproducibility
 
 **Functions**:
 - `build_pipeline(cat_cols, num_cols, estimator)` -- returns unfitted Pipeline
-- `train_source(enriched_path, label_col, cat_cols, num_cols, model_name, model_dir, *, regressor)` -- trains one model, returns row count
-- `evaluate_source(enriched_path, label_col, cat_cols, num_cols, *, regressor, cv, year_col)` -- temporal CV evaluation; returns per-metric mean/std dict. Uses `TimeSeriesSplit` when `year_col` is set and present (avoids future-data leakage). Classifiers return roc_auc, neg_brier_score, avg_precision; regressors return r2, neg_mae, neg_rmse.
-- `train_all(data_dir, model_dir)` -- trains all 4 models, evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict})
+- `train_source(enriched_path, label_col, cat_cols, num_cols, model_name, model_dir, *, regressor, calibrate)` -- trains one model, returns row count. When calibrate=True (default) and not regressor and >= 20 rows, wraps pipeline in CalibratedClassifierCV.
+- `evaluate_source(enriched_path, label_col, cat_cols, num_cols, *, regressor, cv, year_col)` -- temporal CV evaluation; returns per-metric mean/std dict. Uses `TimeSeriesSplit` when `year_col` is set and present (avoids future-data leakage). Caps cv at n_samples - 1 for all splitter types. Classifiers return roc_auc, neg_brier_score, avg_precision; regressors return r2, neg_mae, neg_rmse.
+- `train_all(data_dir, model_dir)` -- trains 4-5 models (permit model optional, trained if enriched file exists), evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict})
 
 ### Scoring (`analytics/score.py`)
 
@@ -168,11 +179,12 @@ Batch and single-application inference from trained joblib models:
 - Reads enriched parquet from `data/enriched/`, loads models from `models/`
 - For classifiers: outputs `pred_<label>` (int) and `prob_<label>` (float) columns
 - For regressors: outputs `pred_<label>` (float) column only
-- Writes scored parquet to `data/scores/dev_applications.parquet` and `data/scores/coa.parquet`
+- Writes scored parquet to `data/scores/dev_applications.parquet`, `data/scores/coa.parquet`,
+  and optionally `data/scores/permits_cleared.parquet` (skips if enriched file absent)
 
 **Single scoring** (`score_one`):
 - `score_one(source, features, model_dir)` -- scores one application dict
-- `source` must be `"dev_applications"` or `"coa"`
+- `source` must be `"dev_applications"`, `"coa"`, or `"permits_cleared"`
 - `features` is a dict with keys matching the feature column lists
 - Returns dict of prediction/probability values
 
@@ -186,6 +198,17 @@ Batch and single-application inference from trained joblib models:
 | coa | `pred_coa_approved` | int | 0/1 approval prediction |
 | coa | `prob_coa_approved` | float | approval probability |
 | coa | `pred_coa_days_to_approval` | float | predicted days to approval |
+| permits_cleared | `pred_permit_issuance_days` | float | predicted days to permit issuance |
+
+### Feature Importance (`analytics/importance.py`)
+
+Computes feature importance for trained models via two methods:
+
+- `feature_importance(model_name, data_dir, model_dir, *, builtin, n_repeats, random_state)` -- returns polars DataFrame with columns: feature, importance_mean, importance_std (sorted descending)
+- `builtin=True`: gain-based importance from HistGradientBoosting internal tree structure (fast, no data needed). Unwraps `CalibratedClassifierCV` wrapper automatically.
+- `builtin=False` (default): permutation importance on enriched parquet (slower, more reliable)
+
+**Supported models** (`_MODEL_META` registry): dev_applications_approved, dev_applications_appealed, coa_approved, coa_days_to_approval, permit_issuance_days
 
 ## Dependencies
 

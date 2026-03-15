@@ -9,6 +9,7 @@ from typing import Any
 import joblib
 import numpy as np
 import polars as pl
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import (
     HistGradientBoostingClassifier,
@@ -29,6 +30,8 @@ from zoneto.analytics.features import (
     COA_NUM_COLS,
     DEV_CAT_COLS,
     DEV_NUM_COLS,
+    PERMIT_CAT_COLS,
+    PERMIT_NUM_COLS,
 )
 
 
@@ -87,6 +90,9 @@ def build_pipeline(
     )
 
 
+_MIN_CALIBRATION_ROWS = 20
+
+
 def train_source(
     enriched_path: Path,
     label_col: str,
@@ -96,8 +102,13 @@ def train_source(
     model_dir: Path,
     *,
     regressor: bool = False,
+    calibrate: bool = True,
 ) -> int:
     """Train one model, serialize to *model_dir*/<model_name>.joblib.
+
+    For classifiers with calibrate=True and sufficient data (>= 20 rows), wraps
+    the fitted pipeline in CalibratedClassifierCV so predict_proba returns
+    calibrated probabilities. Regressors are never calibrated.
 
     Returns number of training rows used.
     """
@@ -117,10 +128,20 @@ def train_source(
         else HistGradientBoostingClassifier(random_state=42)
     )
     pipe = build_pipeline(cat_cols=cat_cols, num_cols=num_cols, estimator=estimator)
-    pipe.fit(X, y)
+
+    if not regressor and calibrate and len(y) >= _MIN_CALIBRATION_ROWS:
+        # Wrap the unfitted pipeline in CalibratedClassifierCV (5-fold internal CV)
+        # so that predict_proba returns calibrated probabilities.
+        model_to_save: Pipeline | CalibratedClassifierCV = CalibratedClassifierCV(
+            pipe, cv=5, method="isotonic"
+        )
+        model_to_save.fit(X, y)
+    else:
+        pipe.fit(X, y)
+        model_to_save = pipe
 
     model_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(pipe, model_dir / f"{model_name}.joblib")
+    joblib.dump(model_to_save, model_dir / f"{model_name}.joblib")
     return len(df)
 
 
@@ -149,15 +170,15 @@ def evaluate_source(
     all_cols = cat_cols + num_cols
     df = _fill_missing_cols(df, cat_cols, num_cols)
 
+    # Cap cv at n_samples - 1 to avoid splits > samples errors on small datasets
+    effective_cv = min(cv, len(df) - 1)
     if year_col is not None and year_col in df.columns:
         df = df.sort(year_col)
-        # TimeSeriesSplit requires n_samples >= n_splits + 1
-        effective_cv = min(cv, len(df) - 1)
         cv_obj: KFold | StratifiedKFold | TimeSeriesSplit = TimeSeriesSplit(
             n_splits=effective_cv
         )
     else:
-        cv_obj = KFold(cv) if regressor else StratifiedKFold(cv)
+        cv_obj = KFold(effective_cv) if regressor else StratifiedKFold(effective_cv)
 
     X = df.select(all_cols).to_pandas()
     y = df[label_col].to_pandas()
@@ -202,13 +223,18 @@ def train_all(
     data_dir: Path = Path("data"),
     model_dir: Path = Path("models"),
 ) -> tuple[dict[str, int], dict[str, dict[str, float | int]]]:
-    """Train all 4 models. Returns (row_counts, metrics).
+    """Train all models. Returns (row_counts, metrics).
+
+    Core models (always trained): dev_applications_approved,
+    dev_applications_appealed, coa_approved, coa_days_to_approval.
+    Optional model (trained if enriched file exists): permit_issuance_days.
 
     First element: {model_name: row_count}
     Second element: {model_name: {metric_mean: float, metric_std: float, ..., n: int}}
     """
     dev_path = data_dir / "enriched" / "dev_applications.parquet"
     coa_path = data_dir / "enriched" / "coa.parquet"
+    permits_path = data_dir / "enriched" / "permits_cleared.parquet"
 
     jobs: list[tuple[Path, str, list[str], list[str], str, bool]] = [
         (
@@ -237,6 +263,19 @@ def train_all(
             True,
         ),
     ]
+
+    # Permit issuance model is optional — skip if enriched file absent
+    if permits_path.exists():
+        jobs.append(
+            (
+                permits_path,
+                "permit_issuance_days",
+                PERMIT_CAT_COLS,
+                PERMIT_NUM_COLS,
+                "permit_issuance_days",
+                True,
+            )
+        )
 
     counts: dict[str, int] = {}
     metrics: dict[str, dict[str, float | int]] = {}

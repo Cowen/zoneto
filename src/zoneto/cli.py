@@ -7,7 +7,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from zoneto.analytics.enrich import enrich_coa, enrich_dev, fetch_reference
+from zoneto.analytics.enrich import (
+    enrich_coa,
+    enrich_dev,
+    enrich_permits,
+    fetch_reference,
+)
 from zoneto.analytics.importance import feature_importance
 from zoneto.analytics.score import score_all
 from zoneto.analytics.train import train_all
@@ -90,7 +95,11 @@ def enrich(
         fetch_reference(DATA_DIR)
         console.print("  [green]✓[/green] Reference data ready")
 
-    for label, fn in [("COA", enrich_coa), ("Dev applications", enrich_dev)]:
+    for label, fn in [
+        ("COA", enrich_coa),
+        ("Dev applications", enrich_dev),
+        ("Permits", enrich_permits),
+    ]:
         console.print(f"[bold]Enriching {label}...[/bold]")
         try:
             count = fn(DATA_DIR)

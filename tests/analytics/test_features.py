@@ -3,6 +3,8 @@ from zoneto.analytics.features import (
     COA_NUM_COLS,
     DEV_CAT_COLS,
     DEV_NUM_COLS,
+    PERMIT_CAT_COLS,
+    PERMIT_NUM_COLS,
 )
 
 
@@ -16,9 +18,9 @@ def test_dev_cat_cols() -> None:
 
 
 def test_dev_num_cols() -> None:
+    # is_tlab_era removed: redundant with year_submitted (year >= 2017)
     assert DEV_NUM_COLS == [
         "year_submitted",
-        "is_tlab_era",
         "in_heritage_register",
         "in_heritage_district",
         "in_secondary_plan",
@@ -32,8 +34,29 @@ def test_coa_cat_cols() -> None:
         "sub_type",
         "ward_number",
         "zoning_designation",
+        "planning_district",
     ]
 
 
 def test_coa_num_cols() -> None:
-    assert COA_NUM_COLS == ["year_submitted"]
+    assert COA_NUM_COLS == ["year_submitted", "hearing_month"]
+
+
+def test_permit_cat_cols() -> None:
+    assert PERMIT_CAT_COLS == [
+        "permit_type",
+        "structure_type",
+        "ward_grid",
+    ]
+
+
+def test_permit_num_cols() -> None:
+    assert PERMIT_NUM_COLS == [
+        "est_const_cost",
+        "dwelling_units_created",
+        "dwelling_units_lost",
+        "residential",
+        "commercial",
+        "industrial",
+        "institutional",
+    ]

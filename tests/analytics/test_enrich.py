@@ -1,4 +1,5 @@
 """Tests for enrich.py — all file I/O uses tmp_path."""
+
 from __future__ import annotations
 
 import zipfile
@@ -7,7 +8,12 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from zoneto.analytics.enrich import enrich_coa, enrich_dev, fetch_reference
+from zoneto.analytics.enrich import (
+    enrich_coa,
+    enrich_dev,
+    enrich_permits,
+    fetch_reference,
+)
 
 
 def _fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
@@ -24,9 +30,11 @@ def _fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
 def stub_spatial_join(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("zoneto.analytics.enrich._spatial_join_dev", _fake_spatial_join)
 
+
 # ---------------------------------------------------------------------------
 # fetch_reference
 # ---------------------------------------------------------------------------
+
 
 def test_fetch_reference_creates_dirs(
     tmp_path: Path,
@@ -59,12 +67,14 @@ def test_fetch_reference_creates_dirs(
 # enrich_coa
 # ---------------------------------------------------------------------------
 
+
 def _make_coa_parquet(tmp_path: Path) -> None:
     """Write minimal COA parquet to tmp_path/coa/year=2022/part0.parquet."""
     df = pl.DataFrame(
         {
             "in_date": ["2022-01-15", "2022-03-01", "2022-06-10", "2022-09-01"],
             "finaldate": ["2022-04-20", "2022-05-15", None, "2022-11-30"],
+            "hearing_date": ["2022-02-10", "2022-04-05", "2022-07-20", "2022-10-01"],
             "c_of_a_descision": [
                 "Approved",
                 "Refused",
@@ -80,12 +90,19 @@ def _make_coa_parquet(tmp_path: Path) -> None:
             ],
             "sub_type": ["A", "B", "A", "C"],
             "zoning_designation": ["RS", "RM", None, "CR"],
+            "planning_district": [
+                "Toronto & East York",
+                "North York",
+                "Etobicoke York",
+                "Scarborough",
+            ],
             "source_name": ["coa"] * 4,
             "year": [2022, 2022, 2022, 2022],
         }
     ).with_columns(
         pl.col("in_date").str.to_date(),
         pl.col("finaldate").str.to_date(),
+        pl.col("hearing_date").str.to_date(),
     )
     out = tmp_path / "coa" / "year=2022"
     out.mkdir(parents=True)
@@ -145,6 +162,7 @@ def test_enrich_coa_year_submitted(tmp_path: Path) -> None:
 # enrich_dev (unit — spatial join mocked)
 # ---------------------------------------------------------------------------
 
+
 def _make_dev_parquet(tmp_path: Path) -> None:
     """Write minimal dev_applications parquet."""
     df = pl.DataFrame(
@@ -182,9 +200,12 @@ def test_enrich_dev_approved_label(
     enrich_dev(data_dir=tmp_path)
     df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
     # "Closed" is no longer in approved set → null (ambiguous status)
-    assert df.filter(pl.col("application_type") == "Rezoning").filter(
-        pl.col("year_submitted") == 2021
-    )["dev_approved"][0] is None
+    assert (
+        df.filter(pl.col("application_type") == "Rezoning").filter(
+            pl.col("year_submitted") == 2021
+        )["dev_approved"][0]
+        is None
+    )
     # "Refused" → approved = 0
     assert df.filter(pl.col("application_type") == "Site Plan")["dev_approved"][0] == 0
     # "Under Review" → null
@@ -200,28 +221,29 @@ def test_enrich_dev_appealed_label(
     enrich_dev(data_dir=tmp_path)
     df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
     # "Closed" removed from approved set → not in any set → None
-    assert df.filter(pl.col("application_type") == "Rezoning").filter(
-        pl.col("year_submitted") == 2021
-    )["dev_appealed"][0] is None
+    assert (
+        df.filter(pl.col("application_type") == "Rezoning").filter(
+            pl.col("year_submitted") == 2021
+        )["dev_appealed"][0]
+        is None
+    )
     # "Refused" is in refused set, not in approved or appealed → None
-    assert df.filter(pl.col("application_type") == "Site Plan")[
-        "dev_appealed"
-    ][0] is None
+    assert (
+        df.filter(pl.col("application_type") == "Site Plan")["dev_appealed"][0] is None
+    )
     # "Under Review" not in any set → None
     assert df.filter(pl.col("year_submitted") == 2022)["dev_appealed"][0] is None
 
 
-def test_enrich_dev_is_tlab_era(
+def test_enrich_dev_no_is_tlab_era(
     tmp_path: Path,
     stub_spatial_join: None,
 ) -> None:
-    """is_tlab_era should be 1 for year_submitted >= 2017."""
+    """is_tlab_era should be removed — it was redundant with year_submitted."""
     _make_dev_parquet(tmp_path)
     enrich_dev(data_dir=tmp_path)
     df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
-    assert "is_tlab_era" in df.columns
-    # All fixture rows have year_submitted 2021 or 2022, both >= 2017
-    assert df["is_tlab_era"].to_list() == [1, 1, 1]
+    assert "is_tlab_era" not in df.columns
 
 
 def test_enrich_dev_has_community_meeting(
@@ -237,3 +259,113 @@ def test_enrich_dev_has_community_meeting(
         descending=True,
     )
     assert row0["has_community_meeting"][0] == 1
+
+
+# ---------------------------------------------------------------------------
+# enrich_coa — new feature tests
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_coa_planning_district(tmp_path: Path) -> None:
+    """planning_district should be preserved as a feature column."""
+    _make_coa_parquet(tmp_path)
+    enrich_coa(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
+    assert "planning_district" in df.columns
+    districts = df["planning_district"].to_list()
+    assert "Toronto & East York" in districts
+    assert "North York" in districts
+
+
+def test_enrich_coa_hearing_month(tmp_path: Path) -> None:
+    """hearing_month should be extracted from hearing_date (1-12)."""
+    _make_coa_parquet(tmp_path)
+    enrich_coa(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
+    assert "hearing_month" in df.columns
+    # hearing_dates in fixture: 2022-02-10, 2022-04-05, 2022-07-20, 2022-10-01
+    months = df.sort("in_date")["hearing_month"].to_list()
+    assert months == [2, 4, 7, 10]
+
+
+# ---------------------------------------------------------------------------
+# enrich_permits
+# ---------------------------------------------------------------------------
+
+
+def _make_permits_parquet(tmp_path: Path) -> None:
+    """Write minimal permits_cleared parquet."""
+    df = pl.DataFrame(
+        {
+            "application_date": [
+                "2022-01-10",
+                "2022-03-15",
+                "2022-06-01",
+                "2022-08-20",
+            ],
+            "issued_date": ["2022-04-20", "2022-07-01", None, "2022-10-05"],
+            "permit_type": [
+                "New Houses",
+                "Small Residential Projects",
+                "New Houses",
+                "Commercial",
+            ],
+            "structure_type": [
+                "Detached House",
+                "Semi-Detached",
+                "Row House",
+                "Office",
+            ],
+            "ward_grid": ["W01", "W02", "W03", "W04"],
+            "est_const_cost": [500000.0, 150000.0, 800000.0, 2000000.0],
+            "dwelling_units_created": [1, 0, 2, 0],
+            "dwelling_units_lost": [0, 0, 0, 0],
+            "residential": [1, 1, 1, 0],
+            "commercial": [0, 0, 0, 1],
+            "industrial": [0, 0, 0, 0],
+            "institutional": [0, 0, 0, 0],
+            "source_name": ["permits_cleared"] * 4,
+            "year": [2022, 2022, 2022, 2022],
+        }
+    ).with_columns(
+        pl.col("application_date").str.to_date(),
+        pl.col("issued_date").str.to_date(),
+    )
+    out = tmp_path / "permits_cleared" / "year=2022"
+    out.mkdir(parents=True)
+    df.write_parquet(out / "part0.parquet")
+
+
+def test_enrich_permits_creates_output(tmp_path: Path) -> None:
+    _make_permits_parquet(tmp_path)
+    enrich_permits(data_dir=tmp_path)
+    assert (tmp_path / "enriched" / "permits_cleared.parquet").exists()
+
+
+def test_enrich_permits_issuance_days(tmp_path: Path) -> None:
+    """permit_issuance_days = issued_date - application_date in calendar days."""
+    _make_permits_parquet(tmp_path)
+    enrich_permits(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "permits_cleared.parquet")
+    assert "permit_issuance_days" in df.columns
+    # Row 0: 2022-01-10 → 2022-04-20 = 100 days
+    row0 = df.filter(pl.col("permit_type") == "New Houses").filter(
+        pl.col("ward_grid") == "W01"
+    )
+    assert row0["permit_issuance_days"][0] == 100
+
+
+def test_enrich_permits_null_issued_date(tmp_path: Path) -> None:
+    """Rows with null issued_date should have null permit_issuance_days."""
+    _make_permits_parquet(tmp_path)
+    enrich_permits(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "permits_cleared.parquet")
+    row = df.filter(pl.col("ward_grid") == "W03")
+    assert row["permit_issuance_days"][0] is None
+
+
+def test_enrich_permits_row_count(tmp_path: Path) -> None:
+    """enrich_permits returns the count of rows written."""
+    _make_permits_parquet(tmp_path)
+    count = enrich_permits(data_dir=tmp_path)
+    assert count == 4  # all 4 rows preserved (null issuance_days kept)

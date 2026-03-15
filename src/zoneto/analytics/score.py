@@ -14,6 +14,8 @@ from zoneto.analytics.features import (
     COA_NUM_COLS,
     DEV_CAT_COLS,
     DEV_NUM_COLS,
+    PERMIT_CAT_COLS,
+    PERMIT_NUM_COLS,
 )
 
 # Model registry: source → list of (model_name, pred_col, is_regressor)
@@ -24,6 +26,9 @@ _DEV_MODELS: list[tuple[str, str, bool]] = [
 _COA_MODELS: list[tuple[str, str, bool]] = [
     ("coa_approved", "pred_coa_approved", False),
     ("coa_days_to_approval", "pred_coa_days_to_approval", True),
+]
+_PERMIT_MODELS: list[tuple[str, str, bool]] = [
+    ("permit_issuance_days", "pred_permit_issuance_days", True),
 ]
 
 
@@ -92,6 +97,29 @@ def score_all(
     )
     df_coa_scored.write_parquet(scores_dir / "coa.parquet")
 
+    # --- permits_cleared (optional: skip if enriched file absent) ---
+    permits_enriched = data_dir / "enriched" / "permits_cleared.parquet"
+    if permits_enriched.exists():
+        df_permits = pl.read_parquet(permits_enriched)
+        all_permit_cols = PERMIT_CAT_COLS + PERMIT_NUM_COLS
+        X_permits = df_permits.select(all_permit_cols).to_pandas()
+
+        extra_permits: dict[str, list] = {}
+        for model_name, pred_col, is_reg in _PERMIT_MODELS:
+            pipe = _load(model_dir, model_name)
+            prob_col = pred_col.replace("pred_", "prob_")
+            if is_reg:
+                extra_permits.update(_predict_regressor(pipe, X_permits, pred_col))
+            else:
+                extra_permits.update(
+                    _predict_classifier(pipe, X_permits, pred_col, prob_col)
+                )
+
+        df_permits_scored = df_permits.with_columns(
+            [pl.Series(name=k, values=v) for k, v in extra_permits.items()]
+        )
+        df_permits_scored.write_parquet(scores_dir / "permits_cleared.parquet")
+
 
 def score_one(
     source: str,
@@ -108,9 +136,13 @@ def score_one(
     elif source == "coa":
         models = _COA_MODELS
         all_cols = COA_CAT_COLS + COA_NUM_COLS
+    elif source == "permits_cleared":
+        models = _PERMIT_MODELS
+        all_cols = PERMIT_CAT_COLS + PERMIT_NUM_COLS
     else:
         raise ValueError(
-            f"Unknown source: {source!r}. Must be 'dev_applications' or 'coa'."
+            f"Unknown source: {source!r}. Must be 'dev_applications', 'coa',"
+            " or 'permits_cleared'."
         )
 
     X = pd.DataFrame([{col: features.get(col) for col in all_cols}])

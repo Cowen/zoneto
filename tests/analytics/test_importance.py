@@ -1,4 +1,5 @@
 """Tests for importance.py."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,6 +26,7 @@ from zoneto.analytics.train import build_pipeline
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def model_dir(tmp_path: Path) -> Path:
@@ -80,31 +82,38 @@ def enriched_dir(tmp_path: Path) -> Path:
     out.mkdir()
 
     # DEV enriched
-    pl.DataFrame({
-        "application_type": ["Rezoning", "Site Plan"] * 5,
-        "ward_number": ["Ward 1", "Ward 2"] * 5,
-        "zoning_class": ["RS", None] * 5,
-        "secondary_plan_name": [None, "Midtown"] * 5,
-        "year_submitted": [2021, 2022] * 5,
-        "in_heritage_register": [0, 1] * 5,
-        "in_heritage_district": [0, 0] * 5,
-        "in_secondary_plan": [0, 1] * 5,
-        "has_community_meeting": [1, 0] * 5,
-        "is_tlab_era": [1, 1] * 5,
-        "dev_approved": [1, 0] * 5,
-        "dev_appealed": [0, 1] * 5,
-    }).write_parquet(out / "dev_applications.parquet")
+    pl.DataFrame(
+        {
+            "application_type": ["Rezoning", "Site Plan"] * 5,
+            "ward_number": ["Ward 1", "Ward 2"] * 5,
+            "zoning_class": ["RS", None] * 5,
+            "secondary_plan_name": [None, "Midtown"] * 5,
+            "year_submitted": [2021, 2022] * 5,
+            "in_heritage_register": [0, 1] * 5,
+            "in_heritage_district": [0, 0] * 5,
+            "in_secondary_plan": [0, 1] * 5,
+            "has_community_meeting": [1, 0] * 5,
+            "dev_approved": [1, 0] * 5,
+            "dev_appealed": [0, 1] * 5,
+        }
+    ).write_parquet(out / "dev_applications.parquet")
 
     # COA enriched
-    pl.DataFrame({
-        "application_type": ["Minor Variance", "Consent"] * 5,
-        "sub_type": ["A", "B"] * 5,
-        "ward_number": ["Ward 3", "Ward 4"] * 5,
-        "zoning_designation": ["RS", None] * 5,
-        "year_submitted": [2021, 2022] * 5,
-        "coa_approved": [1, 0] * 5,
-        "coa_days_to_approval": rng.integers(30, 400, size=n).astype(float).tolist(),
-    }).write_parquet(out / "coa.parquet")
+    pl.DataFrame(
+        {
+            "application_type": ["Minor Variance", "Consent"] * 5,
+            "sub_type": ["A", "B"] * 5,
+            "ward_number": ["Ward 3", "Ward 4"] * 5,
+            "zoning_designation": ["RS", None] * 5,
+            "planning_district": ["Toronto & East York", "North York"] * 5,
+            "year_submitted": [2021, 2022] * 5,
+            "hearing_month": [3, 9] * 5,
+            "coa_approved": [1, 0] * 5,
+            "coa_days_to_approval": rng.integers(30, 400, size=n)
+            .astype(float)
+            .tolist(),
+        }
+    ).write_parquet(out / "coa.parquet")
 
     return tmp_path  # return data_dir (parent of enriched/)
 
@@ -112,6 +121,7 @@ def enriched_dir(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_feature_importance_columns(model_dir: Path, enriched_dir: Path) -> None:
     result = feature_importance(

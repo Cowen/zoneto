@@ -1,4 +1,5 @@
 """Tests for score.py — uses synthetic trained models from tmp_path."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,6 +17,8 @@ from zoneto.analytics.features import (
     COA_NUM_COLS,
     DEV_CAT_COLS,
     DEV_NUM_COLS,
+    PERMIT_CAT_COLS,
+    PERMIT_NUM_COLS,
 )
 from zoneto.analytics.score import score_all, score_one
 from zoneto.analytics.train import build_pipeline
@@ -40,9 +43,7 @@ def _train_dummy_model(
     n = 6
     X = pd.DataFrame({c: [str(i % 3) for i in range(n)] for c in cat_cols})
     X[num_cols] = pd.DataFrame(
-        np.random.default_rng(0)
-        .integers(0, 5, size=(n, len(num_cols)))
-        .astype(float),
+        np.random.default_rng(0).integers(0, 5, size=(n, len(num_cols))).astype(float),
         columns=num_cols,
     )
     y = np.array([0, 1, 0, 1, 0, 1], dtype=float if regressor else int)
@@ -75,6 +76,13 @@ def _setup_models(tmp_path: Path) -> Path:
         COA_NUM_COLS,
         regressor=True,
     )
+    _train_dummy_model(
+        model_dir,
+        "permit_issuance_days",
+        PERMIT_CAT_COLS,
+        PERMIT_NUM_COLS,
+        regressor=True,
+    )
     return model_dir
 
 
@@ -86,7 +94,6 @@ def _make_dev_enriched(tmp_path: Path) -> None:
             "zoning_class": ["RS", None],
             "secondary_plan_name": [None, "Midtown"],
             "year_submitted": [2021, 2022],
-            "is_tlab_era": [1, 1],
             "in_heritage_register": [0, 1],
             "in_heritage_district": [0, 0],
             "in_secondary_plan": [0, 1],
@@ -107,7 +114,9 @@ def _make_coa_enriched(tmp_path: Path) -> None:
             "sub_type": ["A", "B"],
             "ward_number": ["1", "2"],
             "zoning_designation": ["RS", None],
+            "planning_district": ["Toronto & East York", "North York"],
             "year_submitted": [2021, 2022],
+            "hearing_month": [3, 9],
             "coa_approved": [1, 0],
             "coa_days_to_approval": [90, None],
         }
@@ -115,6 +124,27 @@ def _make_coa_enriched(tmp_path: Path) -> None:
     out = tmp_path / "enriched"
     out.mkdir(exist_ok=True)
     df.write_parquet(out / "coa.parquet")
+
+
+def _make_permits_enriched(tmp_path: Path) -> None:
+    df = pl.DataFrame(
+        {
+            "permit_type": ["New Houses", "Small Residential Projects"],
+            "structure_type": ["Detached House", "Semi-Detached"],
+            "ward_grid": ["W01", "W02"],
+            "est_const_cost": [500000.0, 150000.0],
+            "dwelling_units_created": [1, 0],
+            "dwelling_units_lost": [0, 0],
+            "residential": [1, 1],
+            "commercial": [0, 0],
+            "industrial": [0, 0],
+            "institutional": [0, 0],
+            "permit_issuance_days": [100, 45],
+        }
+    )
+    out = tmp_path / "enriched"
+    out.mkdir(exist_ok=True)
+    df.write_parquet(out / "permits_cleared.parquet")
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +234,9 @@ def test_score_one_coa(tmp_path: Path) -> None:
             "sub_type": "A",
             "ward_number": "3",
             "zoning_designation": "RM",
+            "planning_district": "North York",
             "year_submitted": 2021,
+            "hearing_month": 6,
         },
         model_dir=model_dir,
     )
@@ -216,3 +248,56 @@ def test_score_one_unknown_source(tmp_path: Path) -> None:
     model_dir = _setup_models(tmp_path)
     with pytest.raises(ValueError, match="Unknown source"):
         score_one(source="invalid", features={}, model_dir=model_dir)
+
+
+def test_score_all_permits_parquet(tmp_path: Path) -> None:
+    """score_all creates permits_cleared.parquet when enriched file exists."""
+    _make_dev_enriched(tmp_path)
+    _make_coa_enriched(tmp_path)
+    _make_permits_enriched(tmp_path)
+    model_dir = _setup_models(tmp_path)
+    score_all(data_dir=tmp_path, model_dir=model_dir)
+    assert (tmp_path / "scores" / "permits_cleared.parquet").exists()
+
+
+def test_score_all_permits_column(tmp_path: Path) -> None:
+    """scored permits parquet has pred_permit_issuance_days column."""
+    _make_dev_enriched(tmp_path)
+    _make_coa_enriched(tmp_path)
+    _make_permits_enriched(tmp_path)
+    model_dir = _setup_models(tmp_path)
+    score_all(data_dir=tmp_path, model_dir=model_dir)
+    df = pl.read_parquet(tmp_path / "scores" / "permits_cleared.parquet")
+    assert "pred_permit_issuance_days" in df.columns
+
+
+def test_score_all_no_permits_enriched(tmp_path: Path) -> None:
+    """score_all succeeds without permit model when enriched file is absent."""
+    _make_dev_enriched(tmp_path)
+    _make_coa_enriched(tmp_path)
+    model_dir = _setup_models(tmp_path)
+    score_all(data_dir=tmp_path, model_dir=model_dir)
+    # No permits_cleared.parquet written since no enriched file
+    assert not (tmp_path / "scores" / "permits_cleared.parquet").exists()
+
+
+def test_score_one_permits(tmp_path: Path) -> None:
+    """score_one supports permits_cleared source."""
+    model_dir = _setup_models(tmp_path)
+    result = score_one(
+        source="permits_cleared",
+        features={
+            "permit_type": "New Houses",
+            "structure_type": "Detached House",
+            "ward_grid": "W01",
+            "est_const_cost": 500000.0,
+            "dwelling_units_created": 1,
+            "dwelling_units_lost": 0,
+            "residential": 1,
+            "commercial": 0,
+            "industrial": 0,
+            "institutional": 0,
+        },
+        model_dir=model_dir,
+    )
+    assert "pred_permit_issuance_days" in result

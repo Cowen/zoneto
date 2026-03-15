@@ -9,7 +9,6 @@ DEV_CAT_COLS: list[str] = [
 
 DEV_NUM_COLS: list[str] = [
     "year_submitted",
-    "is_tlab_era",
     "in_heritage_register",
     "in_heritage_district",
     "in_secondary_plan",
@@ -21,6 +20,23 @@ COA_CAT_COLS: list[str] = [
     "sub_type",
     "ward_number",
     "zoning_designation",
+    "planning_district",
 ]
 
-COA_NUM_COLS: list[str] = ["year_submitted"]
+COA_NUM_COLS: list[str] = ["year_submitted", "hearing_month"]
+
+PERMIT_CAT_COLS: list[str] = [
+    "permit_type",
+    "structure_type",
+    "ward_grid",
+]
+
+PERMIT_NUM_COLS: list[str] = [
+    "est_const_cost",
+    "dwelling_units_created",
+    "dwelling_units_lost",
+    "residential",
+    "commercial",
+    "industrial",
+    "institutional",
+]

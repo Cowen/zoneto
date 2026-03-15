@@ -144,9 +144,7 @@ def test_mixed_numeric_column_parsed_without_error(
     )
     # 'Units' column: first row has a plain integer, second has '0.' (float notation)
     csv_content = (
-        b"Application Date,Permit No,Units\n"
-        b"2021-01-01,B001,5\n"
-        b"2021-02-01,B002,0.\n"
+        b"Application Date,Permit No,Units\n2021-01-01,B001,5\n2021-02-01,B002,0.\n"
     )
     httpx_mock.add_response(content=csv_content)
 
@@ -186,9 +184,7 @@ def test_only_csv_format_resources_are_downloaded(
         ),
     )
     # Only one HTTP call for the CSV; XML and JSON should never be requested
-    httpx_mock.add_response(
-        content=b"Application Date,Permit No\n2021-06-01,C001\n"
-    )
+    httpx_mock.add_response(content=b"Application Date,Permit No\n2021-06-01,C001\n")
 
     df = source.fetch()
     assert len(df) == 1
@@ -231,8 +227,7 @@ def test_duplicate_snake_case_column_names_are_deduplicated(
         ),
     )
     csv_content = (
-        b"Application Date,Street Direction,STREET_DIRECTION\n"
-        b"2021-01-01,N,North\n"
+        b"Application Date,Street Direction,STREET_DIRECTION\n2021-01-01,N,North\n"
     )
     httpx_mock.add_response(content=csv_content)
 
@@ -255,9 +250,7 @@ def test_ragged_csv_rows_are_truncated(
         ),
     )
     csv_content = (
-        b"Application Date,Permit No\n"
-        b"2021-01-01,B001\n"
-        b"2021-02-01,B002,extra_field\n"
+        b"Application Date,Permit No\n2021-01-01,B001\n2021-02-01,B002,extra_field\n"
     )
     httpx_mock.add_response(content=csv_content)
 
