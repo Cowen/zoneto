@@ -37,6 +37,18 @@ pipeline:
 test:
     uv run pytest
 
+# Run performance regression tests (CI-safe, synthetic data)
+regression:
+    uv run pytest tests/analytics/test_regression.py -m "not integration" -v
+
+# Run performance regression tests against real enriched data
+regression-integration:
+    uv run pytest tests/analytics/test_regression.py -m integration -v
+
+# Regenerate tests/fixtures/model_baselines.json from current enriched data
+update-baselines:
+    uv run python scripts/update_baselines.py
+
 lint:
     uv run ruff check src/ && uv run ty check src/
 

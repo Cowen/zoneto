@@ -39,6 +39,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: requires local enriched parquet (skip with -m 'not integration')",
+]
 filterwarnings = [
     # sklearn emits these when CV folds have too few samples (expected with tiny test fixtures)
     "ignore:R\\^2 score is not well-defined:sklearn.exceptions.UndefinedMetricWarning",

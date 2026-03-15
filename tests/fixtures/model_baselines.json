@@ -1,0 +1,28 @@
+{
+  "_meta": { "updated": "2026-03-15" },
+  "dev_applications_approved": {
+    "roc_auc_mean": 0.7644,
+    "brier_score_mean": 0.0229,
+    "avg_precision_mean": 0.9861
+  },
+  "dev_applications_appealed": {
+    "roc_auc_mean": 0.8593,
+    "brier_score_mean": 0.1711,
+    "avg_precision_mean": 0.8381
+  },
+  "coa_approved": {
+    "roc_auc_mean": 0.4956,
+    "brier_score_mean": 0.0348,
+    "avg_precision_mean": 0.9712
+  },
+  "coa_days_to_approval": {
+    "r2_mean": -0.7760,
+    "mae_mean": 63.8689,
+    "rmse_mean": 79.7921
+  },
+  "permit_issuance_days": {
+    "r2_mean": 0.0297,
+    "mae_mean": 55.2710,
+    "rmse_mean": 95.9388
+  }
+}
