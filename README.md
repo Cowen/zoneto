@@ -1,8 +1,8 @@
 # zoneto
 
-Toronto building application data pipeline. Fetches building permit and Committee
-of Adjustment data from the City of Toronto Open Data API and stores it locally as
-Hive-partitioned Parquet files.
+Toronto building application data pipeline. 
+
+The goal is to be able to track and ultimately predict the likelihood of a given development application being approved by the city, as well as how long such an approval might take using any and all data available.
 
 ## Quickstart
 
