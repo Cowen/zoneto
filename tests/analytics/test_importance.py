@@ -93,6 +93,10 @@ def enriched_dir(tmp_path: Path) -> Path:
             "in_heritage_district": [0, 0] * 5,
             "in_secondary_plan": [0, 1] * 5,
             "has_community_meeting": [1, 0] * 5,
+            "ward_pct_renters": [45.5, 50.2] * 5,
+            "ward_median_income": [75000.0, 80000.0] * 5,
+            "ward_pop_density": [3500.0, 4200.0] * 5,
+            "ward_pct_detached": [25.5, 20.0] * 5,
             "dev_approved": [1, 0] * 5,
             "dev_appealed": [0, 1] * 5,
         }
@@ -108,6 +112,10 @@ def enriched_dir(tmp_path: Path) -> Path:
             "planning_district": ["Toronto & East York", "North York"] * 5,
             "work_type": ["Construction", "Change of Use"] * 5,
             "year_submitted": [2021, 2022] * 5,
+            "ward_pct_renters": [45.5, 50.2] * 5,
+            "ward_median_income": [75000.0, 80000.0] * 5,
+            "ward_pop_density": [3500.0, 4200.0] * 5,
+            "ward_pct_detached": [25.5, 20.0] * 5,
             "hearing_month": [3, 9] * 5,
             "coa_approved": [1, 0] * 5,
             "coa_days_to_approval": rng.integers(30, 400, size=n)

@@ -25,6 +25,10 @@ def test_dev_num_cols() -> None:
         "in_heritage_district",
         "in_secondary_plan",
         "has_community_meeting",
+        "ward_pct_renters",
+        "ward_median_income",
+        "ward_pop_density",
+        "ward_pct_detached",
     ]
 
 
@@ -40,7 +44,13 @@ def test_coa_cat_cols() -> None:
 
 
 def test_coa_num_cols() -> None:
-    assert COA_NUM_COLS == ["year_submitted"]
+    assert COA_NUM_COLS == [
+        "year_submitted",
+        "ward_pct_renters",
+        "ward_median_income",
+        "ward_pop_density",
+        "ward_pct_detached",
+    ]
 
 
 def test_permit_cat_cols() -> None:

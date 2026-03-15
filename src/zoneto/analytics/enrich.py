@@ -36,6 +36,12 @@ _SECONDARY_PLANS_URL = (
     "/resource/08099a8c-a598-4ca3-8395-e4159cc1ec1a"
     "/download/secondary-plans-data-2017-4326.geojson"
 )
+_WARD_PROFILES_URL = (
+    "https://ckan0.cf.opendata.inter.prod-toronto.ca"
+    "/dataset/8e6cfe74-d84c-403e-8399-f123c6666e09"
+    "/resource/4eb52b8f-8159-459b-be33-2e66c3fb4e19"
+    "/download/ward-profiles-25-ward-model.csv"
+)
 
 # ---------------------------------------------------------------------------
 # Status label sets (lowercase after strip)
@@ -92,6 +98,109 @@ def _label_from_sets(
     return None
 
 
+def _enrich_ward_features(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
+    """Add ward profile features (ward_pct_renters, ward_median_income, etc.) to df.
+
+    Reads ward_profiles.csv (transposed format with ward numbers as columns).
+    Left-joins on ward_number (normalizing format — dev uses "Ward N", COA uses "N").
+    Returns enriched DataFrame with new columns.
+    """
+    ref = data_dir / "reference"
+    ward_profiles_path = ref / "ward_profiles.csv"
+
+    if not ward_profiles_path.exists():
+        # If ward profiles don't exist, add null columns
+        return df.with_columns(
+            pl.lit(None, dtype=pl.Float64).alias("ward_pct_renters"),
+            pl.lit(None, dtype=pl.Float64).alias("ward_median_income"),
+            pl.lit(None, dtype=pl.Float64).alias("ward_pop_density"),
+            pl.lit(None, dtype=pl.Float64).alias("ward_pct_detached"),
+        )
+
+    # Read CSV; first column is characteristic, rest are ward numbers
+    ward_df = pl.read_csv(ward_profiles_path)
+
+    # Extract rows for the four characteristics we want
+    characteristics_map = {
+        "% Renter households": "ward_pct_renters",
+        "Median total income of households in 2020 ($)": "ward_median_income",
+        "Population density per square kilometre": "ward_pop_density",
+        "% Single-detached house": "ward_pct_detached",
+    }
+
+    # Transpose: columns become rows, ward numbers become a column
+    # Skip the first column (Characteristic) and get column names (ward numbers)
+    ward_cols = ward_df.columns[
+        1:
+    ]  # E.g., ["Ward 1", "Ward 5", "Ward 10"] or ["1", "5", "10"]
+
+    # Build a dict: ward_number -> {metric: value}
+    ward_data: dict[int, dict[str, float | None]] = {}
+    for row_idx, row in enumerate(ward_df.iter_rows(named=True)):
+        characteristic = row["Characteristic"]
+        if characteristic not in characteristics_map:
+            continue
+
+        output_col = characteristics_map[characteristic]
+        for ward_col in ward_cols:
+            # Extract ward number: "Ward 5" → 5, "5" → 5
+            ward_str = ward_col.replace("Ward ", "").strip()
+            try:
+                ward_num = int(ward_str)
+            except ValueError:
+                continue
+
+            value_str = row[ward_col]
+            if value_str is None:
+                value = None
+            else:
+                try:
+                    value = float(str(value_str).replace(",", ""))
+                except (ValueError, AttributeError):
+                    value = None
+
+            if ward_num not in ward_data:
+                ward_data[ward_num] = {}
+            ward_data[ward_num][output_col] = value
+
+    # Normalize df's ward_number to integer
+    def normalize_ward(ward_val) -> int | None:
+        if ward_val is None:
+            return None
+        ward_str = str(ward_val).replace("Ward ", "").strip()
+        try:
+            return int(ward_str)
+        except ValueError:
+            return None
+
+    ward_nums = [normalize_ward(w) for w in df["ward_number"]]
+
+    # Map ward profiles to rows
+    ward_pct_renters = [
+        ward_data.get(w, {}).get("ward_pct_renters") if w is not None else None
+        for w in ward_nums
+    ]
+    ward_median_income = [
+        ward_data.get(w, {}).get("ward_median_income") if w is not None else None
+        for w in ward_nums
+    ]
+    ward_pop_density = [
+        ward_data.get(w, {}).get("ward_pop_density") if w is not None else None
+        for w in ward_nums
+    ]
+    ward_pct_detached = [
+        ward_data.get(w, {}).get("ward_pct_detached") if w is not None else None
+        for w in ward_nums
+    ]
+
+    return df.with_columns(
+        pl.Series("ward_pct_renters", ward_pct_renters, dtype=pl.Float64),
+        pl.Series("ward_median_income", ward_median_income, dtype=pl.Float64),
+        pl.Series("ward_pop_density", ward_pop_density, dtype=pl.Float64),
+        pl.Series("ward_pct_detached", ward_pct_detached, dtype=pl.Float64),
+    )
+
+
 def _download(url: str, dest: Path) -> None:
     """Download *url* to *dest* (binary)."""
     import httpx
@@ -140,6 +249,11 @@ def fetch_reference(data_dir: Path = Path("data")) -> None:
     if not sp_geojson.exists():
         _download(_SECONDARY_PLANS_URL, sp_geojson)
 
+    # Ward profiles CSV
+    ward_profiles_csv = ref / "ward_profiles.csv"
+    if not ward_profiles_csv.exists():
+        _download(_WARD_PROFILES_URL, ward_profiles_csv)
+
 
 def enrich_coa(data_dir: Path = Path("data")) -> int:
     """Enrich COA parquet with outcome labels; write data/enriched/coa.parquet.
@@ -180,6 +294,9 @@ def enrich_coa(data_dir: Path = Path("data")) -> int:
         .otherwise(None)
         .alias("coa_days_to_approval")
     )
+
+    # Enrich with ward profiles
+    df = _enrich_ward_features(df, data_dir)
 
     out = data_dir / "enriched"
     out.mkdir(parents=True, exist_ok=True)
@@ -346,6 +463,9 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         )
         .alias("dev_appealed"),
     )
+
+    # Enrich with ward profiles
+    df = _enrich_ward_features(df, data_dir)
 
     out = data_dir / "enriched"
     out.mkdir(parents=True, exist_ok=True)

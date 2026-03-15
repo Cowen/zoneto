@@ -73,10 +73,20 @@ def test_fetch_reference_creates_dirs(
     """
 
     def fake_download(url: str, dest: Path) -> None:
-        # Write a minimal ZIP for ZIP URLs, GeoJSON for geojson files
+        # Write a minimal ZIP for ZIP URLs, CSV for ward profiles, GeoJSON for others
         if url.endswith(".zip"):
             with zipfile.ZipFile(dest, "w") as zf:
                 zf.writestr("dummy.shp", b"")
+        elif "ward" in dest.name:
+            # Write minimal ward profiles CSV (transposed format)
+            csv_content = (
+                "Characteristic,Ward 1,Ward 2\n"
+                "% Renter households,45.5,50.2\n"
+                "Median total income of households in 2020 ($),75000,80000\n"
+                "Population density per square kilometre,3500,4200\n"
+                "% Single-detached house,25.5,20.1\n"
+            )
+            dest.write_text(csv_content)
         else:
             dest.write_bytes(b'{"type":"FeatureCollection","features":[]}')
 
@@ -88,6 +98,7 @@ def test_fetch_reference_creates_dirs(
     assert (ref / "heritage_register").is_dir()
     assert (ref / "heritage_districts").is_dir()
     assert (ref / "secondary_plans.geojson").exists()
+    assert (ref / "ward_profiles.csv").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +195,50 @@ def test_enrich_coa_year_submitted(tmp_path: Path) -> None:
     df = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
     assert df["year_submitted"].dtype == pl.Int32
     assert df["year_submitted"][0] == 2022
+
+
+def test_enrich_coa_ward_features(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """enrich_coa adds ward profile features (ward_pct_renters, etc.)."""
+    _make_coa_parquet(tmp_path)
+
+    # Mock _download to write ward profiles CSV when called for ward profiles
+    def mock_download(url: str, dest: Path) -> None:
+        if "ward" in dest.name:
+            csv_content = (
+                "Characteristic,Ward 1,Ward 5,Ward 10,Ward 15,Ward 20\n"
+                "% Renter households,45.5,52.0,48.0,55.0,42.0\n"
+                "Median total income of households in 2020 ($),75000,70000,80000,68000,85000\n"
+                "Population density per square kilometre,3500,4200,3800,4500,3200\n"
+                "% Single-detached house,25.5,20.0,30.0,18.5,35.0\n"
+            )
+            dest.write_text(csv_content)
+        elif url.endswith(".zip"):
+            with zipfile.ZipFile(dest, "w") as zf:
+                zf.writestr("dummy.shp", b"")
+        else:
+            dest.write_bytes(b'{"type":"FeatureCollection","features":[]}')
+
+    monkeypatch.setattr("zoneto.analytics.enrich._download", mock_download)
+
+    # Fetch reference to ensure ward profiles exist
+    fetch_reference(data_dir=tmp_path)
+
+    enrich_coa(data_dir=tmp_path)
+
+    df = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
+    # Verify ward profile columns are present
+    ward_cols = ["ward_pct_renters", "ward_median_income", "ward_pop_density", "ward_pct_detached"]
+    for col in ward_cols:
+        assert col in df.columns, f"Missing column {col}"
+
+    # Verify ward 5 has correct values (second row in CSV)
+    ward_5_rows = df.filter(pl.col("ward_number") == "5")
+    assert len(ward_5_rows) > 0
+    # Check that ward profile values are actually populated
+    assert ward_5_rows["ward_pct_renters"][0] is not None
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +342,50 @@ def test_enrich_dev_has_community_meeting(
         descending=True,
     )
     assert row0["has_community_meeting"][0] == 1
+
+
+def test_enrich_dev_ward_features(
+    tmp_path: Path,
+    stub_spatial_join: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """enrich_dev adds ward profile features."""
+    _make_dev_parquet(tmp_path)
+
+    # Mock _download to write ward profiles CSV when called for ward profiles
+    def mock_download(url: str, dest: Path) -> None:
+        if "ward" in dest.name:
+            csv_content = (
+                "Characteristic,Ward 1,Ward 5,Ward 10\n"
+                "% Renter households,45.5,52.0,48.0\n"
+                "Median total income of households in 2020 ($),75000,70000,80000\n"
+                "Population density per square kilometre,3500,4200,3800\n"
+                "% Single-detached house,25.5,20.0,30.0\n"
+            )
+            dest.write_text(csv_content)
+        elif url.endswith(".zip"):
+            with zipfile.ZipFile(dest, "w") as zf:
+                zf.writestr("dummy.shp", b"")
+        else:
+            dest.write_bytes(b'{"type":"FeatureCollection","features":[]}')
+
+    monkeypatch.setattr("zoneto.analytics.enrich._download", mock_download)
+
+    # Fetch reference to ensure ward profiles exist
+    fetch_reference(data_dir=tmp_path)
+
+    enrich_dev(data_dir=tmp_path)
+
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+    # Verify ward profile columns are present
+    ward_cols = ["ward_pct_renters", "ward_median_income", "ward_pop_density", "ward_pct_detached"]
+    for col in ward_cols:
+        assert col in df.columns, f"Missing column {col}"
+
+    # Verify that dev app in Ward 1 has the correct values
+    ward_1_rows = df.filter(pl.col("ward_number") == "Ward 1")
+    if len(ward_1_rows) > 0:
+        assert ward_1_rows["ward_pct_renters"][0] is not None
 
 
 # ---------------------------------------------------------------------------

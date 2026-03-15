@@ -13,6 +13,10 @@ DEV_NUM_COLS: list[str] = [
     "in_heritage_district",
     "in_secondary_plan",
     "has_community_meeting",
+    "ward_pct_renters",
+    "ward_median_income",
+    "ward_pop_density",
+    "ward_pct_detached",
 ]
 
 COA_CAT_COLS: list[str] = [
@@ -24,7 +28,13 @@ COA_CAT_COLS: list[str] = [
     "work_type",
 ]
 
-COA_NUM_COLS: list[str] = ["year_submitted"]
+COA_NUM_COLS: list[str] = [
+    "year_submitted",
+    "ward_pct_renters",
+    "ward_median_income",
+    "ward_pop_density",
+    "ward_pct_detached",
+]
 
 PERMIT_CAT_COLS: list[str] = [
     "permit_type",
