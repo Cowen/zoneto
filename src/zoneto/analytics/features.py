@@ -37,6 +37,7 @@ PERMIT_NUM_COLS: list[str] = [
     "dwelling_units_created",
     "dwelling_units_lost",
     "residential",
+    "commercial",
     "industrial",
     "institutional",
     "application_year",
