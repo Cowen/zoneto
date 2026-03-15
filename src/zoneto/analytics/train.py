@@ -295,13 +295,15 @@ def train_all(
             regressor=is_reg,
         )
         counts[name] = count
+        # COA models use KFold (year_col=None); dev_applications uses TimeSeriesSplit
+        year_col_for_eval = None if name.startswith("coa_") else "year_submitted"
         eval_result = evaluate_source(
             enriched_path=path,
             label_col=label,
             cat_cols=cat,
             num_cols=num,
             regressor=is_reg,
-            year_col="year_submitted",
+            year_col=year_col_for_eval,
         )
         metrics[name] = eval_result
 

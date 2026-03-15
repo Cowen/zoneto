@@ -6,6 +6,7 @@ from pathlib import Path
 
 import joblib
 import polars as pl
+import pytest
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.pipeline import Pipeline
 
@@ -111,21 +112,31 @@ def _make_coa_enriched(tmp_path: Path) -> Path:
                 "Minor Variance",
                 "Consent",
                 "Minor Variance",
+                "Consent",
+                "Minor Variance",
+                "Consent",
+                "Minor Variance",
+                "Consent",
             ],
-            "sub_type": ["A", "B", "A", "C", "B"],
-            "ward_number": ["1", "2", "3", "4", "5"],
-            "zoning_designation": ["RS", "RM", None, "CR", "RS"],
+            "sub_type": ["A", "B", "A", "C", "B", "A", "B", "C", "A", "B"],
+            "ward_number": ["1", "2", "3", "4", "5", "1", "2", "3", "4", "5"],
+            "zoning_designation": ["RS", "RM", None, "CR", "RS", "RS", "RM", None, "CR", "RS"],
             "planning_district": [
                 "Toronto & East York",
                 "North York",
                 "Etobicoke York",
                 "Scarborough",
                 "North York",
+                "Toronto & East York",
+                "North York",
+                "Etobicoke York",
+                "Scarborough",
+                "North York",
             ],
-            "year_submitted": [2019, 2020, 2021, 2022, 2022],
-            "hearing_month": [3, 6, 9, 11, 4],
-            "coa_approved": [1, 0, 1, 0, 1],
-            "coa_days_to_approval": [95, None, 120, None, 60],
+            "year_submitted": [2019, 2020, 2021, 2022, 2022, 2019, 2020, 2021, 2022, 2022],
+            "hearing_month": [3, 6, 9, 11, 4, 3, 6, 9, 11, 4],
+            "coa_approved": [1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
+            "coa_days_to_approval": [95, None, 120, None, 60, 100, 50, 110, 70, 80],
         }
     )
     out = tmp_path / "enriched"
@@ -282,6 +293,65 @@ def test_train_source_drops_null_labels(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_train_all_coa_uses_kfold_cv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """COA models use KFold (year_col=None), dev_appealed uses TimeSeriesSplit."""
+    from unittest.mock import Mock
+    from zoneto.analytics.train import evaluate_source
+
+    _make_dev_enriched(tmp_path)
+    _make_coa_enriched(tmp_path)
+    _make_permits_enriched(tmp_path)
+    model_dir = tmp_path / "models"
+
+    # Mock evaluate_source to capture the year_col parameter
+    call_args = []
+    original_evaluate = evaluate_source
+
+    def mock_evaluate(
+        enriched_path,
+        label_col,
+        cat_cols,
+        num_cols,
+        *,
+        regressor=False,
+        cv=5,
+        year_col="year_submitted",
+    ):
+        call_args.append(
+            {
+                "label_col": label_col,
+                "year_col": year_col,
+                "regressor": regressor,
+            }
+        )
+        # Call original to get real results
+        return original_evaluate(
+            enriched_path=enriched_path,
+            label_col=label_col,
+            cat_cols=cat_cols,
+            num_cols=num_cols,
+            regressor=regressor,
+            cv=cv,
+            year_col=year_col,
+        )
+
+    monkeypatch.setattr("zoneto.analytics.train.evaluate_source", mock_evaluate)
+
+    train_all(data_dir=tmp_path, model_dir=model_dir)
+
+    # Find the calls for COA and dev_appealed models
+    coa_approved_call = next(c for c in call_args if c["label_col"] == "coa_approved")
+    coa_days_call = next(c for c in call_args if c["label_col"] == "coa_days_to_approval")
+    dev_appealed_call = next(c for c in call_args if c["label_col"] == "dev_appealed")
+
+    # COA models must use year_col=None (KFold)
+    assert coa_approved_call["year_col"] is None, "coa_approved should use KFold (year_col=None)"
+    assert coa_days_call["year_col"] is None, "coa_days_to_approval should use KFold (year_col=None)"
+
+    # dev_appealed must use year_col="year_submitted" (TimeSeriesSplit)
+    assert dev_appealed_call["year_col"] == "year_submitted", "dev_appealed should use TimeSeriesSplit"
+
+
 # ---------------------------------------------------------------------------
 # evaluate_source
 # ---------------------------------------------------------------------------
@@ -335,7 +405,7 @@ def test_evaluate_source_regressor(tmp_path: Path) -> None:
         year_col=None,  # shuffled CV for small test dataset
     )
     assert "n" in result
-    assert result["n"] == 3  # only 3 non-null coa_days_to_approval rows
+    assert result["n"] == 8  # 8 non-null coa_days_to_approval rows
     assert "r2_mean" in result
     assert "mae_mean" in result
     assert "rmse_mean" in result
