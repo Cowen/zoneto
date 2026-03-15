@@ -177,8 +177,15 @@ def evaluate_source(
         cv_obj: KFold | StratifiedKFold | TimeSeriesSplit = TimeSeriesSplit(
             n_splits=effective_cv
         )
+    elif regressor:
+        cv_obj = KFold(effective_cv)
     else:
-        cv_obj = KFold(effective_cv) if regressor else StratifiedKFold(effective_cv)
+        # Also cap by minority class count so StratifiedKFold never warns
+        label_series = df[label_col]
+        min_class = label_series.drop_nulls().value_counts()["count"].min()
+        assert isinstance(min_class, int)
+        effective_cv = min(effective_cv, min_class)
+        cv_obj = StratifiedKFold(effective_cv)
 
     X = df.select(all_cols).to_pandas()
     y = df[label_col].to_pandas()
