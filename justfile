@@ -35,7 +35,7 @@ pipeline:
     just score
 
 test:
-    uv run pytest
+    uv run pytest -qq
 
 # Run performance regression tests (CI-safe, synthetic data)
 regression:
