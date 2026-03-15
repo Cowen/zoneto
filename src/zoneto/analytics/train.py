@@ -214,8 +214,9 @@ def evaluate_source(
         is_neg = key.startswith("neg_")
         out_key = key[4:] if is_neg else key
         sign = -1.0 if is_neg else 1.0
-        result[f"{out_key}_mean"] = sign * float(np.nanmean(vals))
-        result[f"{out_key}_std"] = float(np.nanstd(vals))
+        non_nan = vals[~np.isnan(vals)]
+        result[f"{out_key}_mean"] = sign * float(np.mean(non_nan)) if len(non_nan) else float("nan")
+        result[f"{out_key}_std"] = float(np.std(non_nan)) if len(non_nan) else float("nan")
     return result
 
 

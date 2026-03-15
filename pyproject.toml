@@ -39,6 +39,13 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # sklearn emits these when CV folds have too few samples (expected with tiny test fixtures)
+    "ignore:R\\^2 score is not well-defined:sklearn.exceptions.UndefinedMetricWarning",
+    "ignore:Only one class is present in y_true:sklearn.exceptions.UndefinedMetricWarning",
+    "ignore:No positive class found in y_true:UserWarning:sklearn",
+    "ignore:Skipping features without any observed values:UserWarning:sklearn",
+]
 
 [tool.ruff]
 src = ["src"]
