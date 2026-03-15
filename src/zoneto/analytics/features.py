@@ -21,6 +21,7 @@ COA_CAT_COLS: list[str] = [
     "ward_number",
     "zoning_designation",
     "planning_district",
+    "work_type",
 ]
 
 COA_NUM_COLS: list[str] = ["year_submitted"]

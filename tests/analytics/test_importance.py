@@ -106,6 +106,7 @@ def enriched_dir(tmp_path: Path) -> Path:
             "ward_number": ["Ward 3", "Ward 4"] * 5,
             "zoning_designation": ["RS", None] * 5,
             "planning_district": ["Toronto & East York", "North York"] * 5,
+            "work_type": ["Construction", "Change of Use"] * 5,
             "year_submitted": [2021, 2022] * 5,
             "hearing_month": [3, 9] * 5,
             "coa_approved": [1, 0] * 5,

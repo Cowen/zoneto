@@ -35,6 +35,7 @@ def test_coa_cat_cols() -> None:
         "ward_number",
         "zoning_designation",
         "planning_district",
+        "work_type",
     ]
 
 
