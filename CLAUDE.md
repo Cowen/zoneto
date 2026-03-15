@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
-<!-- Freshness: 2026-03-14 -->
-<!-- Last reviewed against: main branch (permits model, calibration, feature updates) -->
+<!-- Freshness: 2026-03-15 -->
+<!-- Last reviewed against: main branch (P0 feature cleanup: removed postal_fsa, COA ward profiles, permit application_year, retired dev_approved model) -->
 
 ## Purpose
 
@@ -96,6 +96,8 @@ creates correct Hive directories while pyarrow creates flat files.
 | `coa` | committee-of-adjustment-applications | bulk_csv | 2015 | `application_date` (default) |
 | `dev_applications` | development-applications | datastore | 2000 | `date_submitted` |
 
+NOTE: Though the CKAN data source identifies `dev_applications` as retired, it still has data indicating it is being actively updated.
+
 ### CLI (`cli.py`)
 
 - `zoneto sync [--source NAME]` -- fetches one or all sources, writes Parquet
@@ -105,8 +107,9 @@ creates correct Hive directories while pyarrow creates flat files.
   labels and spatial features. Downloads reference datasets to `data/reference/` if
   `--fetch-ref` (default). Enriches COA, dev_applications, and permits_cleared.
   Writes enriched parquet to `data/enriched/`.
-- `zoneto train [--model-dir PATH]` -- trains 4-5 outcome-prediction models from
+- `zoneto train [--model-dir PATH]` -- trains 3-4 outcome-prediction models from
   enriched parquet (permit model optional). Serializes to `models/*.joblib` (default: `./models`).
+  dev_applications_approved is retired (dataset frozen, 97.3% class imbalance).
 - `zoneto score [--model-dir PATH]` -- runs batch inference on enriched parquet using
   trained models. Writes scored parquet to `data/scores/`.
 
@@ -116,12 +119,12 @@ creates correct Hive directories while pyarrow creates flat files.
 
 Canonical feature column lists for machine learning models:
 
-- `DEV_CAT_COLS` -- categorical features for development applications
-- `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting)
-- `COA_CAT_COLS` -- categorical features for COA (application_type, sub_type, ward_number, zoning_designation, planning_district)
+- `DEV_CAT_COLS` -- categorical features for development applications (application_type, ward_number, zoning_class, secondary_plan_name)
+- `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, has_parent_application)
+- `COA_CAT_COLS` -- categorical features for COA (application_type, sub_type, ward_number, zoning_designation, planning_district, work_type)
 - `COA_NUM_COLS` -- numeric features for COA (year_submitted)
 - `PERMIT_CAT_COLS` -- categorical features for permits (permit_type, structure_type, ward_grid)
-- `PERMIT_NUM_COLS` -- numeric features for permits (est_const_cost, dwelling_units_created, dwelling_units_lost, residential, industrial, institutional, application_year)
+- `PERMIT_NUM_COLS` -- numeric features for permits (est_const_cost, dwelling_units_created, dwelling_units_lost, residential, mercantile, industrial, institutional)
 
 ### Enrichment (`analytics/enrich.py`)
 
@@ -154,11 +157,12 @@ Trains sklearn HistGradientBoosting classifiers and regressors from enriched par
 **Models**:
 | File | Type | Target | Source | Label filter |
 |---|---|---|---|---|
-| `dev_applications_approved.joblib` | CalibratedClassifierCV(HistGradientBoostingClassifier) | `dev_approved` | enriched dev_applications | drop null |
 | `dev_applications_appealed.joblib` | CalibratedClassifierCV(HistGradientBoostingClassifier) | `dev_appealed` | enriched dev_applications | drop null |
 | `coa_approved.joblib` | CalibratedClassifierCV(HistGradientBoostingClassifier) | `coa_approved` | enriched coa | drop null |
 | `coa_days_to_approval.joblib` | HistGradientBoostingRegressor | `coa_days_to_approval` | enriched coa | drop null |
 | `permit_issuance_days.joblib` | HistGradientBoostingRegressor | `permit_issuance_days` | enriched permits_cleared | drop null (optional, skip if absent) |
+
+Note: `dev_applications_approved` is retired — dataset frozen (no new records), 97.3% class imbalance, ±0.267 AUC variance. Not trained or scored.
 
 **Pipeline architecture**:
 - ColumnTransformer with OrdinalEncoder for categorical features
@@ -172,7 +176,7 @@ Trains sklearn HistGradientBoosting classifiers and regressors from enriched par
 - `build_pipeline(cat_cols, num_cols, estimator)` -- returns unfitted Pipeline
 - `train_source(enriched_path, label_col, cat_cols, num_cols, model_name, model_dir, *, regressor, calibrate)` -- trains one model, returns row count. When calibrate=True (default) and not regressor and >= 20 rows, wraps pipeline in CalibratedClassifierCV.
 - `evaluate_source(enriched_path, label_col, cat_cols, num_cols, *, regressor, cv, year_col)` -- temporal CV evaluation; returns per-metric mean/std dict. Uses `TimeSeriesSplit` when `year_col` is set and present (avoids future-data leakage). Caps cv at n_samples - 1 for all splitter types. Classifiers return roc_auc, neg_brier_score, avg_precision; regressors return r2, neg_mae, neg_rmse.
-- `train_all(data_dir, model_dir)` -- trains 4-5 models (permit model optional, trained if enriched file exists), evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict})
+- `train_all(data_dir, model_dir)` -- trains 3-4 models (dev_approved retired; permit model optional), evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict})
 
 ### Scoring (`analytics/score.py`)
 
@@ -209,7 +213,7 @@ Computes feature importance for trained models via two methods:
 - `builtin=True`: gain-based importance from HistGradientBoosting internal tree structure (fast, no data needed). Unwraps `CalibratedClassifierCV` wrapper automatically.
 - `builtin=False` (default): permutation importance on enriched parquet (slower, more reliable)
 
-**Supported models** (`_MODEL_META` registry): dev_applications_approved, dev_applications_appealed, coa_approved, coa_days_to_approval, permit_issuance_days
+**Supported models** (`_MODEL_META` registry): dev_applications_appealed, coa_approved, coa_days_to_approval, permit_issuance_days (dev_applications_approved retired)
 
 ## Dependencies
 

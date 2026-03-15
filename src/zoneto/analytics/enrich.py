@@ -73,13 +73,15 @@ _DEV_APPEALED_SET: frozenset[str] = frozenset(
         "omb partially approved",
     }
 )
-_DEV_ACTIVE_SET: frozenset[str] = frozenset({
-    "under review",
-    "on hold",
-    "referred",
-    "deferred",
-    "information requested",
-})
+_DEV_ACTIVE_SET: frozenset[str] = frozenset(
+    {
+        "under review",
+        "on hold",
+        "referred",
+        "deferred",
+        "information requested",
+    }
+)
 _COA_APPROVED_SET: frozenset[str] = frozenset(
     {
         "approved",
@@ -554,9 +556,7 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         pl.col("status")
         .map_elements(
             lambda v: (
-                1
-                if (v is not None and v.strip().lower() in _DEV_ACTIVE_SET)
-                else 0
+                1 if (v is not None and v.strip().lower() in _DEV_ACTIVE_SET) else 0
             ),
             return_dtype=pl.Int8,
         )
@@ -573,19 +573,13 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
             .alias("has_parent_application")
         )
     else:
-        df = df.with_columns(
-            pl.lit(0, dtype=pl.Int8).alias("has_parent_application")
-        )
+        df = df.with_columns(pl.lit(0, dtype=pl.Int8).alias("has_parent_application"))
 
     # postal_fsa: neighbourhood proxy (first 3 chars of postal code e.g. "M5V")
     if "postal" in df.columns:
-        df = df.with_columns(
-            pl.col("postal").str.slice(0, 3).alias("postal_fsa")
-        )
+        df = df.with_columns(pl.col("postal").str.slice(0, 3).alias("postal_fsa"))
     else:
-        df = df.with_columns(
-            pl.lit(None, dtype=pl.String).alias("postal_fsa")
-        )
+        df = df.with_columns(pl.lit(None, dtype=pl.String).alias("postal_fsa"))
 
     # Enrich with ward profiles
     df = _enrich_ward_features(df, data_dir)

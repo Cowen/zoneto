@@ -14,7 +14,6 @@ def test_dev_cat_cols() -> None:
         "ward_number",
         "zoning_class",
         "secondary_plan_name",
-        "postal_fsa",
     ]
 
 
@@ -48,10 +47,6 @@ def test_coa_cat_cols() -> None:
 def test_coa_num_cols() -> None:
     assert COA_NUM_COLS == [
         "year_submitted",
-        "ward_pct_renters",
-        "ward_median_income",
-        "ward_pop_density",
-        "ward_pct_detached",
     ]
 
 
@@ -72,5 +67,4 @@ def test_permit_num_cols() -> None:
         "mercantile",
         "industrial",
         "institutional",
-        "application_year",
     ]

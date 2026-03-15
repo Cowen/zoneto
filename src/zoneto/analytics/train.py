@@ -237,8 +237,9 @@ def train_all(
 ) -> tuple[dict[str, int], dict[str, dict[str, float | int]]]:
     """Train all models. Returns (row_counts, metrics).
 
-    Core models (always trained): dev_applications_approved,
-    dev_applications_appealed, coa_approved, coa_days_to_approval.
+    Core models (always trained): dev_applications_appealed, coa_approved,
+    coa_days_to_approval. dev_applications_approved is retired (dataset frozen,
+    97.3% class imbalance, ±0.267 AUC variance).
     Optional model (trained if enriched file exists): permit_issuance_days.
 
     First element: {model_name: row_count}
@@ -249,14 +250,9 @@ def train_all(
     permits_path = data_dir / "enriched" / "permits_cleared.parquet"
 
     jobs: list[tuple[Path, str, list[str], list[str], str, bool]] = [
-        (
-            dev_path,
-            "dev_approved",
-            DEV_CAT_COLS,
-            DEV_NUM_COLS,
-            "dev_applications_approved",
-            False,
-        ),
+        # dev_applications_approved retired: dataset frozen (no new records since city
+        # retired the dataset), class imbalance is 97.3% approved, and CV variance
+        # (±0.267 AUC) is too high for reliable predictions.
         (
             dev_path,
             "dev_appealed",

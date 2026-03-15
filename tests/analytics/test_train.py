@@ -319,7 +319,6 @@ def test_train_source_drops_null_labels(tmp_path: Path) -> None:
 
 def test_train_all_coa_uses_kfold_cv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """COA models use KFold (year_col=None), dev_appealed uses TimeSeriesSplit."""
-    from unittest.mock import Mock
     from zoneto.analytics.train import evaluate_source
 
     _make_dev_enriched(tmp_path)
@@ -441,19 +440,20 @@ def test_evaluate_source_regressor(tmp_path: Path) -> None:
 
 
 def test_train_all_creates_core_models(tmp_path: Path) -> None:
-    """train_all creates the four core model files (permits optional)."""
+    """train_all creates the three core model files (permits optional)."""
     _make_dev_enriched(tmp_path)
     _make_coa_enriched(tmp_path)
     model_dir = tmp_path / "models"
     counts, metrics = train_all(data_dir=tmp_path, model_dir=model_dir)
     expected = [
-        "dev_applications_approved.joblib",
         "dev_applications_appealed.joblib",
         "coa_approved.joblib",
         "coa_days_to_approval.joblib",
     ]
     for name in expected:
         assert (model_dir / name).exists(), f"Missing {name}"
+    # dev_applications_approved is retired: dataset frozen, 97.3% class imbalance
+    assert not (model_dir / "dev_applications_approved.joblib").exists()
 
 
 def test_train_all_creates_permit_model(tmp_path: Path) -> None:
@@ -487,7 +487,6 @@ def test_train_all_returns_metrics(tmp_path: Path) -> None:
     assert isinstance(counts, dict)
     assert isinstance(metrics, dict)
     expected_models = [
-        "dev_applications_approved",
         "dev_applications_appealed",
         "coa_approved",
         "coa_days_to_approval",

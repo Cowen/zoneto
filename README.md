@@ -52,6 +52,8 @@ from 2020 onwards (`year_start=2020`). `dev_applications` uses `year_start=2000`
 capture the full archive (earliest records are from 2008). In all cases, records with
 unparseable dates land in `year=0`.
 
+NOTE: Though the CKAN data source identifies `dev_applications` as retired, it still has data indicating it is being actively updated.
+
 ---
 
 ### Building Permits — Active (`permits_active`)
