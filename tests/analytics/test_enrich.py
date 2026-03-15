@@ -243,6 +243,8 @@ def _make_dev_parquet(tmp_path: Path) -> None:
             "application_type": ["Rezoning", "Site Plan", "Rezoning"],
             "ward_number": ["Ward 1", "Ward 5", "Ward 10"],
             "community_meeting_date": ["2021-07-01", None, None],
+            "parent_folder_number": ["23 456789 OZ", None, None],
+            "postal": ["M5V 2T6", "M4K 1A1", None],
             "x": ["630000.0", "631000.0", None],
             "y": ["4840000.0", "4841000.0", None],
             "source_name": ["dev_applications"] * 3,
@@ -361,6 +363,33 @@ def test_enrich_dev_ward_features(
     ward_1_rows = df.filter(pl.col("ward_number") == "Ward 1")
     if len(ward_1_rows) > 0:
         assert ward_1_rows["ward_pct_renters"][0] is not None
+
+
+def test_enrich_dev_is_active(tmp_path, stub_spatial_join):
+    """'Under Review' → is_active=1; decided statuses → is_active=0."""
+    _make_dev_parquet(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+    rows = dict(zip(df["status"].to_list(), df["is_active"].to_list()))
+    assert rows["Under Review"] == 1
+    assert rows["Closed"] == 0
+    assert rows["Refused"] == 0
+
+
+def test_enrich_dev_has_parent_application(tmp_path, stub_spatial_join):
+    """Non-null parent_folder_number → has_parent_application=1, null → 0."""
+    _make_dev_parquet(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+    assert df["has_parent_application"].to_list() == [1, 0, 0]
+
+
+def test_enrich_dev_postal_fsa(tmp_path, stub_spatial_join):
+    """postal_fsa is first 3 chars of postal; null postal → null fsa."""
+    _make_dev_parquet(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+    assert df["postal_fsa"].to_list() == ["M5V", "M4K", None]
 
 
 # ---------------------------------------------------------------------------

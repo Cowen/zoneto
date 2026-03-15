@@ -73,6 +73,13 @@ _DEV_APPEALED_SET: frozenset[str] = frozenset(
         "omb partially approved",
     }
 )
+_DEV_ACTIVE_SET: frozenset[str] = frozenset({
+    "under review",
+    "on hold",
+    "referred",
+    "deferred",
+    "information requested",
+})
 _COA_APPROVED_SET: frozenset[str] = frozenset(
     {
         "approved",
@@ -120,7 +127,9 @@ def _fetch_ward_profiles_csv(ref: Path) -> None:
     geo_xlsx = Path(tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name)
     try:
         with httpx.Client(follow_redirects=True, timeout=120) as client:
-            census_xlsx.write_bytes(client.get(_WARD_CENSUS_URL).raise_for_status().content)
+            census_xlsx.write_bytes(
+                client.get(_WARD_CENSUS_URL).raise_for_status().content
+            )
             geo_xlsx.write_bytes(client.get(_WARD_GEO_URL).raise_for_status().content)
 
         # --- parse census XLSX ---
@@ -175,8 +184,13 @@ def _fetch_ward_profiles_csv(ref: Path) -> None:
         with out_path.open("w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(
-                ["ward_number", "ward_pct_renters", "ward_median_income",
-                 "ward_pop_density", "ward_pct_detached"]
+                [
+                    "ward_number",
+                    "ward_pct_renters",
+                    "ward_median_income",
+                    "ward_pop_density",
+                    "ward_pct_detached",
+                ]
             )
             for ward_num in sorted(ward_col_idx.keys()):
                 population = _cell(18, ward_num)
@@ -534,6 +548,44 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         )
         .alias("dev_appealed"),
     )
+
+    # is_active: 1 for pending applications (not an ML feature — output flag only)
+    df = df.with_columns(
+        pl.col("status")
+        .map_elements(
+            lambda v: (
+                1
+                if (v is not None and v.strip().lower() in _DEV_ACTIVE_SET)
+                else 0
+            ),
+            return_dtype=pl.Int8,
+        )
+        .alias("is_active")
+    )
+
+    # has_parent_application: SA/CD linked to a parent OZ implies upstream rezoning
+    # decided
+    if "parent_folder_number" in df.columns:
+        df = df.with_columns(
+            pl.col("parent_folder_number")
+            .is_not_null()
+            .cast(pl.Int8)
+            .alias("has_parent_application")
+        )
+    else:
+        df = df.with_columns(
+            pl.lit(0, dtype=pl.Int8).alias("has_parent_application")
+        )
+
+    # postal_fsa: neighbourhood proxy (first 3 chars of postal code e.g. "M5V")
+    if "postal" in df.columns:
+        df = df.with_columns(
+            pl.col("postal").str.slice(0, 3).alias("postal_fsa")
+        )
+    else:
+        df = df.with_columns(
+            pl.lit(None, dtype=pl.String).alias("postal_fsa")
+        )
 
     # Enrich with ward profiles
     df = _enrich_ward_features(df, data_dir)

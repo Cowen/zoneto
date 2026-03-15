@@ -14,6 +14,7 @@ def test_dev_cat_cols() -> None:
         "ward_number",
         "zoning_class",
         "secondary_plan_name",
+        "postal_fsa",
     ]
 
 
@@ -29,6 +30,7 @@ def test_dev_num_cols() -> None:
         "ward_median_income",
         "ward_pop_density",
         "ward_pct_detached",
+        "has_parent_application",
     ]
 
 

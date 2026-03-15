@@ -5,6 +5,7 @@ DEV_CAT_COLS: list[str] = [
     "ward_number",
     "zoning_class",
     "secondary_plan_name",
+    "postal_fsa",
 ]
 
 DEV_NUM_COLS: list[str] = [
@@ -17,6 +18,7 @@ DEV_NUM_COLS: list[str] = [
     "ward_median_income",
     "ward_pop_density",
     "ward_pct_detached",
+    "has_parent_application",
 ]
 
 COA_CAT_COLS: list[str] = [
