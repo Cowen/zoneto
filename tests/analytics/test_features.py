@@ -39,7 +39,7 @@ def test_coa_cat_cols() -> None:
 
 
 def test_coa_num_cols() -> None:
-    assert COA_NUM_COLS == ["year_submitted", "hearing_month"]
+    assert COA_NUM_COLS == ["year_submitted"]
 
 
 def test_permit_cat_cols() -> None:
@@ -56,7 +56,6 @@ def test_permit_num_cols() -> None:
         "dwelling_units_created",
         "dwelling_units_lost",
         "residential",
-        "commercial",
         "industrial",
         "institutional",
     ]

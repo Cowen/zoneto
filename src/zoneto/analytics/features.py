@@ -23,7 +23,7 @@ COA_CAT_COLS: list[str] = [
     "planning_district",
 ]
 
-COA_NUM_COLS: list[str] = ["year_submitted", "hearing_month"]
+COA_NUM_COLS: list[str] = ["year_submitted"]
 
 PERMIT_CAT_COLS: list[str] = [
     "permit_type",
@@ -36,7 +36,6 @@ PERMIT_NUM_COLS: list[str] = [
     "dwelling_units_created",
     "dwelling_units_lost",
     "residential",
-    "commercial",
     "industrial",
     "institutional",
 ]

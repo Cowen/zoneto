@@ -119,7 +119,7 @@ Canonical feature column lists for machine learning models:
 - `DEV_CAT_COLS` -- categorical features for development applications
 - `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting)
 - `COA_CAT_COLS` -- categorical features for COA (application_type, sub_type, ward_number, zoning_designation, planning_district)
-- `COA_NUM_COLS` -- numeric features for COA (year_submitted, hearing_month)
+- `COA_NUM_COLS` -- numeric features for COA (year_submitted)
 - `PERMIT_CAT_COLS` -- categorical features for permits (permit_type, structure_type, ward_grid)
 - `PERMIT_NUM_COLS` -- numeric features for permits (est_const_cost, dwelling_units_created, dwelling_units_lost, residential, commercial, industrial, institutional)
 
@@ -128,16 +128,16 @@ Canonical feature column lists for machine learning models:
 Downloads reference datasets from CKAN and enriches raw source parquet:
 
 **Reference datasets** (cached in `data/reference/`):
-- Zoning (CSV with GeoJSON) -- for spatial point-in-polygon join
+- Zoning (GeoJSON, full-city WGS84 — `zoning.geojson`) -- for spatial point-in-polygon join via DuckDB ST_Read
 - Heritage register (ZIP → SHP with WGS84 points) -- flag properties in register
 - Heritage districts (ZIP → SHP) -- flag properties in district
 - Secondary plans (GeoJSON) -- flag properties in plan area
 
 **Enrichment functions**:
 - `fetch_reference(data_dir)` -- downloads/extracts all reference datasets (idempotent)
-- `enrich_coa(data_dir)` -- enriches COA with outcome labels, ward_number, year_submitted,
-  hearing_month (Int32, from hearing_date month), planning_district (preserved from source),
-  coa_approved (1/0/null), coa_days_to_approval regression target
+- `enrich_coa(data_dir)` -- deduplicates on `reference_file` (handles consolidated CSV overlap),
+  enriches COA with outcome labels, ward_number, year_submitted,
+  planning_district (preserved from source), coa_approved (1/0/null), coa_days_to_approval regression target
 - `enrich_dev(data_dir)` -- enriches dev_applications with year_submitted,
   has_community_meeting, spatial features (zoning, heritage, secondary plan), dev_approved and dev_appealed labels
 - `enrich_permits(data_dir)` -- enriches permits_cleared with permit_issuance_days

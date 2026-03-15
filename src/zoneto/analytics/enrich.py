@@ -14,7 +14,9 @@ import pyproj
 # ---------------------------------------------------------------------------
 _ZONING_URL = (
     "https://ckan0.cf.opendata.inter.prod-toronto.ca"
-    "/datastore/dump/76a2620f-a6b4-495d-8e41-c0ede1f8a928"
+    "/dataset/34927e44-fc11-4336-a8aa-a0dfb27658b7"
+    "/resource/d75fa1ed-cd04-4a0b-bb6d-2b928ffffa6e"
+    "/download/zoning-area-4326.geojson"
 )
 _HERITAGE_REGISTER_URL = (
     "https://ckan0.cf.opendata.inter.prod-toronto.ca"
@@ -108,10 +110,10 @@ def fetch_reference(data_dir: Path = Path("data")) -> None:
     ref = data_dir / "reference"
     ref.mkdir(parents=True, exist_ok=True)
 
-    # Zoning CSV
-    zoning_csv = ref / "zoning.csv"
-    if not zoning_csv.exists():
-        _download(_ZONING_URL, zoning_csv)
+    # Zoning GeoJSON (full-city, WGS84)
+    zoning_geojson = ref / "zoning.geojson"
+    if not zoning_geojson.exists():
+        _download(_ZONING_URL, zoning_geojson)
 
     # Heritage register (ZIP → extract)
     hr_dir = ref / "heritage_register"
@@ -146,6 +148,10 @@ def enrich_coa(data_dir: Path = Path("data")) -> int:
     """
     df = pl.read_parquet(data_dir / "coa", hive_partitioning=True)
 
+    # Deduplicate on application key (consolidated CSV may overlap individual year CSVs)
+    if "reference_file" in df.columns:
+        df = df.unique(subset=["reference_file"], keep="first", maintain_order=True)
+
     # Rename ward → ward_number (cast to str for consistency)
     df = df.rename({"ward": "ward_number"}).with_columns(
         pl.col("ward_number").cast(pl.Utf8)
@@ -155,14 +161,6 @@ def enrich_coa(data_dir: Path = Path("data")) -> int:
     df = df.with_columns(
         pl.col("in_date").dt.year().cast(pl.Int32).alias("year_submitted")
     )
-
-    # hearing_month from hearing_date (1–12); null if column absent or date null
-    if "hearing_date" in df.columns:
-        df = df.with_columns(
-            pl.col("hearing_date").dt.month().cast(pl.Int32).alias("hearing_month")
-        )
-    else:
-        df = df.with_columns(pl.lit(None, dtype=pl.Int32).alias("hearing_month"))
 
     # coa_approved label
     df = df.with_columns(
@@ -222,14 +220,9 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial;")
 
-    # Pre-read zoning CSV with polars (lines can be >700KB due to geometry)
-    # and register as Arrow table to avoid DuckDB's CSV sniffer limits.
-    zoning_df = pl.read_csv(
-        ref / "zoning.csv", infer_schema_length=0, truncate_ragged_lines=True
-    )
     con.register("apps", df.to_arrow())
-    con.register("zoning", zoning_df.to_arrow())
 
+    zoning_geojson_path = str(ref / "zoning.geojson").replace("'", "''")
     hr_shp = str(next((ref / "heritage_register").glob("*.shp"))).replace(
         "'",
         "''",
@@ -254,8 +247,8 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
                 p._rid,
                 z.ZN_ZONE AS zoning_class
             FROM pts p
-            LEFT JOIN zoning z
-                ON ST_Within(p.geom, ST_GeomFromGeoJSON(z.geometry))
+            LEFT JOIN ST_Read('{zoning_geojson_path}') z
+                ON ST_Within(p.geom, z.geom)
             WHERE p.geom IS NOT NULL
         ),
         hr_join AS (
@@ -367,6 +360,16 @@ def enrich_permits(data_dir: Path = Path("data")) -> int:
     Writes data/enriched/permits_cleared.parquet. Returns row count written.
     """
     df = pl.read_parquet(data_dir / "permits_cleared", hive_partitioning=True)
+
+    # Coerce string numeric columns to Float64 (remove comma thousands separators)
+    _str_num_cols = ["est_const_cost", "dwelling_units_created", "dwelling_units_lost"]
+    for _col in _str_num_cols:
+        if _col in df.columns and df[_col].dtype == pl.Utf8:
+            df = df.with_columns(
+                pl.col(_col)
+                .str.replace_all(",", "")
+                .cast(pl.Float64, strict=False)
+            )
 
     days = (
         (pl.col("issued_date") - pl.col("application_date"))

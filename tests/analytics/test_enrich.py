@@ -46,18 +46,18 @@ def test_fetch_reference_creates_dirs(
     """
 
     def fake_download(url: str, dest: Path) -> None:
-        # Write a minimal ZIP for ZIP URLs, plain text for CSV/GeoJSON
+        # Write a minimal ZIP for ZIP URLs, GeoJSON for geojson files
         if url.endswith(".zip"):
             with zipfile.ZipFile(dest, "w") as zf:
                 zf.writestr("dummy.shp", b"")
         else:
-            dest.write_bytes(b"id,geometry\n1,{}")
+            dest.write_bytes(b'{"type":"FeatureCollection","features":[]}')
 
     monkeypatch.setattr("zoneto.analytics.enrich._download", fake_download)
     fetch_reference(data_dir=tmp_path)
 
     ref = tmp_path / "reference"
-    assert (ref / "zoning.csv").exists()
+    assert (ref / "zoning.geojson").exists()
     assert (ref / "heritage_register").is_dir()
     assert (ref / "heritage_districts").is_dir()
     assert (ref / "secondary_plans.geojson").exists()
@@ -72,6 +72,7 @@ def _make_coa_parquet(tmp_path: Path) -> None:
     """Write minimal COA parquet to tmp_path/coa/year=2022/part0.parquet."""
     df = pl.DataFrame(
         {
+            "reference_file": ["REF-001", "REF-002", "REF-003", "REF-004"],
             "in_date": ["2022-01-15", "2022-03-01", "2022-06-10", "2022-09-01"],
             "finaldate": ["2022-04-20", "2022-05-15", None, "2022-11-30"],
             "hearing_date": ["2022-02-10", "2022-04-05", "2022-07-20", "2022-10-01"],
@@ -277,15 +278,39 @@ def test_enrich_coa_planning_district(tmp_path: Path) -> None:
     assert "North York" in districts
 
 
-def test_enrich_coa_hearing_month(tmp_path: Path) -> None:
-    """hearing_month should be extracted from hearing_date (1-12)."""
-    _make_coa_parquet(tmp_path)
+def test_enrich_coa_deduplicates_on_reference_file(tmp_path: Path) -> None:
+    """Rows sharing reference_file should be deduplicated (consolidated CSV overlap)."""
+    df = pl.DataFrame(
+        {
+            "reference_file": ["REF-001", "REF-001", "REF-002"],
+            "in_date": ["2022-01-15", "2022-01-15", "2022-03-01"],
+            "finaldate": ["2022-04-20", "2022-04-20", "2022-05-15"],
+            "hearing_date": ["2022-02-10", "2022-02-10", "2022-04-05"],
+            "c_of_a_descision": ["Approved", "Approved", "Refused"],
+            "ward": [5, 5, 10],
+            "application_type": ["Minor Variance", "Minor Variance", "Consent"],
+            "sub_type": ["A", "A", "B"],
+            "zoning_designation": ["RS", "RS", "RM"],
+            "planning_district": [
+                "Toronto & East York",
+                "Toronto & East York",
+                "North York",
+            ],
+            "source_name": ["coa"] * 3,
+            "year": [2022, 2022, 2022],
+        }
+    ).with_columns(
+        pl.col("in_date").str.to_date(),
+        pl.col("finaldate").str.to_date(),
+        pl.col("hearing_date").str.to_date(),
+    )
+    out = tmp_path / "coa" / "year=2022"
+    out.mkdir(parents=True)
+    df.write_parquet(out / "part0.parquet")
+
     enrich_coa(data_dir=tmp_path)
-    df = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
-    assert "hearing_month" in df.columns
-    # hearing_dates in fixture: 2022-02-10, 2022-04-05, 2022-07-20, 2022-10-01
-    months = df.sort("in_date")["hearing_month"].to_list()
-    assert months == [2, 4, 7, 10]
+    result = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
+    assert len(result) == 2  # REF-001 deduplicated to 1 row, REF-002 kept
 
 
 # ---------------------------------------------------------------------------
