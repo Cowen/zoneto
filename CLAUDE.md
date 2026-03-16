@@ -124,9 +124,12 @@ NOTE: Though the CKAN data source identifies `dev_applications` as retired, it s
 - `zoneto sync [--source NAME]` -- fetches one or all sources, writes Parquet
   to `./data/`. Prints colored output via Rich.
 - `zoneto status` -- prints a Rich table of row counts and last-modified times.
-- `zoneto enrich [--fetch-ref/--no-fetch-ref]` -- enriches raw parquet with outcome
+- `zoneto aic [--delay FLOAT]` -- scrapes AIC portal for OZ/SA decision milestone dates.
+  Caches results to `data/reference/aic_decisions.parquet`. Default delay: 1.0s/request.
+- `zoneto enrich [--fetch-ref/--no-fetch-ref] [--fetch-aic/--no-fetch-aic]` -- enriches raw parquet with outcome
   labels and spatial features. Downloads reference datasets to `data/reference/` if
-  `--fetch-ref` (default). Enriches COA, dev_applications, and permits_cleared.
+  `--fetch-ref` (default). Scrapes AIC portal for decision dates if `--fetch-aic` (default).
+  Enriches COA, dev_applications, and permits_cleared.
   Writes enriched parquet to `data/enriched/`.
 - `zoneto train [--model-dir PATH]` -- trains 3-4 outcome-prediction models from
   enriched parquet (permit model optional). Serializes to `models/*.joblib` (default: `./models`).
@@ -141,7 +144,7 @@ NOTE: Though the CKAN data source identifies `dev_applications` as retired, it s
 Canonical feature column lists for machine learning models:
 
 - `DEV_CAT_COLS` -- categorical features for development applications (application_type, ward_number, zoning_class, secondary_plan_name)
-- `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, has_parent_application)
+- `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, has_parent_application, is_combined_application)
 - `COA_CAT_COLS` -- categorical features for COA (application_type, sub_type, ward_number, zoning_designation, planning_district, work_type)
 - `COA_NUM_COLS` -- numeric features for COA (year_submitted)
 - `PERMIT_CAT_COLS` -- categorical features for permits (permit_type, structure_type, ward_grid)
@@ -156,9 +159,14 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
 - Heritage register (ZIP → SHP with WGS84 points) -- flag properties in register
 - Heritage districts (ZIP → SHP) -- flag properties in district
 - Secondary plans (GeoJSON) -- flag properties in plan area
+- AIC decisions (scraped via `fetch_aic_decisions()` — `data/reference/aic_decisions.parquet`)
+  Schema: `folderrsn (String), decision_date (Date|null), complete_date (Date|null), scraped_at (Date)`
+  OZ: "City Council Decision Made"; SA: "Statement of Approval Issued"
 
 **Enrichment functions**:
 - `fetch_reference(data_dir)` -- downloads/extracts all reference datasets (idempotent)
+- `fetch_aic_decisions(data_dir, *, delay=1.0)` -- scrapes AIC portal for OZ+SA milestone dates.
+  Idempotent: skips already-scraped `folderrsn` values. Returns count of newly scraped rows.
 - `enrich_coa(data_dir)` -- deduplicates on `reference_file` (handles consolidated CSV overlap),
   enriches COA with outcome labels, ward_number, year_submitted,
   planning_district (preserved from source), coa_approved (1/0/null), coa_days_to_approval regression target.
@@ -167,6 +175,10 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
   has_community_meeting, spatial features (zoning, heritage, secondary plan), dev_approved and dev_appealed labels.
   Dev application x/y are in EPSG:2952 (NAD83 / MTM Zone 10, City of Toronto internal CRS);
   `_spatial_join_dev` reprojects from EPSG:2952 → EPSG:4326 before joining zoning polygons.
+  New survival columns (requires AIC scrape): `dev_days_to_decision` (Int32|null, capped at 3,650 days),
+  `dev_decision_event` (Int8|null, 1=closed/0=active/null=non-OZ/SA),
+  `dev_days_observed` (Int32|null, days_to_decision for events; today-submitted for censored).
+  New feature: `is_combined_application` (Int8, 1 if OZ with OPA in description).
 - `enrich_permits(data_dir)` -- enriches permits_cleared with application_year (Int32,
   from application_date year) and permit_issuance_days (Int32, issued_date - application_date
   in calendar days). Drops rows with non-positive issuance days. Writes
@@ -183,6 +195,7 @@ Trains sklearn HistGradientBoosting classifiers and regressors from enriched par
 | `coa_approved.joblib` | CalibratedClassifierCV(HistGradientBoostingClassifier) | `coa_approved` | enriched coa | drop null |
 | `coa_days_to_approval.joblib` | HistGradientBoostingRegressor | `coa_days_to_approval` | enriched coa | drop null |
 | `permit_issuance_days.joblib` | HistGradientBoostingRegressor | `permit_issuance_days` | enriched permits_cleared | drop null (optional, skip if absent) |
+| `dev_days_to_decision.joblib` | GradientBoostingSurvivalAnalysis | `dev_days_observed`/`dev_decision_event` | enriched dev_applications | OZ+SA only (null event = excluded); trained only if AIC scraped |
 
 Note: `dev_applications_approved` is retired — dataset frozen (no new records), 97.3% class imbalance, ±0.267 AUC variance. Not trained or scored.
 
@@ -199,6 +212,8 @@ Note: `dev_applications_approved` is retired — dataset frozen (no new records)
 - `train_source(enriched_path, label_col, cat_cols, num_cols, model_name, model_dir, *, regressor, calibrate)` -- trains one model, returns row count. When calibrate=True (default) and not regressor and >= 20 rows, wraps pipeline in CalibratedClassifierCV.
 - `evaluate_source(enriched_path, label_col, cat_cols, num_cols, *, regressor, cv, year_col)` -- temporal CV evaluation; returns per-metric mean/std dict. Uses `TimeSeriesSplit` when `year_col` is set and present (avoids future-data leakage). Caps cv at n_samples - 1 for all splitter types. Classifiers return roc_auc, neg_brier_score, avg_precision; regressors return r2, neg_mae, neg_rmse.
 - `train_all(data_dir, model_dir)` -- trains 3-4 models (dev_approved retired; permit model optional), evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict}). Each metrics dict includes `production_ready` (bool): classifiers require roc_auc_mean >= 0.65; regressors require r2_mean >= 0.0.
+  Optional survival model (trained if `dev_days_observed` present in enriched dev parquet):
+  dev_days_to_decision. Survival model uses c-index threshold (>= 0.65) for `production_ready`.
 
 ### Scoring (`analytics/score.py`)
 
@@ -222,6 +237,7 @@ Batch and single-application inference from trained joblib models:
 |---|---|---|---|
 | dev_applications | `pred_dev_appealed` | int | 0/1 appeal prediction |
 | dev_applications | `prob_dev_appealed` | float | appeal probability |
+| dev_applications | `pred_dev_days_to_decision` | float | predicted median days to decision (survival model) |
 | coa | `pred_coa_approved` | int | 0/1 approval prediction |
 | coa | `prob_coa_approved` | float | approval probability |
 | coa | `pred_coa_days_to_approval` | float | predicted days to approval |
@@ -235,12 +251,13 @@ Computes feature importance for trained models via two methods:
 - `builtin=True`: gain-based importance from HistGradientBoosting internal tree structure (fast, no data needed). Unwraps `CalibratedClassifierCV` wrapper automatically.
 - `builtin=False` (default): permutation importance on enriched parquet (slower, more reliable)
 
-**Supported models** (`_MODEL_META` registry): dev_applications_appealed, coa_approved, coa_days_to_approval, permit_issuance_days (dev_applications_approved retired)
+**Supported models** (`_MODEL_META` registry): dev_applications_appealed, coa_approved, coa_days_to_approval, permit_issuance_days, dev_days_to_decision (dev_applications_approved retired)
 
 ## Dependencies
 
 | Package | Role |
 |---|---|
+| beautifulsoup4 | HTML parsing for AIC scraper |
 | duckdb | OLAP database for analytics |
 | httpx | HTTP client for CKAN API |
 | joblib | Serialization and parallel computing for ML models |
@@ -251,6 +268,7 @@ Computes feature importance for trained models via two methods:
 | pyproj | Coordinate reference system transformations |
 | rich | Terminal formatting |
 | scikit-learn | Machine learning library |
+| scikit-survival | Survival analysis (GradientBoostingSurvivalAnalysis, concordance_index_censored) |
 | shapely | Spatial geometry operations |
 | typer | CLI framework |
 
