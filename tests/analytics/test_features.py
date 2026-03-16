@@ -30,6 +30,7 @@ def test_dev_num_cols() -> None:
         "ward_pop_density",
         "ward_pct_detached",
         "has_parent_application",
+        "is_combined_application",
     ]
 
 
@@ -68,3 +69,7 @@ def test_permit_num_cols() -> None:
         "industrial",
         "institutional",
     ]
+
+
+def test_dev_num_cols_includes_is_combined_application() -> None:
+    assert "is_combined_application" in DEV_NUM_COLS

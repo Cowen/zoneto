@@ -36,6 +36,7 @@ def _make_dev_enriched(tmp_path: Path) -> Path:
             "ward_median_income": [75000.0, 80000.0, 78000.0, 75000.0, 70000.0],
             "ward_pop_density": [3500.0, 4200.0, 3800.0, 3500.0, 4500.0],
             "ward_pct_detached": [25.5, 20.0, 30.0, 25.5, 18.0],
+            "is_combined_application": [0, 0, 0, 0, 0],
             "dev_approved": [1, 0, 1, 1, 0],
             "dev_appealed": [0, None, 0, 1, 0],
         }
@@ -67,6 +68,7 @@ def _make_dev_enriched_large(tmp_path: Path) -> Path:
             "ward_median_income": ([75000.0 + i * 100 for i in range(n)]),
             "ward_pop_density": ([3500.0 + i * 50 for i in range(n)]),
             "ward_pct_detached": ([25.5 + i * 0.3 for i in range(n)]),
+            "is_combined_application": ([0, 1] * 15),
             "dev_approved": ([1, 0] * 15),
             "dev_appealed": ([0, 1] * 15),
         }
