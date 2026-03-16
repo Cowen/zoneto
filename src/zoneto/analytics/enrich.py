@@ -520,16 +520,24 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
     """
     df = pl.read_parquet(data_dir / "dev_applications", hive_partitioning=True)
 
-    # year_submitted from date_submitted (may be Date/Datetime or String)
+    # year_submitted and _submitted_date from date_submitted
+    # (may be Date/Datetime or String like "2022-08-09T00:00:00")
     _ds_dtype = df["date_submitted"].dtype
     if _ds_dtype.is_temporal():
         _year_expr = pl.col("date_submitted").dt.year().cast(pl.Int32)
+        _date_expr = pl.col("date_submitted").cast(pl.Date)
     else:
-        # String like "2022-08-09T00:00:00" — extract year from first 4 chars
+        # String like "2022-08-09T00:00:00" — slice to date part
         _year_expr = (
             pl.col("date_submitted").str.slice(0, 4).cast(pl.Int32, strict=False)
         )
-    df = df.with_columns(_year_expr.alias("year_submitted"))
+        _date_expr = (
+            pl.col("date_submitted").str.slice(0, 10).str.to_date(strict=False)
+        )
+    df = df.with_columns(
+        _year_expr.alias("year_submitted"),
+        _date_expr.alias("_submitted_date"),
+    )
 
     # has_community_meeting
     df = df.with_columns(
@@ -609,7 +617,7 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
             & pl.col("decision_date").is_not_null()
         )
         .then(
-            (pl.col("decision_date") - pl.col("date_submitted").cast(pl.Date))
+            (pl.col("decision_date") - pl.col("_submitted_date"))
             .dt.total_days()
             .cast(pl.Int32)
         )
@@ -626,7 +634,7 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         .otherwise(None)
         .cast(pl.Int32)
         .alias("dev_days_to_decision")
-    ).drop("_raw_days")
+    )
 
     # dev_decision_event: 1 = has decision, 0 = active, null = not OZ/SA
     df = df.with_columns(
@@ -640,19 +648,21 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         .alias("dev_decision_event")
     )
 
-    # dev_days_observed: days_to_decision for events; today-submitted for censored
+    # dev_days_observed: actual days to decision for events (uncapped, for survival
+    # model time axis); today-submitted for censored; null for non-OZ/SA.
     df = df.with_columns(
         pl.when(pl.col("dev_decision_event") == 1)
-        .then(pl.col("dev_days_to_decision"))
+        .then(pl.col("_raw_days"))  # use uncapped actual time for survival model
         .when(pl.col("dev_decision_event") == 0)
         .then(
-            (pl.lit(_today) - pl.col("date_submitted").cast(pl.Date))
+            (pl.lit(_today) - pl.col("_submitted_date"))
             .dt.total_days()
             .cast(pl.Int32)
         )
         .otherwise(None)
         .alias("dev_days_observed")
     )
+    df = df.drop("_raw_days", "_submitted_date")
 
     # is_combined_application: OZ with OPA in description field (case-insensitive)
     if "description" in df.columns:

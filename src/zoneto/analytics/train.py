@@ -55,6 +55,39 @@ def _fill_missing_cols(
     return df
 
 
+def _build_survival_pipeline(
+    cat_cols: list[str],
+    num_cols: list[str],
+) -> Pipeline:
+    """Pipeline for GradientBoostingSurvivalAnalysis with median imputation.
+
+    Unlike build_pipeline (which passes numeric NaN through for HistGradientBoosting),
+    this adds SimpleImputer(strategy='median') for numeric features because
+    GradientBoostingSurvivalAnalysis does not handle NaN natively.
+    """
+    _cat_pipe = Pipeline(
+        [
+            ("impute", SimpleImputer(strategy="constant", fill_value="__missing__")),
+            (
+                "encode",
+                OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1),
+            ),
+        ]
+    )
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("cat", _cat_pipe, cat_cols),
+            ("num", SimpleImputer(strategy="median"), num_cols),
+        ]
+    )
+    return Pipeline(
+        [
+            ("preprocessor", preprocessor),
+            ("estimator", GradientBoostingSurvivalAnalysis(random_state=42)),
+        ]
+    )
+
+
 def build_pipeline(
     cat_cols: list[str],
     num_cols: list[str],
@@ -167,7 +200,9 @@ def train_survival(
     Serializes to model_dir/<model_name>.joblib.
     """
     df = pl.read_parquet(enriched_path)
-    df = df.filter(pl.col(event_col).is_not_null())
+    df = df.filter(
+        pl.col(event_col).is_not_null() & pl.col(time_col).is_not_null()
+    )
 
     df = _fill_missing_cols(df, cat_cols, num_cols)
     all_cols = cat_cols + num_cols
@@ -180,8 +215,7 @@ def train_survival(
         dtype=[("event", bool), ("time", np.int32)],
     )
 
-    estimator = GradientBoostingSurvivalAnalysis(random_state=42)
-    pipe = build_pipeline(cat_cols=cat_cols, num_cols=num_cols, estimator=estimator)
+    pipe = _build_survival_pipeline(cat_cols, num_cols)
     pipe.fit(X, y)
 
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -204,7 +238,9 @@ def evaluate_survival(
     Uses TimeSeriesSplit when year_col is present (temporal CV to avoid leakage).
     Uses sksurv.metrics.concordance_index_censored for scoring each fold.
     """
-    df = pl.read_parquet(enriched_path).filter(pl.col(event_col).is_not_null())
+    df = pl.read_parquet(enriched_path).filter(
+        pl.col(event_col).is_not_null() & pl.col(time_col).is_not_null()
+    )
     df = _fill_missing_cols(df, cat_cols, num_cols)
 
     if year_col is not None and year_col in df.columns:
@@ -226,8 +262,7 @@ def evaluate_survival(
         dtype=[("event", bool), ("time", np.int32)],
     )
 
-    estimator = GradientBoostingSurvivalAnalysis(random_state=42)
-    pipeline = build_pipeline(cat_cols, num_cols, estimator)
+    pipeline = _build_survival_pipeline(cat_cols, num_cols)
 
     ci_scores: list[float] = []
     for train_idx, test_idx in cv_obj.split(X):
