@@ -5,12 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import joblib
+import numpy as np
 import polars as pl
 import pytest
 from sklearn.ensemble import (
     HistGradientBoostingClassifier,
     HistGradientBoostingRegressor,
 )
+from sksurv.ensemble import GradientBoostingSurvivalAnalysis
 
 from zoneto.analytics.features import (
     COA_CAT_COLS,
@@ -60,6 +62,39 @@ def _train_dummy_model(
     joblib.dump(pipe, model_dir / f"{model_name}.joblib")
 
 
+def _train_dummy_survival_model(
+    model_dir: Path,
+    model_name: str,
+    cat_cols: list[str],
+    num_cols: list[str],
+) -> None:
+    """Train a minimal GradientBoostingSurvivalAnalysis and save as .joblib."""
+    import pandas as pd
+
+    n = 20
+    X = pd.DataFrame({c: [str(i % 3) for i in range(n)] for c in cat_cols})
+    X[num_cols] = pd.DataFrame(
+        np.random.default_rng(1).integers(0, 5, size=(n, len(num_cols))).astype(float),
+        columns=num_cols,
+    )
+    events = np.array([True, False] * 10)
+    times = np.array([365 + i * 20 for i in range(n)], dtype=np.int32)
+    y = np.array(
+        list(zip(events, times)),
+        dtype=[("event", bool), ("time", np.int32)],
+    )
+
+    pipe = build_pipeline(
+        cat_cols=cat_cols,
+        num_cols=num_cols,
+        estimator=GradientBoostingSurvivalAnalysis(random_state=0),
+    )
+    pipe.fit(X, y)
+
+    model_dir.mkdir(parents=True, exist_ok=True)
+    joblib.dump(pipe, model_dir / f"{model_name}.joblib")
+
+
 def _setup_models(tmp_path: Path) -> Path:
     model_dir = tmp_path / "models"
     _train_dummy_model(
@@ -83,13 +118,16 @@ def _setup_models(tmp_path: Path) -> Path:
         PERMIT_NUM_COLS,
         regressor=True,
     )
+    _train_dummy_survival_model(
+        model_dir, "dev_days_to_decision", DEV_CAT_COLS, DEV_NUM_COLS
+    )
     return model_dir
 
 
 def _make_dev_enriched(tmp_path: Path) -> None:
     df = pl.DataFrame(
         {
-            "application_type": ["Rezoning", "Site Plan"],
+            "application_type": ["OZ", "SA"],
             "ward_number": ["Ward 1", "Ward 2"],
             "zoning_class": ["RS", None],
             "secondary_plan_name": [None, "Midtown"],
@@ -100,13 +138,16 @@ def _make_dev_enriched(tmp_path: Path) -> None:
             "in_secondary_plan": [0, 1],
             "has_community_meeting": [1, 0],
             "has_parent_application": [0, 1],
+            "is_combined_application": [1, 0],
             "ward_pct_renters": [45.5, 50.2],
             "ward_median_income": [75000.0, 80000.0],
             "ward_pop_density": [3500.0, 4200.0],
             "ward_pct_detached": [25.5, 20.0],
-            "is_combined_application": [0, 0],
             "dev_approved": [1, 0],
             "dev_appealed": [0, 1],
+            "dev_decision_event": [1, 0],
+            "dev_days_observed": [525, 800],
+            "dev_days_to_decision": [525, None],
         }
     )
     out = tmp_path / "enriched"
@@ -231,6 +272,8 @@ def test_score_one_returns_dict(tmp_path: Path) -> None:
             "in_heritage_district": 0,
             "in_secondary_plan": 0,
             "has_community_meeting": 0,
+            "has_parent_application": 0,
+            "is_combined_application": 0,
             "ward_pct_renters": 45.5,
             "ward_median_income": 75000.0,
             "ward_pop_density": 3500.0,
@@ -328,3 +371,54 @@ def test_score_one_permits(tmp_path: Path) -> None:
         model_dir=model_dir,
     )
     assert "pred_permit_issuance_days" in result
+
+
+def test_score_all_writes_pred_dev_days_to_decision(
+    tmp_path: Path,
+) -> None:
+    """score_all() appends pred_dev_days_to_decision when model exists."""
+    _make_dev_enriched(tmp_path)
+    _make_coa_enriched(tmp_path)
+    model_dir = _setup_models(tmp_path)
+
+    score_all(data_dir=tmp_path, model_dir=model_dir)
+
+    df = pl.read_parquet(tmp_path / "scores" / "dev_applications.parquet")
+    assert "pred_dev_days_to_decision" in df.columns
+    assert df["pred_dev_days_to_decision"].dtype in (pl.Float32, pl.Float64)
+
+
+def test_score_all_skips_survival_model_when_absent(
+    tmp_path: Path,
+) -> None:
+    """score_all() runs without pred_dev_days_to_decision when model .joblib absent."""
+    _make_dev_enriched(tmp_path)
+    _make_coa_enriched(tmp_path)
+    model_dir = tmp_path / "models"
+    # Only non-survival models
+    _train_dummy_model(
+        model_dir, "dev_applications_appealed", DEV_CAT_COLS, DEV_NUM_COLS
+    )
+    _train_dummy_model(model_dir, "coa_approved", COA_CAT_COLS, COA_NUM_COLS)
+    _train_dummy_model(
+        model_dir, "coa_days_to_approval", COA_CAT_COLS, COA_NUM_COLS, regressor=True
+    )
+
+    score_all(data_dir=tmp_path, model_dir=model_dir)
+
+    df = pl.read_parquet(tmp_path / "scores" / "dev_applications.parquet")
+    assert "pred_dev_days_to_decision" not in df.columns
+
+
+def test_score_one_returns_pred_dev_days_to_decision(
+    tmp_path: Path,
+) -> None:
+    """score_one() returns pred_dev_days_to_decision for dev_applications source."""
+    model_dir = _setup_models(tmp_path)
+    features = {col: 0 for col in DEV_CAT_COLS + DEV_NUM_COLS}
+    features["application_type"] = "OZ"
+
+    result = score_one("dev_applications", features, model_dir=model_dir)
+
+    assert "pred_dev_days_to_decision" in result
+    assert isinstance(result["pred_dev_days_to_decision"], float)

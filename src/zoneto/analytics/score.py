@@ -51,6 +51,34 @@ def _predict_regressor(pipe: Any, X: pd.DataFrame, pred_col: str) -> dict[str, l
     return {pred_col: preds}
 
 
+def _predict_survival_median(
+    pipe: Any, X: pd.DataFrame, pred_col: str
+) -> dict[str, list]:
+    """Extract median survival time (time at which S(t) crosses 0.5).
+
+    Falls back to max observed time if the survival function never crosses 0.5
+    within the fitted range (right-censored upper tail).
+
+    IMPORTANT: sklearn Pipeline does not proxy predict_survival_function().
+    We preprocess X through all pipeline steps except the last (estimator),
+    then call predict_survival_function() on the estimator directly.
+    """
+    # Preprocess X through all pipeline steps except the final estimator
+    X_transformed = pipe[:-1].transform(X)
+    # Call predict_survival_function on the estimator (last pipeline step)
+    survival_fns = pipe[-1].predict_survival_function(X_transformed)
+    medians: list[float] = []
+    for fn in survival_fns:
+        times = fn.x
+        probs = fn.y
+        crossing = times[probs <= 0.5]
+        if len(crossing) > 0:
+            medians.append(float(crossing[0]))
+        else:
+            medians.append(float(times[-1]))
+    return {pred_col: medians}
+
+
 def score_all(
     data_dir: Path = Path("data"),
     model_dir: Path = Path("models"),
@@ -73,6 +101,16 @@ def score_all(
             extra.update(_predict_regressor(pipe, X_dev, pred_col))
         else:
             extra.update(_predict_classifier(pipe, X_dev, pred_col, prob_col))
+
+    # Survival model (optional — skip if .joblib absent)
+    _surv_model_path = model_dir / "dev_days_to_decision.joblib"
+    if _surv_model_path.exists():
+        _surv_pipe = _load(model_dir, "dev_days_to_decision")
+        extra.update(
+            _predict_survival_median(
+                _surv_pipe, X_dev, "pred_dev_days_to_decision"
+            )
+        )
 
     df_dev_scored = df_dev.with_columns(
         [pl.Series(name=k, values=v) for k, v in extra.items()]
@@ -130,7 +168,7 @@ def score_one(
 ) -> dict[str, Any]:
     """Score a single application dict. Returns prediction dict.
 
-    source must be 'dev_applications' or 'coa'.
+    source must be 'dev_applications', 'coa', or 'permits_cleared'.
     """
     if source == "dev_applications":
         models = _DEV_MODELS
@@ -158,5 +196,17 @@ def score_one(
         else:
             result[pred_col] = int(pipe.predict(X)[0])
             result[prob_col] = float(pipe.predict_proba(X)[0, 1])
+
+    # Survival model for dev_applications (optional — skip if .joblib absent)
+    if source == "dev_applications":
+        _surv_path = model_dir / "dev_days_to_decision.joblib"
+        if _surv_path.exists():
+            _surv_pipe = _load(model_dir, "dev_days_to_decision")
+            _surv_preds = _predict_survival_median(
+                _surv_pipe, X, "pred_dev_days_to_decision"
+            )
+            result["pred_dev_days_to_decision"] = float(
+                _surv_preds["pred_dev_days_to_decision"][0]
+            )
 
     return result
