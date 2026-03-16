@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
-<!-- Freshness: 2026-03-15 -->
-<!-- Last reviewed against: main branch (P0 feature cleanup: removed postal_fsa, COA ward profiles, permit application_year, retired dev_approved model) -->
+<!-- Freshness: 2026-03-16 -->
+<!-- Last reviewed against: main branch (dev-days-to-decision phase: AIC scraper, survival model, is_combined_application feature) -->
 
 ## Purpose
 
@@ -19,6 +19,7 @@ just test                  # run pytest
 just lint                  # ruff check + ty check
 just sync                  # fetch all sources -> data/
 just status                # show row counts and last-modified
+just aic                   # scrape AIC portal for decision dates
 just enrich                # enrich raw parquet with spatial + outcome labels
 just train                 # train ML models from enriched parquet
 just score                 # batch inference -> data/scores/
@@ -52,10 +53,11 @@ within the last two weeks.
 
 ```
 src/zoneto/
-  cli.py             Typer app: `sync`, `status`, `enrich`, `train`, `score` commands
+  cli.py             Typer app: `sync`, `status`, `aic`, `enrich`, `train`, `score` commands
   models.py          CKANConfig pydantic model
   storage.py         write_source / source_row_counts / last_modified
   sources/
+    aic.py           AIC scraper: fetch_aic_decisions() for OZ/SA milestone dates
     base.py          Source protocol (runtime_checkable)
     ckan.py          CKANSource (datastore + bulk_csv modes)
     registry.py      SOURCES dict -- the single source of truth for datasets
@@ -131,8 +133,8 @@ NOTE: Though the CKAN data source identifies `dev_applications` as retired, it s
   `--fetch-ref` (default). Scrapes AIC portal for decision dates if `--fetch-aic` (default).
   Enriches COA, dev_applications, and permits_cleared.
   Writes enriched parquet to `data/enriched/`.
-- `zoneto train [--model-dir PATH]` -- trains 3-4 outcome-prediction models from
-  enriched parquet (permit model optional). Serializes to `models/*.joblib` (default: `./models`).
+- `zoneto train [--model-dir PATH]` -- trains 3-5 outcome-prediction models from
+  enriched parquet (permit and survival models optional). Serializes to `models/*.joblib` (default: `./models`).
   dev_applications_approved is retired (dataset frozen, 97.3% class imbalance).
 - `zoneto score [--model-dir PATH]` -- runs batch inference on enriched parquet using
   trained models. Writes scored parquet to `data/scores/`.
@@ -210,8 +212,10 @@ Note: `dev_applications_approved` is retired — dataset frozen (no new records)
 **Functions**:
 - `build_pipeline(cat_cols, num_cols, estimator)` -- returns unfitted Pipeline
 - `train_source(enriched_path, label_col, cat_cols, num_cols, model_name, model_dir, *, regressor, calibrate)` -- trains one model, returns row count. When calibrate=True (default) and not regressor and >= 20 rows, wraps pipeline in CalibratedClassifierCV.
+- `train_survival(enriched_path, time_col, event_col, cat_cols, num_cols, model_name, model_dir)` -- trains a GradientBoostingSurvivalAnalysis model. Filters to non-null event rows (OZ+SA only). Labels are structured numpy array `[(event: bool, time: int)]`. No calibration. Returns row count.
 - `evaluate_source(enriched_path, label_col, cat_cols, num_cols, *, regressor, cv, year_col)` -- temporal CV evaluation; returns per-metric mean/std dict. Uses `TimeSeriesSplit` when `year_col` is set and present (avoids future-data leakage). Caps cv at n_samples - 1 for all splitter types. Classifiers return roc_auc, neg_brier_score, avg_precision; regressors return r2, neg_mae, neg_rmse.
-- `train_all(data_dir, model_dir)` -- trains 3-4 models (dev_approved retired; permit model optional), evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict}). Each metrics dict includes `production_ready` (bool): classifiers require roc_auc_mean >= 0.65; regressors require r2_mean >= 0.0.
+- `evaluate_survival(enriched_path, time_col, event_col, cat_cols, num_cols, *, cv, year_col)` -- temporal CV for survival model. Uses `concordance_index_censored` for scoring each fold. Returns concordance_index_mean/std and n.
+- `train_all(data_dir, model_dir)` -- trains 3-5 models (dev_approved retired; permit and survival models optional), evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict}). Each metrics dict includes `production_ready` (bool): classifiers require roc_auc_mean >= 0.65; regressors require r2_mean >= 0.0.
   Optional survival model (trained if `dev_days_observed` present in enriched dev parquet):
   dev_days_to_decision. Survival model uses c-index threshold (>= 0.65) for `production_ready`.
 
@@ -252,6 +256,8 @@ Computes feature importance for trained models via two methods:
 - `builtin=False` (default): permutation importance on enriched parquet (slower, more reliable)
 
 **Supported models** (`_MODEL_META` registry): dev_applications_appealed, coa_approved, coa_days_to_approval, permit_issuance_days, dev_days_to_decision (dev_applications_approved retired)
+
+Note: `dev_days_to_decision` only supports `--builtin` mode (gain-based). Permutation importance raises an error because sksurv does not support standard sklearn scorers.
 
 ## Dependencies
 
