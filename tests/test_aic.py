@@ -178,6 +178,72 @@ def test_http_error_skipped_without_crash(
     assert count == 2
 
 
+def test_http_redirect_to_https_is_followed(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    """http:// URLs that 302-redirect to https:// are followed successfully."""
+    df = pl.DataFrame(
+        {
+            "folderrsn": ["111"],
+            "application_type": ["OZ"],
+            "application_url": ["http://app.toronto.ca/AIC/details?folderRsn=111"],
+            "status": ["Closed"],
+            "date_submitted": ["2021-01-01"],
+            "year": [2021],
+        }
+    ).with_columns(pl.col("date_submitted").str.to_date())
+    out = tmp_path / "dev_applications" / "year=2021"
+    out.mkdir(parents=True)
+    df.write_parquet(out / "part0.parquet")
+
+    https_url = "https://app.toronto.ca/AIC/details?folderRsn=111"
+    httpx_mock.add_response(
+        url="http://app.toronto.ca/AIC/details?folderRsn=111",
+        status_code=302,
+        headers={"Location": https_url},
+    )
+    httpx_mock.add_response(url=https_url, text=_OZ_MILESTONES_HTML)
+
+    count = fetch_aic_decisions(tmp_path, delay=0.0)
+
+    assert count == 1
+    result = pl.read_parquet(tmp_path / "reference" / "aic_decisions.parquet")
+    assert result["decision_date"][0] == date(2022, 11, 8)
+
+
+@pytest.mark.httpx_mock(assert_all_responses_were_requested=False)
+def test_duplicate_folderrsn_scraped_only_once(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    """Same folderrsn appearing in multiple year partitions is scraped exactly once."""
+    for year in (2021, 2022):
+        df = pl.DataFrame(
+            {
+                "folderrsn": ["111"],
+                "application_type": ["OZ"],
+                "application_url": [
+                    "https://app.toronto.ca/AIC/details?folderRsn=111"
+                ],
+                "status": ["Closed"],
+                "date_submitted": [f"{year}-01-01"],
+                "year": [year],
+            }
+        ).with_columns(pl.col("date_submitted").str.to_date())
+        p = tmp_path / "dev_applications" / f"year={year}"
+        p.mkdir(parents=True)
+        df.write_parquet(p / "part0.parquet")
+
+    # Two responses queued — second would be consumed if scraper hits the URL twice
+    httpx_mock.add_response(text=_OZ_MILESTONES_HTML)
+    httpx_mock.add_response(text=_OZ_MILESTONES_HTML)
+
+    count = fetch_aic_decisions(tmp_path, delay=0.0)
+
+    assert count == 1
+    result = pl.read_parquet(tmp_path / "reference" / "aic_decisions.parquet")
+    assert len(result) == 1
+
+
 def test_progress_logged_at_start_and_each_chunk(
     tmp_path: Path, httpx_mock: HTTPXMock, caplog: pytest.LogCaptureFixture
 ) -> None:

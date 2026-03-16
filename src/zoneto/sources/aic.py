@@ -86,8 +86,12 @@ def fetch_aic_decisions(
         existing = pl.DataFrame(schema=_OUTPUT_SCHEMA)
         scraped_ids = set()
 
-    # Scrape only un-cached rows
-    rows_to_scrape = df.filter(~pl.col("folderrsn").is_in(list(scraped_ids)))
+    # Scrape only un-cached rows, deduplicated (same folderrsn can appear in
+    # multiple year partitions)
+    rows_to_scrape = (
+        df.filter(~pl.col("folderrsn").is_in(list(scraped_ids)))
+        .unique(subset=["folderrsn"], keep="first", maintain_order=True)
+    )
     total_to_scrape = len(rows_to_scrape)
 
     logger.info(
@@ -110,7 +114,7 @@ def fetch_aic_decisions(
         new_rows = []
         logger.info("AIC: scraped %d / %d", total_new, total_to_scrape)
 
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
         for row in rows_to_scrape.iter_rows(named=True):
             folderrsn: str = row["folderrsn"]
             url: str = row["application_url"]
