@@ -17,7 +17,7 @@ from zoneto.analytics.enrich import (
 from zoneto.analytics.importance import feature_importance
 from zoneto.analytics.score import score_all
 from zoneto.analytics.train import train_all
-from zoneto.sources.aic import fetch_aic_decisions
+from zoneto.sources.aic import fetch_aic_decisions_arcgis
 from zoneto.sources.registry import SOURCES
 from zoneto.storage import last_modified, source_row_counts, write_source
 
@@ -88,12 +88,12 @@ def aic(
         typer.Option(help="Seconds to sleep between AIC requests."),
     ] = 1.0,
 ) -> None:
-    """Scrape AIC portal for OZ/SA decision milestone dates."""
+    """Fetch AIC decision dates via ArcGIS REST API (fast, structured data)."""
     logging.basicConfig(format="%(message)s", level=logging.INFO)
-    console.print("[bold]Scraping AIC decision dates...[/bold]")
+    console.print("[bold]Fetching AIC decision dates (ArcGIS)...[/bold]")
     try:
-        count = fetch_aic_decisions(DATA_DIR, delay=delay)
-        console.print(f"  [green]✓[/green] {count:,} applications scraped")
+        count = fetch_aic_decisions_arcgis(DATA_DIR)
+        console.print(f"  [green]✓[/green] {count:,} applications fetched")
     except Exception as exc:
         console.print(f"  [red]✗ {exc}[/red]")
         raise typer.Exit(code=1)
@@ -125,7 +125,7 @@ def enrich(
     if fetch_aic:
         console.print("[bold]Scraping AIC decision dates...[/bold]")
         try:
-            count = fetch_aic_decisions(DATA_DIR)
+            count = fetch_aic_decisions_arcgis(DATA_DIR)
             console.print(f"  [green]✓[/green] {count:,} applications scraped")
         except Exception as exc:
             console.print(f"  [red]✗ AIC scrape failed: {exc}[/red]")
