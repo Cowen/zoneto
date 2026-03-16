@@ -178,9 +178,28 @@ def test_http_error_skipped_without_crash(
     assert count == 2
 
 
-def test_chunk_size_writes_all_rows(
-    tmp_path: Path, httpx_mock: HTTPXMock
+def test_progress_logged_at_start_and_each_chunk(
+    tmp_path: Path, httpx_mock: HTTPXMock, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """fetch_aic_decisions logs a start message and a progress line per chunk."""
+    import logging
+
+    _make_dev_parquet(tmp_path)
+    httpx_mock.add_response(text=_OZ_MILESTONES_HTML)
+    httpx_mock.add_response(text=_SA_MILESTONES_HTML)
+    httpx_mock.add_response(text=_NO_DECISION_HTML)
+
+    with caplog.at_level(logging.INFO, logger="zoneto.sources.aic"):
+        fetch_aic_decisions(tmp_path, delay=0.0, chunk_size=2)
+
+    messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+    # Start message mentions total to scrape
+    assert any("3" in m for m in messages), "Expected total count in start message"
+    # Progress message after each flush mentions scraped so far
+    assert any("scraped" in m.lower() for m in messages)
+
+
+def test_chunk_size_writes_all_rows(tmp_path: Path, httpx_mock: HTTPXMock) -> None:
     """chunk_size smaller than total rows still writes all rows."""
     _make_dev_parquet(tmp_path)
     httpx_mock.add_response(text=_OZ_MILESTONES_HTML)

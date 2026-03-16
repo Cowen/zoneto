@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -88,6 +89,7 @@ def aic(
     ] = 1.0,
 ) -> None:
     """Scrape AIC portal for OZ/SA decision milestone dates."""
+    logging.basicConfig(format="%(message)s", level=logging.INFO)
     console.print("[bold]Scraping AIC decision dates...[/bold]")
     try:
         count = fetch_aic_decisions(DATA_DIR, delay=delay)

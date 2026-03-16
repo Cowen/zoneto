@@ -88,6 +88,13 @@ def fetch_aic_decisions(
 
     # Scrape only un-cached rows
     rows_to_scrape = df.filter(~pl.col("folderrsn").is_in(list(scraped_ids)))
+    total_to_scrape = len(rows_to_scrape)
+
+    logger.info(
+        "AIC: %d applications to scrape (%d already cached)",
+        total_to_scrape,
+        len(scraped_ids),
+    )
 
     new_rows: list[dict] = []
     total_new = 0
@@ -101,6 +108,7 @@ def fetch_aic_decisions(
         existing.write_parquet(ref_path)
         total_new += len(new_rows)
         new_rows = []
+        logger.info("AIC: scraped %d / %d", total_new, total_to_scrape)
 
     with httpx.Client(timeout=30.0) as client:
         for row in rows_to_scrape.iter_rows(named=True):
