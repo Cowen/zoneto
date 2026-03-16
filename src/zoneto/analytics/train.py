@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,8 @@ from sklearn.model_selection import (
 )
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OrdinalEncoder
+from sksurv.ensemble import GradientBoostingSurvivalAnalysis
+from sksurv.metrics import concordance_index_censored
 
 from zoneto.analytics.features import (
     COA_CAT_COLS,
@@ -33,6 +36,8 @@ from zoneto.analytics.features import (
     PERMIT_CAT_COLS,
     PERMIT_NUM_COLS,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _fill_missing_cols(
@@ -143,6 +148,108 @@ def train_source(
     model_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(model_to_save, model_dir / f"{model_name}.joblib")
     return len(df)
+
+
+def train_survival(
+    enriched_path: Path,
+    time_col: str,
+    event_col: str,
+    cat_cols: list[str],
+    num_cols: list[str],
+    model_name: str,
+    model_dir: Path,
+) -> int:
+    """Train a GradientBoostingSurvivalAnalysis model. Returns row count used.
+
+    Filters to rows where event_col is not null (OZ+SA only).
+    Labels are structured numpy array [(event: bool, time: int)].
+    No CalibratedClassifierCV wrapper — survival models are not calibrated.
+    Serializes to model_dir/<model_name>.joblib.
+    """
+    df = pl.read_parquet(enriched_path)
+    df = df.filter(pl.col(event_col).is_not_null())
+
+    df = _fill_missing_cols(df, cat_cols, num_cols)
+    all_cols = cat_cols + num_cols
+    X = df.select(all_cols).to_pandas()
+
+    events = df[event_col].cast(pl.Boolean).to_numpy()
+    times = df[time_col].cast(pl.Int32).to_numpy()
+    y = np.array(
+        list(zip(events, times)),
+        dtype=[("event", bool), ("time", np.int32)],
+    )
+
+    estimator = GradientBoostingSurvivalAnalysis(random_state=42)
+    pipe = build_pipeline(cat_cols=cat_cols, num_cols=num_cols, estimator=estimator)
+    pipe.fit(X, y)
+
+    model_dir.mkdir(parents=True, exist_ok=True)
+    joblib.dump(pipe, model_dir / f"{model_name}.joblib")
+    return len(df)
+
+
+def evaluate_survival(
+    enriched_path: Path,
+    time_col: str,
+    event_col: str,
+    cat_cols: list[str],
+    num_cols: list[str],
+    *,
+    cv: int = 5,
+    year_col: str | None = "year_submitted",
+) -> dict[str, float | int]:
+    """Cross-validate survival model. Returns concordance_index_mean/std and n.
+
+    Uses TimeSeriesSplit when year_col is present (temporal CV to avoid leakage).
+    Uses sksurv.metrics.concordance_index_censored for scoring each fold.
+    """
+    df = pl.read_parquet(enriched_path).filter(pl.col(event_col).is_not_null())
+    df = _fill_missing_cols(df, cat_cols, num_cols)
+
+    if year_col is not None and year_col in df.columns:
+        df = df.sort(year_col)
+
+    effective_cv = min(cv, len(df) - 1)
+    cv_obj: TimeSeriesSplit | KFold = (
+        TimeSeriesSplit(n_splits=effective_cv)
+        if year_col is not None and year_col in df.columns
+        else KFold(effective_cv)
+    )
+
+    all_cols = cat_cols + num_cols
+    X = df.select(all_cols).to_pandas()
+    events = df[event_col].cast(pl.Boolean).to_numpy()
+    times = df[time_col].cast(pl.Int32).to_numpy()
+    y = np.array(
+        list(zip(events, times)),
+        dtype=[("event", bool), ("time", np.int32)],
+    )
+
+    estimator = GradientBoostingSurvivalAnalysis(random_state=42)
+    pipeline = build_pipeline(cat_cols, num_cols, estimator)
+
+    ci_scores: list[float] = []
+    for train_idx, test_idx in cv_obj.split(X):
+        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+        try:
+            pipeline.fit(X_train, y_train)
+            risk_scores = pipeline.predict(X_test)
+            ci, *_ = concordance_index_censored(
+                y_test["event"], y_test["time"], risk_scores
+            )
+            ci_scores.append(ci)
+        except Exception as exc:
+            logger.warning("Survival CV fold failed: %s", exc)
+            ci_scores.append(float("nan"))
+
+    non_nan = [s for s in ci_scores if not np.isnan(s)]
+    return {
+        "concordance_index_mean": float(np.mean(non_nan)) if non_nan else float("nan"),
+        "concordance_index_std": float(np.std(non_nan)) if non_nan else float("nan"),
+        "n": len(df),
+    }
 
 
 def evaluate_source(
@@ -310,12 +417,42 @@ def train_all(
         )
         metrics[name] = eval_result
 
+    # --- Optional: survival model for dev_days_to_decision ---
+    # Only train if enriched dev parquet has dev_days_observed column (AIC scraped)
+    if dev_path.exists():
+        _dev_df_cols = pl.read_parquet(dev_path).columns
+        if "dev_days_observed" in _dev_df_cols:
+            surv_count = train_survival(
+                enriched_path=dev_path,
+                time_col="dev_days_observed",
+                event_col="dev_decision_event",
+                cat_cols=DEV_CAT_COLS,
+                num_cols=DEV_NUM_COLS,
+                model_name="dev_days_to_decision",
+                model_dir=model_dir,
+            )
+            counts["dev_days_to_decision"] = surv_count
+            surv_eval = evaluate_survival(
+                enriched_path=dev_path,
+                time_col="dev_days_observed",
+                event_col="dev_decision_event",
+                cat_cols=DEV_CAT_COLS,
+                num_cols=DEV_NUM_COLS,
+            )
+            metrics["dev_days_to_decision"] = surv_eval
+
     # Gate each model: mark production_ready based on metric thresholds.
     # Classifiers: roc_auc_mean >= 0.65. Regressors: r2_mean >= 0.0.
+    # Survival: concordance_index_mean >= 0.65.
     # NaN comparison is always False in Python, so NaN → not production_ready.
     reg_model_names = {job[4] for job in jobs if job[5]}
     for name, m in metrics.items():
-        if name in reg_model_names:
+        if name == "dev_days_to_decision":
+            # Survival model: gate on Harrell's c-index >= 0.65
+            m["production_ready"] = bool(
+                m.get("concordance_index_mean", float("nan")) >= 0.65
+            )
+        elif name in reg_model_names:
             m["production_ready"] = bool(m.get("r2_mean", float("nan")) >= 0.0)
         else:
             m["production_ready"] = bool(m.get("roc_auc_mean", 0.0) >= 0.65)

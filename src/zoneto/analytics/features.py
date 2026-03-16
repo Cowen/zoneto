@@ -18,6 +18,7 @@ DEV_NUM_COLS: list[str] = [
     "ward_pop_density",
     "ward_pct_detached",
     "has_parent_application",
+    "is_combined_application",
 ]
 
 COA_CAT_COLS: list[str] = [

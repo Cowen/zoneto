@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import zipfile
+from datetime import date as _date
 from pathlib import Path
 
 import duckdb
@@ -91,6 +92,8 @@ _COA_APPROVED_SET: frozenset[str] = frozenset(
     }
 )
 _COA_REFUSED_SET: frozenset[str] = frozenset({"refused"})
+_DEV_SURVIVAL_TYPES: frozenset[str] = frozenset({"OZ", "SA"})
+_DEV_DAYS_CAP = 3650
 
 
 def _label_from_sets(
@@ -587,6 +590,83 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
 
     # Enrich with ward profiles
     df = _enrich_ward_features(df, data_dir)
+
+    # --- AIC decision date join and survival labels ---
+    aic_path = data_dir / "reference" / "aic_decisions.parquet"
+    if aic_path.exists() and "folderrsn" in df.columns:
+        aic = pl.read_parquet(aic_path).select(["folderrsn", "decision_date"])
+        df = df.join(aic, on="folderrsn", how="left")
+    else:
+        df = df.with_columns(pl.lit(None, dtype=pl.Date).alias("decision_date"))
+
+    _today = _date.today()
+
+    # dev_days_to_decision: days from date_submitted to decision_date (OZ/SA only)
+    # Intermediate column _raw_days used to simplify capping logic.
+    df = df.with_columns(
+        pl.when(
+            pl.col("application_type").is_in(list(_DEV_SURVIVAL_TYPES))
+            & pl.col("decision_date").is_not_null()
+        )
+        .then(
+            (pl.col("decision_date") - pl.col("date_submitted").cast(pl.Date))
+            .dt.total_days()
+            .cast(pl.Int32)
+        )
+        .otherwise(None)
+        .alias("_raw_days")
+    )
+    df = df.with_columns(
+        pl.when(
+            pl.col("application_type").is_in(list(_DEV_SURVIVAL_TYPES))
+            & pl.col("decision_date").is_not_null()
+            & (pl.col("_raw_days") <= _DEV_DAYS_CAP)
+        )
+        .then(pl.col("_raw_days"))
+        .otherwise(None)
+        .cast(pl.Int32)
+        .alias("dev_days_to_decision")
+    ).drop("_raw_days")
+
+    # dev_decision_event: 1 = has decision, 0 = active, null = not OZ/SA
+    df = df.with_columns(
+        pl.when(~pl.col("application_type").is_in(list(_DEV_SURVIVAL_TYPES)))
+        .then(None)
+        .when(pl.col("decision_date").is_not_null())
+        .then(pl.lit(1, dtype=pl.Int8))
+        .when(pl.col("is_active") == 1)
+        .then(pl.lit(0, dtype=pl.Int8))
+        .otherwise(None)
+        .alias("dev_decision_event")
+    )
+
+    # dev_days_observed: days_to_decision for events; today-submitted for censored
+    df = df.with_columns(
+        pl.when(pl.col("dev_decision_event") == 1)
+        .then(pl.col("dev_days_to_decision"))
+        .when(pl.col("dev_decision_event") == 0)
+        .then(
+            (pl.lit(_today) - pl.col("date_submitted").cast(pl.Date))
+            .dt.total_days()
+            .cast(pl.Int32)
+        )
+        .otherwise(None)
+        .alias("dev_days_observed")
+    )
+
+    # is_combined_application: OZ with OPA in description field (case-insensitive)
+    if "description" in df.columns:
+        df = df.with_columns(
+            pl.when(
+                (pl.col("application_type") == "OZ")
+                & pl.col("description").str.to_uppercase().str.contains("OPA")
+            )
+            .then(pl.lit(1, dtype=pl.Int8))
+            .otherwise(pl.lit(0, dtype=pl.Int8))
+            .alias("is_combined_application")
+        )
+    else:
+        df = df.with_columns(pl.lit(0, dtype=pl.Int8).alias("is_combined_application"))
 
     out = data_dir / "enriched"
     out.mkdir(parents=True, exist_ok=True)

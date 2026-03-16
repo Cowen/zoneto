@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import struct
 import zipfile
+from datetime import date
 from pathlib import Path
 
 import polars as pl
@@ -243,6 +244,13 @@ def _make_dev_parquet(tmp_path: Path) -> None:
     """Write minimal dev_applications parquet."""
     df = pl.DataFrame(
         {
+            "folderrsn": ["AAA", "BBB", "CCC"],
+            "application_url": [
+                "https://app.toronto.ca/AIC/details?folderRsn=AAA",
+                "https://app.toronto.ca/AIC/details?folderRsn=BBB",
+                None,
+            ],
+            "description": ["Rezoning application", "Site plan approval", "Rezoning"],
             "date_submitted": ["2021-06-01", "2021-09-15", "2022-01-10"],
             "status": ["Closed", "Refused", "Under Review"],
             "application_type": ["Rezoning", "Site Plan", "Rezoning"],
@@ -259,6 +267,54 @@ def _make_dev_parquet(tmp_path: Path) -> None:
     out = tmp_path / "dev_applications" / "year=2021"
     out.mkdir(parents=True)
     df.write_parquet(out / "part0.parquet")
+
+
+def _make_dev_parquet_oz_sa(tmp_path: Path) -> None:
+    """Write dev_applications parquet with OZ+SA types for survival label tests."""
+    df = pl.DataFrame(
+        {
+            "folderrsn": ["AAA", "BBB", "CCC"],
+            "application_url": [
+                "https://app.toronto.ca/AIC/details?folderRsn=AAA",
+                "https://app.toronto.ca/AIC/details?folderRsn=BBB",
+                None,
+            ],
+            "description": ["OPA and rezoning", "Site plan approval", "Rezoning"],
+            "date_submitted": ["2021-06-01", "2021-09-15", "2022-01-10"],
+            "status": ["Closed", "Closed", "Under Review"],
+            "application_type": ["OZ", "SA", "OZ"],
+            "ward_number": ["Ward 1", "Ward 5", "Ward 10"],
+            "community_meeting_date": [None, None, None],
+            "parent_folder_number": [None, None, None],
+            "postal": ["M5V 2T6", "M4K 1A1", None],
+            "x": ["630000.0", "631000.0", None],
+            "y": ["4840000.0", "4841000.0", None],
+            "source_name": ["dev_applications"] * 3,
+            "year": [2021, 2021, 2022],
+        }
+    ).with_columns(pl.col("date_submitted").str.to_date())
+    out = tmp_path / "dev_applications" / "year=2021"
+    out.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(out / "part0.parquet")
+
+
+def _make_aic_decisions(tmp_path: Path) -> None:
+    """Write minimal aic_decisions.parquet with one OZ and one SA decision."""
+    ref_dir = tmp_path / "reference"
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    df = pl.DataFrame(
+        {
+            "folderrsn": ["AAA", "BBB"],
+            "decision_date": [date(2022, 11, 8), date(2021, 2, 14)],
+            "complete_date": [date(2021, 3, 15), date(2020, 6, 1)],
+            "scraped_at": [date(2026, 3, 15), date(2026, 3, 15)],
+        }
+    ).with_columns(
+        pl.col("decision_date").cast(pl.Date),
+        pl.col("complete_date").cast(pl.Date),
+        pl.col("scraped_at").cast(pl.Date),
+    )
+    df.write_parquet(ref_dir / "aic_decisions.parquet")
 
 
 def test_enrich_dev_creates_output(
@@ -699,3 +755,122 @@ def test_enrich_permits_application_year(tmp_path: Path) -> None:
     assert "application_year" in df.columns
     assert df["application_year"].dtype == pl.Int32
     assert df["application_year"][0] == 2022
+
+
+# ---------------------------------------------------------------------------
+# enrich_dev — survival label tests
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_dev_survival_labels_for_oz_with_decision(
+    tmp_path: Path,
+    stub_spatial_join: None,
+) -> None:
+    """OZ with decision date: dev_days_to_decision computed; dev_decision_event=1."""
+    _make_dev_parquet_oz_sa(tmp_path)
+    _make_aic_decisions(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+    oz_row = df.filter(pl.col("folderrsn") == "AAA")
+    # date_submitted=2021-06-01, decision_date=2022-11-08 → 525 days
+    assert oz_row["dev_days_to_decision"][0] == 525
+    assert oz_row["dev_decision_event"][0] == 1
+    assert oz_row["dev_days_observed"][0] == 525
+
+
+def test_enrich_dev_decision_event_zero_for_active(
+    tmp_path: Path,
+    stub_spatial_join: None,
+) -> None:
+    """Active OZ: dev_decision_event=0; dev_days_observed=today minus date_submitted."""
+    _make_dev_parquet_oz_sa(tmp_path)
+    _make_aic_decisions(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+    active_row = df.filter(pl.col("folderrsn") == "CCC")
+    assert active_row["dev_decision_event"][0] == 0
+    assert active_row["dev_days_to_decision"][0] is None
+    assert active_row["dev_days_observed"][0] is not None
+    assert active_row["dev_days_observed"][0] > 0
+
+
+def test_enrich_dev_days_to_decision_cap_at_3650(
+    tmp_path: Path,
+    stub_spatial_join: None,
+) -> None:
+    """Values > 3650 days become null (outlier cap)."""
+    df = pl.DataFrame(
+        {
+            "folderrsn": ["OLD"],
+            "application_url": ["https://app.toronto.ca/AIC/details?folderRsn=OLD"],
+            "description": ["Rezoning"],
+            "date_submitted": ["2010-01-01"],
+            "status": ["Closed"],
+            "application_type": ["OZ"],
+            "ward_number": ["Ward 1"],
+            "community_meeting_date": [None],
+            "parent_folder_number": [None],
+            "postal": [None],
+            "x": [None],
+            "y": [None],
+            "source_name": ["dev_applications"],
+            "year": [2010],
+        },
+        schema={
+            "folderrsn": pl.Utf8,
+            "application_url": pl.Utf8,
+            "description": pl.Utf8,
+            "date_submitted": pl.Utf8,
+            "status": pl.Utf8,
+            "application_type": pl.Utf8,
+            "ward_number": pl.Utf8,
+            "community_meeting_date": pl.Utf8,
+            "parent_folder_number": pl.Utf8,
+            "postal": pl.Utf8,
+            "x": pl.Utf8,
+            "y": pl.Utf8,
+            "source_name": pl.Utf8,
+            "year": pl.Int32,
+        },
+    ).with_columns(pl.col("date_submitted").str.to_date())
+    out = tmp_path / "dev_applications" / "year=2010"
+    out.mkdir(parents=True)
+    df.write_parquet(out / "part0.parquet")
+
+    ref_dir = tmp_path / "reference"
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    decisions = pl.DataFrame(
+        {
+            "folderrsn": ["OLD"],
+            "decision_date": [date(2020, 6, 1)],  # ~3804 days after 2010-01-01
+            "complete_date": [None],
+            "scraped_at": [date(2026, 3, 15)],
+        }
+    ).with_columns(
+        pl.col("decision_date").cast(pl.Date),
+        pl.col("complete_date").cast(pl.Date),
+        pl.col("scraped_at").cast(pl.Date),
+    )
+    decisions.write_parquet(ref_dir / "aic_decisions.parquet")
+
+    enrich_dev(data_dir=tmp_path)
+    df_out = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+    old_row = df_out.filter(pl.col("folderrsn") == "OLD")
+    assert old_row["dev_days_to_decision"][0] is None
+
+
+def test_enrich_dev_is_combined_application_oz_opa(
+    tmp_path: Path,
+    stub_spatial_join: None,
+) -> None:
+    """OZ application with 'OPA' in description: is_combined_application=1."""
+    _make_dev_parquet_oz_sa(tmp_path)
+    _make_aic_decisions(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+    oz_row = df.filter(pl.col("folderrsn") == "AAA")
+    # description="OPA and rezoning", application_type="OZ"
+    assert oz_row["is_combined_application"][0] == 1
+    # SA row should be 0 (not OZ type)
+    sa_row = df.filter(pl.col("folderrsn") == "BBB")
+    assert sa_row["is_combined_application"][0] == 0

@@ -8,6 +8,10 @@ sync:
 status:
     uv run zoneto status
 
+# Scrape AIC portal for decision dates
+aic:
+    uv run zoneto aic
+
 # Enrich data
 enrich:
     uv run zoneto enrich
@@ -28,7 +32,7 @@ importance-all:
 importance model:
     uv run zoneto importance {{model}}
 
-# Run the full analytics pipeline: enrich → train → score
+# Run the full analytics pipeline: enrich (includes AIC scrape) → train → score
 pipeline:
     just enrich
     just train

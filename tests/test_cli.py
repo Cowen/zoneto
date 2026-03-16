@@ -73,3 +73,60 @@ def test_sync_continues_after_source_exception(
     result = runner.invoke(app, ["sync"])
     assert result.exit_code == 0  # does not abort on error
     assert good_source.fetch.called  # good source was still attempted
+
+
+def test_aic_command_calls_fetch_aic_decisions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """zoneto aic calls fetch_aic_decisions and exits 0."""
+    monkeypatch.setattr("zoneto.cli.DATA_DIR", tmp_path)
+    mock_fetch = MagicMock(return_value=42)
+    monkeypatch.setattr("zoneto.cli.fetch_aic_decisions", mock_fetch)
+
+    result = runner.invoke(app, ["aic"])
+
+    assert result.exit_code == 0
+    assert mock_fetch.called
+    assert "42" in result.output
+
+
+def test_enrich_no_fetch_aic_skips_aic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """zoneto enrich --no-fetch-aic skips AIC fetch."""
+    monkeypatch.setattr("zoneto.cli.DATA_DIR", tmp_path)
+    mock_fetch_aic = MagicMock(return_value=0)
+    monkeypatch.setattr("zoneto.cli.fetch_aic_decisions", mock_fetch_aic)
+    mock_enrich_dev = MagicMock(return_value=0)
+    monkeypatch.setattr("zoneto.cli.enrich_dev", mock_enrich_dev)
+    mock_enrich_coa = MagicMock(return_value=0)
+    monkeypatch.setattr("zoneto.cli.enrich_coa", mock_enrich_coa)
+    mock_enrich_permits = MagicMock(return_value=0)
+    monkeypatch.setattr("zoneto.cli.enrich_permits", mock_enrich_permits)
+    monkeypatch.setattr("zoneto.cli.fetch_reference", MagicMock(return_value=None))
+
+    result = runner.invoke(app, ["enrich", "--no-fetch-aic"])
+
+    assert result.exit_code == 0
+    assert not mock_fetch_aic.called
+
+
+def test_enrich_fetch_aic_default_calls_aic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """zoneto enrich (default) calls fetch_aic_decisions."""
+    monkeypatch.setattr("zoneto.cli.DATA_DIR", tmp_path)
+    mock_fetch_aic = MagicMock(return_value=5)
+    monkeypatch.setattr("zoneto.cli.fetch_aic_decisions", mock_fetch_aic)
+    mock_enrich_dev = MagicMock(return_value=0)
+    monkeypatch.setattr("zoneto.cli.enrich_dev", mock_enrich_dev)
+    mock_enrich_coa = MagicMock(return_value=0)
+    monkeypatch.setattr("zoneto.cli.enrich_coa", mock_enrich_coa)
+    mock_enrich_permits = MagicMock(return_value=0)
+    monkeypatch.setattr("zoneto.cli.enrich_permits", mock_enrich_permits)
+    monkeypatch.setattr("zoneto.cli.fetch_reference", MagicMock(return_value=None))
+
+    result = runner.invoke(app, ["enrich"])
+
+    assert result.exit_code == 0
+    assert mock_fetch_aic.called

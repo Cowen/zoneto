@@ -1,27 +1,30 @@
 {
-  "_meta": { "updated": "2026-03-15" },
+  "_meta": {
+    "updated": "2026-03-15"
+  },
   "dev_applications_approved": {
-    "roc_auc_mean": 0.5962,
-    "brier_score_mean": 0.0251,
-    "avg_precision_mean": 0.9835
+    "roc_auc_mean": 0.7187,
+    "brier_score_mean": 0.0235,
+    "avg_precision_mean": 0.9913
   },
   "dev_applications_appealed": {
-    "roc_auc_mean": 0.8678,
-    "brier_score_mean": 0.1702,
-    "avg_precision_mean": 0.8520
+    "roc_auc_mean": 0.874,
+    "brier_score_mean": 0.1671,
+    "avg_precision_mean": 0.8563
   },
   "coa_approved": {
-    "roc_auc_mean": 0.5341,
-    "brier_score_mean": 0.0680,
-    "avg_precision_mean": 0.9429
+    "roc_auc_mean": 0.5105,
+    "brier_score_mean": 0.0348,
+    "avg_precision_mean": 0.973
   },
   "coa_days_to_approval": {
-    "mae_mean": 84.9063,
-    "rmse_mean": 135.6683
+    "r2_mean": -0.3512,
+    "mae_mean": 56.716,
+    "rmse_mean": 72.1551
   },
   "permit_issuance_days": {
-    "r2_mean": 0.0297,
-    "mae_mean": 55.2710,
-    "rmse_mean": 95.9388
+    "r2_mean": 0.0386,
+    "mae_mean": 48.9936,
+    "rmse_mean": 93.5635
   }
 }

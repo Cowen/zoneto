@@ -13,6 +13,7 @@ from sklearn.ensemble import (
     HistGradientBoostingClassifier,
     HistGradientBoostingRegressor,
 )
+from sksurv.ensemble import GradientBoostingSurvivalAnalysis
 
 from zoneto.analytics.features import (
     COA_CAT_COLS,
@@ -26,6 +27,37 @@ from zoneto.analytics.train import build_pipeline
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+def _train_dummy_survival_model(
+    model_dir: Path,
+    model_name: str,
+    cat_cols: list[str],
+    num_cols: list[str],
+) -> None:
+    """Train a minimal GradientBoostingSurvivalAnalysis and save as .joblib."""
+    n = 20
+    X = pd.DataFrame({c: [str(i % 3) for i in range(n)] for c in cat_cols})
+    X[num_cols] = pd.DataFrame(
+        np.random.default_rng(1).integers(0, 5, size=(n, len(num_cols))).astype(float),
+        columns=num_cols,
+    )
+    events = np.array([True, False] * 10)
+    times = np.array([365 + i * 20 for i in range(n)], dtype=np.int32)
+    y = np.array(
+        list(zip(events, times)),
+        dtype=[("event", bool), ("time", np.int32)],
+    )
+
+    pipe = build_pipeline(
+        cat_cols=cat_cols,
+        num_cols=num_cols,
+        estimator=GradientBoostingSurvivalAnalysis(random_state=0),
+    )
+    pipe.fit(X, y)
+
+    model_dir.mkdir(parents=True, exist_ok=True)
+    joblib.dump(pipe, model_dir / f"{model_name}.joblib")
 
 
 @pytest.fixture()
@@ -70,6 +102,9 @@ def model_dir(tmp_path: Path) -> Path:
     coa_reg_pipe.fit(X_coa, y_days)
     joblib.dump(coa_reg_pipe, d / "coa_days_to_approval.joblib")
 
+    # DEV survival model
+    _train_dummy_survival_model(d, "dev_days_to_decision", DEV_CAT_COLS, DEV_NUM_COLS)
+
     return d
 
 
@@ -99,6 +134,7 @@ def enriched_dir(tmp_path: Path) -> Path:
             "ward_median_income": [75000.0, 80000.0] * 5,
             "ward_pop_density": [3500.0, 4200.0] * 5,
             "ward_pct_detached": [25.5, 20.0] * 5,
+            "is_combined_application": [0, 0] * 5,
             "dev_approved": [1, 0] * 5,
             "dev_appealed": [0, 1] * 5,
         }
@@ -207,3 +243,37 @@ def test_feature_importance_coa_regressor(model_dir: Path, enriched_dir: Path) -
 def test_feature_importance_unknown_model(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Unknown model"):
         feature_importance("nonexistent_model", data_dir=tmp_path, model_dir=tmp_path)
+
+
+def test_feature_importance_survival_builtin(model_dir: Path, tmp_path: Path) -> None:
+    """Builtin importance works for survival model without enriched data."""
+    result = feature_importance(
+        "dev_days_to_decision",
+        data_dir=tmp_path,
+        model_dir=model_dir,
+        builtin=True,
+    )
+    assert isinstance(result, pl.DataFrame)
+    assert result.columns == ["feature", "importance_mean", "importance_std"]
+    assert len(result) == len(DEV_CAT_COLS) + len(DEV_NUM_COLS)
+    # importance_std is always 0.0 for builtin
+    assert result["importance_std"].to_list() == [0.0] * len(result)
+    # importances should be descending
+    means = result["importance_mean"].to_list()
+    assert means == sorted(means, reverse=True)
+
+
+def test_feature_importance_survival_permutation_raises(
+    model_dir: Path, enriched_dir: Path
+) -> None:
+    """Permutation importance raises ValueError for survival model."""
+    with pytest.raises(
+        ValueError,
+        match="Permutation importance is not supported for the survival model",
+    ):
+        feature_importance(
+            "dev_days_to_decision",
+            data_dir=enriched_dir,
+            model_dir=model_dir,
+            builtin=False,
+        )
