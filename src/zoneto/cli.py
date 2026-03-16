@@ -16,6 +16,7 @@ from zoneto.analytics.enrich import (
 from zoneto.analytics.importance import feature_importance
 from zoneto.analytics.score import score_all
 from zoneto.analytics.train import train_all
+from zoneto.sources.aic import fetch_aic_decisions
 from zoneto.sources.registry import SOURCES
 from zoneto.storage import last_modified, source_row_counts, write_source
 
@@ -80,6 +81,23 @@ def status() -> None:
 
 
 @app.command()
+def aic(
+    delay: Annotated[
+        float,
+        typer.Option(help="Seconds to sleep between AIC requests."),
+    ] = 1.0,
+) -> None:
+    """Scrape AIC portal for OZ/SA decision milestone dates."""
+    console.print("[bold]Scraping AIC decision dates...[/bold]")
+    try:
+        count = fetch_aic_decisions(DATA_DIR, delay=delay)
+        console.print(f"  [green]✓[/green] {count:,} applications scraped")
+    except Exception as exc:
+        console.print(f"  [red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def enrich(
     fetch_ref: Annotated[
         bool,
@@ -88,12 +106,28 @@ def enrich(
             help="Download reference datasets first.",
         ),
     ] = True,
+    fetch_aic: Annotated[
+        bool,
+        typer.Option(
+            "--fetch-aic/--no-fetch-aic",
+            help="Scrape AIC portal for decision dates before enriching.",
+        ),
+    ] = True,
 ) -> None:
     """Enrich raw Parquet with spatial features and outcome labels."""
     if fetch_ref:
         console.print("[bold]Fetching reference datasets...[/bold]")
         fetch_reference(DATA_DIR)
         console.print("  [green]✓[/green] Reference data ready")
+
+    if fetch_aic:
+        console.print("[bold]Scraping AIC decision dates...[/bold]")
+        try:
+            count = fetch_aic_decisions(DATA_DIR)
+            console.print(f"  [green]✓[/green] {count:,} applications scraped")
+        except Exception as exc:
+            console.print(f"  [red]✗ AIC scrape failed: {exc}[/red]")
+            # Non-fatal: enrich can proceed without AIC data
 
     for label, fn in [
         ("COA", enrich_coa),
@@ -134,6 +168,12 @@ def train(
                     f"AUC {metric['roc_auc_mean']:.3f}±{metric['roc_auc_std']:.3f}"
                 )
                 secondary = f"Brier {metric['brier_score_mean']:.3f}"
+            elif "concordance_index_mean" in metric:
+                primary = (
+                    f"C-index {metric['concordance_index_mean']:.3f}"
+                    f"±{metric['concordance_index_std']:.3f}"
+                )
+                secondary = ""
             else:
                 primary = f"R² {metric['r2_mean']:.3f}±{metric['r2_std']:.3f}"
                 secondary = f"MAE {metric['mae_mean']:.0f}d"
