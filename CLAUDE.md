@@ -23,9 +23,30 @@ just enrich                # enrich raw parquet with spatial + outcome labels
 just train                 # train ML models from enriched parquet
 just score                 # batch inference -> data/scores/
 just pipeline              # enrich -> train -> score in sequence
+just importance <model>    # permutation feature importance for one model
+just importance-all        # feature importance for all models
+just regression            # performance regression tests (synthetic data, CI-safe)
+just regression-integration # performance regression tests against real enriched data
+just update-baselines      # regenerate tests/fixtures/model_baselines.json
+just fmt                   # ruff format
 ```
 
+Run `just` with no arguments to list all available tasks. The full task definitions
+are in `justfile` at the repo root.
+
 The CLI entrypoint is `zoneto` (mapped to `zoneto.cli:app` in pyproject.toml).
+
+### Checking data freshness
+
+Always run `just status` before analyzing model results or running the pipeline.
+It shows row counts and last-modified timestamps for all four sources.
+
+**COA freshness caveat:** The `coa` source will always show a narrow date range
+(in_date spanning ~2014–2023, heavily concentrated in 2022) even when fully synced.
+This is the complete picture from the CKAN source — the city only publishes closed
+application CSVs for 2022 and 2023. A 2022-heavy distribution is **not** a sign
+the data needs re-syncing. A source is fresh if its Last Modified timestamp is
+within the last two weeks.
 
 ## Architecture
 
@@ -140,7 +161,8 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
 - `fetch_reference(data_dir)` -- downloads/extracts all reference datasets (idempotent)
 - `enrich_coa(data_dir)` -- deduplicates on `reference_file` (handles consolidated CSV overlap),
   enriches COA with outcome labels, ward_number, year_submitted,
-  planning_district (preserved from source), coa_approved (1/0/null), coa_days_to_approval regression target
+  planning_district (preserved from source), coa_approved (1/0/null), coa_days_to_approval regression target.
+  `coa_days_to_approval` is capped at 730 days (values beyond → null); >730d outliers are near-certain data errors.
 - `enrich_dev(data_dir)` -- enriches dev_applications with year_submitted,
   has_community_meeting, spatial features (zoning, heritage, secondary plan), dev_approved and dev_appealed labels.
   Dev application x/y are in EPSG:2952 (NAD83 / MTM Zone 10, City of Toronto internal CRS);
@@ -176,7 +198,7 @@ Note: `dev_applications_approved` is retired — dataset frozen (no new records)
 - `build_pipeline(cat_cols, num_cols, estimator)` -- returns unfitted Pipeline
 - `train_source(enriched_path, label_col, cat_cols, num_cols, model_name, model_dir, *, regressor, calibrate)` -- trains one model, returns row count. When calibrate=True (default) and not regressor and >= 20 rows, wraps pipeline in CalibratedClassifierCV.
 - `evaluate_source(enriched_path, label_col, cat_cols, num_cols, *, regressor, cv, year_col)` -- temporal CV evaluation; returns per-metric mean/std dict. Uses `TimeSeriesSplit` when `year_col` is set and present (avoids future-data leakage). Caps cv at n_samples - 1 for all splitter types. Classifiers return roc_auc, neg_brier_score, avg_precision; regressors return r2, neg_mae, neg_rmse.
-- `train_all(data_dir, model_dir)` -- trains 3-4 models (dev_approved retired; permit model optional), evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict})
+- `train_all(data_dir, model_dir)` -- trains 3-4 models (dev_approved retired; permit model optional), evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict}). Each metrics dict includes `production_ready` (bool): classifiers require roc_auc_mean >= 0.65; regressors require r2_mean >= 0.0.
 
 ### Scoring (`analytics/score.py`)
 

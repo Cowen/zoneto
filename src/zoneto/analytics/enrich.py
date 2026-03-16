@@ -373,10 +373,14 @@ def enrich_coa(data_dir: Path = Path("data")) -> int:
         .alias("coa_approved")
     )
 
-    # coa_days_to_approval — only for approved rows with both dates present
+    # coa_days_to_approval — only for approved rows with both dates present.
+    # Cap at 730 days (2 years): outliers beyond this are almost certainly data
+    # errors (legacy applications closed years after filing) that destabilize
+    # the regression across CV folds.
+    _CAP_DAYS = 730
     days = (pl.col("finaldate") - pl.col("in_date")).dt.total_days().cast(pl.Int32)
     df = df.with_columns(
-        pl.when(pl.col("coa_approved") == 1)
+        pl.when((pl.col("coa_approved") == 1) & (days <= _CAP_DAYS))
         .then(days)
         .otherwise(None)
         .alias("coa_days_to_approval")

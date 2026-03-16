@@ -407,6 +407,51 @@ def test_enrich_dev_postal_fsa(tmp_path, stub_spatial_join):
 # ---------------------------------------------------------------------------
 
 
+def test_enrich_coa_caps_days_at_730(tmp_path: Path) -> None:
+    """coa_days_to_approval > 730 days should be null (outlier exclusion).
+
+    A 2,992-day outlier destabilizes the regression across CV folds.
+    Cap at 730 days (2 years); values beyond are treated as exceptional/null.
+    """
+    # Build a COA parquet with one row spanning >730 days (2014 → 2022 = ~2,992d)
+    df = pl.DataFrame(
+        {
+            "reference_file": ["REF-LONG", "REF-SHORT"],
+            "in_date": ["2014-01-01", "2022-01-15"],
+            "finaldate": ["2022-03-01", "2022-04-20"],
+            "hearing_date": ["2014-02-01", "2022-02-10"],
+            "c_of_a_descision": ["Approved", "Approved"],
+            "ward": [5, 10],
+            "application_type": ["Minor Variance", "Minor Variance"],
+            "sub_type": ["A", "A"],
+            "zoning_designation": ["RS", "RS"],
+            "planning_district": ["Toronto & East York", "Toronto & East York"],
+            "source_name": ["coa", "coa"],
+            "year": [2014, 2022],
+        }
+    ).with_columns(
+        pl.col("in_date").str.to_date(),
+        pl.col("finaldate").str.to_date(),
+        pl.col("hearing_date").str.to_date(),
+    )
+    out = tmp_path / "coa" / "year=2014"
+    out.mkdir(parents=True)
+    df.write_parquet(out / "part0.parquet")
+
+    enrich_coa(data_dir=tmp_path)
+    result = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
+
+    # The long row (>730d) should have null coa_days_to_approval
+    long_row = result.filter(pl.col("reference_file") == "REF-LONG")
+    assert long_row["coa_days_to_approval"][0] is None, (
+        "coa_days_to_approval > 730 days should be null (outlier cap)"
+    )
+
+    # The short row (95 days) should be preserved
+    short_row = result.filter(pl.col("reference_file") == "REF-SHORT")
+    assert short_row["coa_days_to_approval"][0] == 95
+
+
 def test_enrich_coa_planning_district(tmp_path: Path) -> None:
     """planning_district should be preserved as a feature column."""
     _make_coa_parquet(tmp_path)

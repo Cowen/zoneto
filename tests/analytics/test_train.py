@@ -642,6 +642,24 @@ def test_train_source_calibration_false_produces_pipeline(tmp_path: Path) -> Non
     assert isinstance(model, Pipeline)
 
 
+def test_train_all_metrics_has_production_ready(tmp_path: Path) -> None:
+    """train_all should add a production_ready bool to each model's metrics dict.
+
+    Thresholds: classifiers need roc_auc_mean >= 0.65; regressors need r2_mean >= 0.0.
+    """
+    _make_dev_enriched(tmp_path)
+    _make_coa_enriched(tmp_path)
+    model_dir = tmp_path / "models"
+    _, metrics = train_all(data_dir=tmp_path, model_dir=model_dir)
+    for name, m in metrics.items():
+        assert "production_ready" in m, (
+            f"Missing production_ready in metrics for {name}"
+        )
+        assert isinstance(m["production_ready"], bool), (
+            f"production_ready must be bool for {name}"
+        )
+
+
 def test_train_source_calibration_regressor_is_pipeline(tmp_path: Path) -> None:
     """Regressors are never wrapped in CalibratedClassifierCV."""
     _make_coa_enriched(tmp_path)
