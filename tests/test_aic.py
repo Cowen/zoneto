@@ -6,8 +6,10 @@ from datetime import date
 from pathlib import Path
 
 import polars as pl
+import pytest
 from pytest_httpx import HTTPXMock
 
+import zoneto.sources.aic as _aic_module
 from zoneto.sources.aic import fetch_aic_decisions
 
 # ---------------------------------------------------------------------------
@@ -174,3 +176,49 @@ def test_http_error_skipped_without_crash(
     # Only 2 rows written (111 skipped due to HTTP error)
     assert len(df) == 2
     assert count == 2
+
+
+def test_chunk_size_writes_all_rows(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    """chunk_size smaller than total rows still writes all rows."""
+    _make_dev_parquet(tmp_path)
+    httpx_mock.add_response(text=_OZ_MILESTONES_HTML)
+    httpx_mock.add_response(text=_SA_MILESTONES_HTML)
+    httpx_mock.add_response(text=_NO_DECISION_HTML)
+
+    count = fetch_aic_decisions(tmp_path, delay=0.0, chunk_size=2)
+
+    assert count == 3
+    df = pl.read_parquet(tmp_path / "reference" / "aic_decisions.parquet")
+    assert len(df) == 3
+
+
+def test_chunk_data_preserved_on_interrupt(
+    tmp_path: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rows in completed chunks survive if a later row causes an unexpected crash."""
+    _make_dev_parquet(tmp_path)
+    httpx_mock.add_response(text=_OZ_MILESTONES_HTML)
+    httpx_mock.add_response(text=_SA_MILESTONES_HTML)
+    httpx_mock.add_response(text=_NO_DECISION_HTML)
+
+    original_parse = _aic_module._parse_milestones
+    parse_calls = 0
+
+    def crashing_parse(html: str, app_type: str) -> tuple:
+        nonlocal parse_calls
+        parse_calls += 1
+        if parse_calls >= 3:
+            raise RuntimeError("Simulated crash")
+        return original_parse(html, app_type)
+
+    monkeypatch.setattr(_aic_module, "_parse_milestones", crashing_parse)
+
+    with pytest.raises(RuntimeError, match="Simulated crash"):
+        fetch_aic_decisions(tmp_path, delay=0.0, chunk_size=2)
+
+    out = tmp_path / "reference" / "aic_decisions.parquet"
+    assert out.exists(), "Cache file should exist even after crash"
+    df = pl.read_parquet(out)
+    assert len(df) == 2, "First chunk (2 rows) should be saved before the crash"

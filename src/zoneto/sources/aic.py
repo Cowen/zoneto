@@ -56,6 +56,7 @@ def fetch_aic_decisions(
     data_dir: Path,
     *,
     delay: float = 1.0,
+    chunk_size: int = 100,
 ) -> int:
     """Scrape AIC milestone dates for OZ+SA applications and cache as parquet.
 
@@ -89,7 +90,17 @@ def fetch_aic_decisions(
     rows_to_scrape = df.filter(~pl.col("folderrsn").is_in(list(scraped_ids)))
 
     new_rows: list[dict] = []
+    total_new = 0
     today = date.today()
+
+    def _flush() -> None:
+        nonlocal existing, new_rows, total_new
+        new_df = pl.DataFrame(new_rows, schema=_OUTPUT_SCHEMA)
+        existing = pl.concat([existing, new_df], how="diagonal")
+        ref_path.parent.mkdir(parents=True, exist_ok=True)
+        existing.write_parquet(ref_path)
+        total_new += len(new_rows)
+        new_rows = []
 
     with httpx.Client(timeout=30.0) as client:
         for row in rows_to_scrape.iter_rows(named=True):
@@ -106,15 +117,7 @@ def fetch_aic_decisions(
                     time.sleep(delay)
                 continue
 
-            try:
-                decision_date, complete_date = _parse_milestones(
-                    response.text, app_type
-                )
-            except Exception as exc:
-                logger.warning("AIC parse failed for %s: %s", folderrsn, exc)
-                if delay > 0:
-                    time.sleep(delay)
-                continue
+            decision_date, complete_date = _parse_milestones(response.text, app_type)
 
             new_rows.append(
                 {
@@ -125,15 +128,13 @@ def fetch_aic_decisions(
                 }
             )
 
+            if len(new_rows) >= chunk_size:
+                _flush()
+
             if delay > 0:
                 time.sleep(delay)
 
-    if not new_rows:
-        return 0
+    if new_rows:
+        _flush()
 
-    new_df = pl.DataFrame(new_rows, schema=_OUTPUT_SCHEMA)
-    combined = pl.concat([existing, new_df], how="diagonal")
-
-    ref_path.parent.mkdir(parents=True, exist_ok=True)
-    combined.write_parquet(ref_path)
-    return len(new_rows)
+    return total_new
