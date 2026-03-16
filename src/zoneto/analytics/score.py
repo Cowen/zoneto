@@ -107,9 +107,7 @@ def score_all(
     if _surv_model_path.exists():
         _surv_pipe = _load(model_dir, "dev_days_to_decision")
         extra.update(
-            _predict_survival_median(
-                _surv_pipe, X_dev, "pred_dev_days_to_decision"
-            )
+            _predict_survival_median(_surv_pipe, X_dev, "pred_dev_days_to_decision")
         )
 
     df_dev_scored = df_dev.with_columns(
