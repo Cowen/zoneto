@@ -263,7 +263,9 @@ def test_feature_importance_survival_builtin(model_dir: Path, tmp_path: Path) ->
     assert means == sorted(means, reverse=True)
 
 
-def test_feature_importance_survival_permutation_raises(model_dir: Path, enriched_dir: Path) -> None:
+def test_feature_importance_survival_permutation_raises(
+    model_dir: Path, enriched_dir: Path
+) -> None:
     """Permutation importance raises ValueError for survival model."""
     with pytest.raises(
         ValueError,
