@@ -50,6 +50,12 @@ _MODEL_META: dict[str, tuple[str, str, list[str], list[str]]] = {
         PERMIT_CAT_COLS,
         PERMIT_NUM_COLS,
     ),
+    "dev_days_to_decision": (
+        "dev_applications",
+        "dev_days_observed",
+        DEV_CAT_COLS,
+        DEV_NUM_COLS,
+    ),
 }
 
 
@@ -108,14 +114,27 @@ def feature_importance(
 
     pipe = joblib.load(model_dir / f"{model_name}.joblib")
 
+    # Survival model uses GradientBoostingSurvivalAnalysis which has public
+    # feature_importances_ but does not support permutation importance with
+    # standard sklearn scorers. Raise a clear error for permutation mode.
+    _is_survival = model_name == "dev_days_to_decision"
+    if _is_survival and not builtin:
+        raise ValueError(
+            "Permutation importance is not supported for the survival model "
+            "'dev_days_to_decision'. Use --builtin for gain-based importance."
+        )
+
     if builtin:
         # Unwrap CalibratedClassifierCV to access the base pipeline
         actual_pipe = pipe
         if isinstance(actual_pipe, CalibratedClassifierCV):
             actual_pipe = actual_pipe.calibrated_classifiers_[0].estimator
-        importances = _gain_importances(
-            actual_pipe.named_steps["estimator"], len(all_cols)
-        )
+        estimator = actual_pipe.named_steps["estimator"]
+        if _is_survival:
+            # GradientBoostingSurvivalAnalysis exposes public feature_importances_
+            importances = estimator.feature_importances_
+        else:
+            importances = _gain_importances(estimator, len(all_cols))
         result = pl.DataFrame(
             {
                 "feature": all_cols,
