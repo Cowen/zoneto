@@ -221,9 +221,7 @@ def test_duplicate_folderrsn_scraped_only_once(
             {
                 "folderrsn": ["111"],
                 "application_type": ["OZ"],
-                "application_url": [
-                    "https://app.toronto.ca/AIC/details?folderRsn=111"
-                ],
+                "application_url": ["https://app.toronto.ca/AIC/details?folderRsn=111"],
                 "status": ["Closed"],
                 "date_submitted": [f"{year}-01-01"],
                 "year": [year],

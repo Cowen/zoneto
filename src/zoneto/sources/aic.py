@@ -88,9 +88,8 @@ def fetch_aic_decisions(
 
     # Scrape only un-cached rows, deduplicated (same folderrsn can appear in
     # multiple year partitions)
-    rows_to_scrape = (
-        df.filter(~pl.col("folderrsn").is_in(list(scraped_ids)))
-        .unique(subset=["folderrsn"], keep="first", maintain_order=True)
+    rows_to_scrape = df.filter(~pl.col("folderrsn").is_in(list(scraped_ids))).unique(
+        subset=["folderrsn"], keep="first", maintain_order=True
     )
     total_to_scrape = len(rows_to_scrape)
 
