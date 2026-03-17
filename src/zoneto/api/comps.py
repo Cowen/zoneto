@@ -26,6 +26,13 @@ def query_comps(
     Returns applications matching filters, sorted by proximity when lat/lon
     provided, otherwise by recency (year_submitted DESC).
     """
+    # Defensive path validation: DuckDB does not support parameterized
+    # read_parquet paths, so we interpolate the path into SQL. The path is
+    # always server-controlled, set via app.state.data_dir by the FastAPI app
+    # factory. This check catches missing/invalid files and returns empty result.
+    if not enriched_path.exists() or enriched_path.suffix != ".parquet":
+        return []
+
     current_year = datetime.date.today().year
     year_cutoff = current_year - years
 
@@ -100,8 +107,8 @@ def query_comps(
 
     con = duckdb.connect()
     try:
-        result = con.execute(sql, params).df()
-        records: list[dict[str, Any]] = result.to_dict(orient="records")
+        result = con.execute(sql, params).pl()
+        records: list[dict[str, Any]] = result.to_dicts()
         # drop internal dist_sq column when no spatial filter used
         if lat is None:
             for r in records:

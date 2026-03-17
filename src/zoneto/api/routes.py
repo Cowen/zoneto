@@ -1,7 +1,7 @@
 """FastAPI route definitions for Zoneto API."""
+
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import Any, Literal
 
@@ -104,18 +104,7 @@ def comps(
         years=years,
         limit=limit,
     )
-    # Convert NaN values to None for Pydantic validation
-    cleaned_records = []
-    for r in records:
-        cleaned = {}
-        for k, v in r.items():
-            if isinstance(v, float) and math.isnan(v):
-                cleaned[k] = None
-            else:
-                cleaned[k] = v
-        cleaned_records.append(cleaned)
-
-    applications = [CompApplication(**r) for r in cleaned_records]
+    applications = [CompApplication(**r) for r in records]
     return CompsResponse(applications=applications, total=len(applications))
 
 
@@ -127,7 +116,7 @@ def score(request: Request, body: ScoreRequest) -> ScoreResponse:
     )
     ready_model_names = [k for k, v in production_ready.items() if v]
 
-    if production_ready and not ready_model_names:
+    if not ready_model_names:
         return ScoreResponse(predictions={}, production_ready_models=[])
 
     try:

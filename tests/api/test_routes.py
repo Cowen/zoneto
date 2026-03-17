@@ -1,4 +1,5 @@
 """Tests for FastAPI endpoint handlers."""
+
 from __future__ import annotations
 
 import datetime
@@ -43,6 +44,13 @@ def data_dir(tmp_path: Path) -> Path:
         }
     )
     df.write_parquet(enriched_dir / "dev_applications.parquet")
+
+    # Ensure models_dir and metrics.json exist with at least one production_ready model
+    models_dir = tmp_path / "models"
+    models_dir.mkdir(exist_ok=True)
+    metrics = {"dev_applications_appealed": {"production_ready": True}}
+    (models_dir / "metrics.json").write_text(json.dumps(metrics))
+
     return tmp_path
 
 
@@ -223,6 +231,45 @@ def test_score_no_production_ready_models_returns_empty(
     (models_dir / "metrics.json").write_text(
         json.dumps({"dev_applications_appealed": {"production_ready": False}})
     )
+    app = create_app(data_dir=tmp_path, model_dir=models_dir)
+    with TestClient(app) as c:
+        response = c.post(
+            "/score",
+            json={"source": "dev_applications", "features": {}},
+        )
+    assert response.status_code == 200
+    assert response.json()["predictions"] == {}
+
+
+def test_score_returns_empty_when_no_metrics_file(tmp_path: Path) -> None:
+    """Returns empty predictions when metrics.json does not exist."""
+    current_year = datetime.date.today().year
+    enriched_dir = tmp_path / "enriched"
+    enriched_dir.mkdir(parents=True)
+    pl.DataFrame(
+        {
+            "folderrsn": ["F001"],
+            "application_type": ["OZ"],
+            "ward_number": ["10"],
+            "zoning_class": ["RA1"],
+            "status": ["Active"],
+            "year_submitted": pl.Series([current_year - 1], dtype=pl.Int32),
+            "lat": [43.65],
+            "lon": [-79.38],
+            "dev_approved": pl.Series([None], dtype=pl.Int8),
+            "dev_appealed": pl.Series([None], dtype=pl.Int8),
+            "dev_days_to_decision": pl.Series([None], dtype=pl.Int32),
+            "proposed_storeys": pl.Series([None], dtype=pl.Int32),
+            "proposed_units": pl.Series([None], dtype=pl.Int32),
+            "description": ["desc"],
+            "street_num": ["1"],
+            "street_name": ["Main St"],
+        }
+    ).write_parquet(enriched_dir / "dev_applications.parquet")
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    # No metrics.json created
     app = create_app(data_dir=tmp_path, model_dir=models_dir)
     with TestClient(app) as c:
         response = c.post(
