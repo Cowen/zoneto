@@ -32,6 +32,14 @@ summary:
 serve:
     uv run zoneto serve
 
+# Build the Docker image for the serving layer
+docker-build:
+    docker build -t zoneto:latest .
+
+# Run the serving layer in Docker (requires prior docker-build and pipeline run)
+docker-run:
+    docker run --rm -p 8000:8000 zoneto:latest
+
 # Measure importance of all model input features
 importance-all:
 	ls models/ | grep joblib | sed 's/.joblib//g' | xargs -n1 just importance
