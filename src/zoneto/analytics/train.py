@@ -200,9 +200,7 @@ def train_survival(
     Serializes to model_dir/<model_name>.joblib.
     """
     df = pl.read_parquet(enriched_path)
-    df = df.filter(
-        pl.col(event_col).is_not_null() & pl.col(time_col).is_not_null()
-    )
+    df = df.filter(pl.col(event_col).is_not_null() & pl.col(time_col).is_not_null())
 
     df = _fill_missing_cols(df, cat_cols, num_cols)
     all_cols = cat_cols + num_cols

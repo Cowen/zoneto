@@ -531,9 +531,7 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         _year_expr = (
             pl.col("date_submitted").str.slice(0, 4).cast(pl.Int32, strict=False)
         )
-        _date_expr = (
-            pl.col("date_submitted").str.slice(0, 10).str.to_date(strict=False)
-        )
+        _date_expr = pl.col("date_submitted").str.slice(0, 10).str.to_date(strict=False)
     df = df.with_columns(
         _year_expr.alias("year_submitted"),
         _date_expr.alias("_submitted_date"),
@@ -655,9 +653,7 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         .then(pl.col("_raw_days"))  # use uncapped actual time for survival model
         .when(pl.col("dev_decision_event") == 0)
         .then(
-            (pl.lit(_today) - pl.col("_submitted_date"))
-            .dt.total_days()
-            .cast(pl.Int32)
+            (pl.lit(_today) - pl.col("_submitted_date")).dt.total_days().cast(pl.Int32)
         )
         .otherwise(None)
         .alias("dev_days_observed")
