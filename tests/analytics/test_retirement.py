@@ -45,6 +45,7 @@ def _make_dev_parquet(tmp_path: Path) -> Path:
                 rng.integers(1, 500, size=n).tolist(), dtype=pl.Int32
             ),
             "ward_appeal_rate_3y": rng.uniform(0.05, 0.25, size=n).tolist(),
+            "in_mtsa": rng.integers(0, 2, size=n).tolist(),
             "dev_appealed": pl.Series(dev_appealed, dtype=pl.Float64),
         }
     )

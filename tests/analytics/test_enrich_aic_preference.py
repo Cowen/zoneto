@@ -1,4 +1,5 @@
 """Tests verifying enrich_dev() prefers AIC records over CKAN for same folderrsn."""
+
 from __future__ import annotations
 
 from pathlib import Path

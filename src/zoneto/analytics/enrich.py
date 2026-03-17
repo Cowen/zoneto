@@ -40,6 +40,11 @@ _SECONDARY_PLANS_URL = (
     "/resource/08099a8c-a598-4ca3-8395-e4159cc1ec1a"
     "/download/secondary-plans-data-2017-4326.geojson"
 )
+_MTSA_URL = (
+    "https://ckan0.cf.opendata.inter.prod-toronto.ca"
+    "/dataset/major-transit-station-areas"
+    "/resource/mtsa-boundaries.geojson"
+)
 _WARD_CENSUS_URL = (
     "https://ckan0.cf.opendata.inter.prod-toronto.ca"
     "/dataset/6678e1a6-d25f-4dff-b2b7-aa8f042bc2eb"
@@ -342,6 +347,16 @@ def fetch_reference(data_dir: Path = Path("data")) -> None:
     if not sp_geojson.exists():
         _download(_SECONDARY_PLANS_URL, sp_geojson)
 
+    # MTSA boundaries GeoJSON (Major Transit Station Areas)
+    mtsa_geojson = ref / "mtsa.geojson"
+    if not mtsa_geojson.exists():
+        try:
+            _download(_MTSA_URL, mtsa_geojson)
+        except Exception:
+            logger.warning(
+                "MTSA boundaries not available — in_mtsa will be 0 for all rows"
+            )
+
     # Ward profiles CSV (computed from two XLSX downloads)
     ward_profiles_csv = ref / "ward_profiles.csv"
     if not ward_profiles_csv.exists():
@@ -403,7 +418,7 @@ def enrich_coa(data_dir: Path = Path("data")) -> int:
 
 def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     """Add zoning_class, secondary_plan_name, in_heritage_register,
-    in_heritage_district, in_secondary_plan columns via DuckDB spatial join.
+    in_heritage_district, in_secondary_plan, in_mtsa columns via DuckDB spatial join.
 
     Rows with null or garbage x/y get null/0 enrichment values.
     """
@@ -513,7 +528,58 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     """).pl()
 
     con.close()
+
+    # Add MTSA feature using the downloaded boundary GeoJSON
+    mtsa_geojson = ref / "mtsa.geojson"
+    result = _add_mtsa_feature(result, mtsa_geojson)
+
     return result
+
+
+def _add_mtsa_feature(df: pl.DataFrame, mtsa_geojson: Path) -> pl.DataFrame:
+    """Add in_mtsa (Int8) column via DuckDB spatial join against MTSA boundaries.
+
+    Rows with null lat/lon or outside MTSA boundaries get in_mtsa=0.
+    If mtsa.geojson does not exist, all rows get in_mtsa=0.
+    """
+    if not mtsa_geojson.exists() or "lat" not in df.columns or "lon" not in df.columns:
+        return df.with_columns(pl.lit(0, dtype=pl.Int8).alias("in_mtsa"))
+
+    valid_mask = df["lat"].is_not_null() & df["lon"].is_not_null()
+    valid_df = df.filter(valid_mask)
+
+    if len(valid_df) == 0:
+        return df.with_columns(pl.lit(0, dtype=pl.Int8).alias("in_mtsa"))
+
+    mtsa_path_escaped = str(mtsa_geojson).replace("'", "''")
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.register("apps", valid_df.to_arrow())
+
+    result = con.execute(f"""
+        SELECT apps._rid,
+               CASE WHEN COUNT(mtsa.geom) > 0 THEN 1 ELSE 0 END AS in_mtsa
+        FROM apps
+        LEFT JOIN ST_Read('{mtsa_path_escaped}') mtsa
+            ON ST_Within(
+                ST_Point(apps.lon, apps.lat),
+                mtsa.geom
+            )
+        GROUP BY apps._rid
+    """).pl()
+
+    con.close()
+
+    rid_to_mtsa: dict[int, int] = dict(
+        zip(result["_rid"].to_list(), result["in_mtsa"].cast(pl.Int8).to_list())
+    )
+    all_rids = df["_rid"].to_list() if "_rid" in df.columns else list(range(len(df)))
+    in_mtsa_series = pl.Series(
+        "in_mtsa",
+        [rid_to_mtsa.get(rid, 0) for rid in all_rids],
+        dtype=pl.Int8,
+    )
+    return df.with_columns(in_mtsa_series)
 
 
 def _compute_ward_appeal_rate_3y(df: pl.DataFrame) -> pl.DataFrame:

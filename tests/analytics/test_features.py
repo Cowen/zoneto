@@ -34,7 +34,9 @@ def test_dev_num_cols() -> None:
         "proposed_storeys",
         "proposed_units",
         "ward_appeal_rate_3y",
+        "in_mtsa",
     ]
+    assert "in_mtsa" in DEV_NUM_COLS
 
 
 def test_coa_cat_cols() -> None:
