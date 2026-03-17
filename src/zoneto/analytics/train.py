@@ -475,9 +475,11 @@ def train_all(
             metrics["dev_days_to_decision"] = surv_eval
 
     # Gate each model: mark production_ready based on metric thresholds.
-    # Classifiers: roc_auc_mean >= 0.65. Regressors: r2_mean >= 0.0.
+    # Classifiers: roc_auc_mean >= 0.65. Regressors: r2_mean >= 0.10.
     # Survival: concordance_index_mean >= 0.65.
     # NaN comparison is always False in Python, so NaN → not production_ready.
+    # Regressor threshold raised to 0.10: a model explaining <10% of variance
+    # is not useful for production decisions.
     reg_model_names = {job[4] for job in jobs if job[5]}
     for name, m in metrics.items():
         if name == "dev_days_to_decision":
@@ -486,7 +488,7 @@ def train_all(
                 m.get("concordance_index_mean", float("nan")) >= 0.65
             )
         elif name in reg_model_names:
-            m["production_ready"] = bool(m.get("r2_mean", float("nan")) >= 0.0)
+            m["production_ready"] = bool(m.get("r2_mean", float("nan")) >= 0.10)
         else:
             m["production_ready"] = bool(m.get("roc_auc_mean", 0.0) >= 0.65)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -34,8 +35,21 @@ _PERMIT_MODELS: list[tuple[str, str, bool]] = [
 ]
 
 
+_SURVIVAL_TYPES: frozenset[str] = frozenset({"OZ", "SA"})
+
+
 def _load(model_dir: Path, model_name: str) -> Any:
     return joblib.load(model_dir / f"{model_name}.joblib")
+
+
+def _load_production_ready(model_dir: Path) -> dict[str, bool]:
+    """Load production_ready flags from metrics.json. Returns {} if absent."""
+    metrics_path = model_dir / "metrics.json"
+    if not metrics_path.exists():
+        return {}
+    with open(metrics_path) as f:
+        metrics: dict[str, Any] = json.load(f)
+    return {name: bool(m.get("production_ready", True)) for name, m in metrics.items()}
 
 
 def _predict_classifier(
@@ -83,9 +97,14 @@ def score_all(
     data_dir: Path = Path("data"),
     model_dir: Path = Path("models"),
 ) -> None:
-    """Run batch inference on enriched parquet files; write data/scores/*.parquet."""
+    """Run batch inference on enriched parquet files; write data/scores/*.parquet.
+
+    Models marked production_ready=False in metrics.json are skipped — their
+    prediction columns are not written to output.
+    """
     scores_dir = data_dir / "scores"
     scores_dir.mkdir(parents=True, exist_ok=True)
+    production_ready = _load_production_ready(model_dir)
 
     # --- dev_applications ---
     dev_enriched = data_dir / "enriched" / "dev_applications.parquet"
@@ -95,6 +114,8 @@ def score_all(
 
     extra: dict[str, list] = {}
     for model_name, pred_col, is_reg in _DEV_MODELS:
+        if not production_ready.get(model_name, True):
+            continue
         pipe = _load(model_dir, model_name)
         prob_col = pred_col.replace("pred_", "prob_")
         if is_reg:
@@ -102,13 +123,23 @@ def score_all(
         else:
             extra.update(_predict_classifier(pipe, X_dev, pred_col, prob_col))
 
-    # Survival model (optional — skip if .joblib absent)
+    # Survival model (optional — skip if .joblib absent or not production_ready).
+    # Only scores OZ+SA applications — model trained exclusively on OZ+SA; CD/SB/PL
+    # have fundamentally different timelines and were never in training data.
     _surv_model_path = model_dir / "dev_days_to_decision.joblib"
-    if _surv_model_path.exists():
+    if _surv_model_path.exists() and production_ready.get("dev_days_to_decision", True):
         _surv_pipe = _load(model_dir, "dev_days_to_decision")
-        extra.update(
-            _predict_survival_median(_surv_pipe, X_dev, "pred_dev_days_to_decision")
-        )
+        oz_sa_mask = df_dev["application_type"].is_in(list(_SURVIVAL_TYPES))
+        oz_sa_indices = oz_sa_mask.arg_true().to_list()
+        pred_days: list[float | None] = [None] * len(df_dev)
+        if oz_sa_indices:
+            X_surv = df_dev.filter(oz_sa_mask).select(all_dev_cols).to_pandas()
+            surv_result = _predict_survival_median(
+                _surv_pipe, X_surv, "pred_dev_days_to_decision"
+            )
+            for i, val in zip(oz_sa_indices, surv_result["pred_dev_days_to_decision"]):
+                pred_days[i] = val
+        extra["pred_dev_days_to_decision"] = pred_days
 
     df_dev_scored = df_dev.with_columns(
         [pl.Series(name=k, values=v) for k, v in extra.items()]
@@ -123,6 +154,8 @@ def score_all(
 
     extra_coa: dict[str, list] = {}
     for model_name, pred_col, is_reg in _COA_MODELS:
+        if not production_ready.get(model_name, True):
+            continue
         pipe = _load(model_dir, model_name)
         prob_col = pred_col.replace("pred_", "prob_")
         if is_reg:
@@ -144,6 +177,8 @@ def score_all(
 
         extra_permits: dict[str, list] = {}
         for model_name, pred_col, is_reg in _PERMIT_MODELS:
+            if not production_ready.get(model_name, True):
+                continue
             pipe = _load(model_dir, model_name)
             prob_col = pred_col.replace("pred_", "prob_")
             if is_reg:
@@ -195,10 +230,11 @@ def score_one(
             result[pred_col] = int(pipe.predict(X)[0])
             result[prob_col] = float(pipe.predict_proba(X)[0, 1])
 
-    # Survival model for dev_applications (optional — skip if .joblib absent)
+    # Survival model for dev_applications (OZ+SA only — skip non-OZ/SA types and
+    # skip if .joblib absent; CD/SB/PL have different timelines and were never trained)
     if source == "dev_applications":
         _surv_path = model_dir / "dev_days_to_decision.joblib"
-        if _surv_path.exists():
+        if _surv_path.exists() and features.get("application_type") in _SURVIVAL_TYPES:
             _surv_pipe = _load(model_dir, "dev_days_to_decision")
             _surv_preds = _predict_survival_median(
                 _surv_pipe, X, "pred_dev_days_to_decision"

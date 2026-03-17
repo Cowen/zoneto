@@ -874,3 +874,86 @@ def test_enrich_dev_is_combined_application_oz_opa(
     # SA row should be 0 (not OZ type)
     sa_row = df.filter(pl.col("folderrsn") == "BBB")
     assert sa_row["is_combined_application"][0] == 0
+
+
+# ---------------------------------------------------------------------------
+# enrich_dev — dev_appealed label coverage (P0 fix)
+# ---------------------------------------------------------------------------
+
+
+def _make_dev_parquet_appeals(tmp_path: Path) -> None:
+    """Write dev_applications parquet with OZ/SA/CD for appeal label tests."""
+    df = pl.DataFrame(
+        {
+            "folderrsn": ["A1", "A2", "A3", "A4", "A5"],
+            "application_url": [None] * 5,
+            "description": ["Test"] * 5,
+            "date_submitted": ["2021-01-01"] * 5,
+            "status": [
+                "OMB Appeal",
+                "Refused",
+                "Under Review",
+                "Council Approved",
+                "Refused",
+            ],
+            "application_type": ["OZ", "SA", "OZ", "OZ", "CD"],
+            "ward_number": ["Ward 1"] * 5,
+            "community_meeting_date": [None] * 5,
+            "parent_folder_number": [None] * 5,
+            "postal": [None] * 5,
+            "x": [None] * 5,
+            "y": [None] * 5,
+            "source_name": ["dev_applications"] * 5,
+            "year": [2021] * 5,
+        },
+        schema={
+            "folderrsn": pl.Utf8,
+            "application_url": pl.Utf8,
+            "description": pl.Utf8,
+            "date_submitted": pl.Utf8,
+            "status": pl.Utf8,
+            "application_type": pl.Utf8,
+            "ward_number": pl.Utf8,
+            "community_meeting_date": pl.Utf8,
+            "parent_folder_number": pl.Utf8,
+            "postal": pl.Utf8,
+            "x": pl.Utf8,
+            "y": pl.Utf8,
+            "source_name": pl.Utf8,
+            "year": pl.Int32,
+        },
+    ).with_columns(pl.col("date_submitted").str.to_date())
+    out = tmp_path / "dev_applications" / "year=2021"
+    out.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(out / "part0.parquet")
+
+
+def test_enrich_dev_appealed_oz_sa_label_coverage(
+    tmp_path: Path,
+    stub_spatial_join: None,
+) -> None:
+    """OZ/SA closed apps get 0/1; active apps get null; non-OZ/SA always null.
+
+    Fixes 50/50 base-rate selection bias: previously only appeals (1) and
+    explicitly-approved (0) got labels. Closed apps like 'Refused' got null,
+    which excluded large numbers of non-appealed cases from training.
+
+    New logic (OZ/SA only):
+    - 1  if status in _DEV_APPEALED_SET
+    - 0  if status is not null and not in _DEV_ACTIVE_SET (closed without appeal)
+    - null  if status is null, active, or application_type is not OZ/SA
+    """
+    _make_dev_parquet_appeals(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+
+    # A1: OZ + "OMB Appeal" → 1
+    assert df.filter(pl.col("folderrsn") == "A1")["dev_appealed"][0] == 1
+    # A2: SA + "Refused" → 0 (closed without appeal — previously was null!)
+    assert df.filter(pl.col("folderrsn") == "A2")["dev_appealed"][0] == 0
+    # A3: OZ + "Under Review" → null (still active)
+    assert df.filter(pl.col("folderrsn") == "A3")["dev_appealed"][0] is None
+    # A4: OZ + "Council Approved" → 0 (closed without appeal)
+    assert df.filter(pl.col("folderrsn") == "A4")["dev_appealed"][0] == 0
+    # A5: CD + "Refused" → null (not OZ/SA — different appeal mechanism)
+    assert df.filter(pl.col("folderrsn") == "A5")["dev_appealed"][0] is None

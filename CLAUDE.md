@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
 <!-- Freshness: 2026-03-16 -->
-<!-- Last reviewed against: main branch (dev-days-to-decision phase: AIC scraper, survival model, is_combined_application feature) -->
+<!-- Last reviewed against: main branch (model-critique phase: dev_appealed OZ/SA restriction, production_ready gating, summary command) -->
 
 ## Purpose
 
@@ -29,6 +29,7 @@ just importance-all        # feature importance for all models
 just regression            # performance regression tests (synthetic data, CI-safe)
 just regression-integration # performance regression tests against real enriched data
 just update-baselines      # regenerate tests/fixtures/model_baselines.json
+just summary               # print score distributions (percentiles)
 just fmt                   # ruff format
 ```
 
@@ -53,7 +54,7 @@ within the last two weeks.
 
 ```
 src/zoneto/
-  cli.py             Typer app: `sync`, `status`, `aic`, `enrich`, `train`, `score` commands
+  cli.py             Typer app: `sync`, `status`, `aic`, `enrich`, `train`, `score`, `summary` commands
   models.py          CKANConfig pydantic model
   storage.py         write_source / source_row_counts / last_modified
   sources/
@@ -138,6 +139,8 @@ NOTE: Though the CKAN data source identifies `dev_applications` as retired, it s
   dev_applications_approved is retired (dataset frozen, 97.3% class imbalance).
 - `zoneto score [--model-dir PATH]` -- runs batch inference on enriched parquet using
   trained models. Writes scored parquet to `data/scores/`.
+- `zoneto summary` -- prints percentile distributions (p5/p25/p50/p75/p95) and mean
+  for all `pred_*` and `prob_*` columns in scored parquet files under `data/scores/`.
 
 `DATA_DIR` defaults to `Path("data")` (cwd-relative).
 
@@ -181,6 +184,9 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
   `dev_decision_event` (Int8|null, 1=closed/0=active/null=non-OZ/SA),
   `dev_days_observed` (Int32|null, days_to_decision for events; today-submitted for censored).
   New feature: `is_combined_application` (Int8, 1 if OZ with OPA in description).
+  `dev_appealed` label (Int8|null): restricted to OZ+SA only. 1=appeal filed, 0=closed without appeal
+  (any non-active closed status), null=active/non-OZ/SA. Covers ALL closed OZ+SA apps to preserve
+  the true base rate (~15-25%); previously only explicitly-approved rows got 0, causing 50/50 bias.
 - `enrich_permits(data_dir)` -- enriches permits_cleared with application_year (Int32,
   from application_date year) and permit_issuance_days (Int32, issued_date - application_date
   in calendar days). Drops rows with non-positive issuance days. Writes
@@ -215,7 +221,7 @@ Note: `dev_applications_approved` is retired — dataset frozen (no new records)
 - `train_survival(enriched_path, time_col, event_col, cat_cols, num_cols, model_name, model_dir)` -- trains a GradientBoostingSurvivalAnalysis model. Filters to non-null event rows (OZ+SA only). Labels are structured numpy array `[(event: bool, time: int)]`. No calibration. Returns row count.
 - `evaluate_source(enriched_path, label_col, cat_cols, num_cols, *, regressor, cv, year_col)` -- temporal CV evaluation; returns per-metric mean/std dict. Uses `TimeSeriesSplit` when `year_col` is set and present (avoids future-data leakage). Caps cv at n_samples - 1 for all splitter types. Classifiers return roc_auc, neg_brier_score, avg_precision; regressors return r2, neg_mae, neg_rmse.
 - `evaluate_survival(enriched_path, time_col, event_col, cat_cols, num_cols, *, cv, year_col)` -- temporal CV for survival model. Uses `concordance_index_censored` for scoring each fold. Returns concordance_index_mean/std and n.
-- `train_all(data_dir, model_dir)` -- trains 3-5 models (dev_approved retired; permit and survival models optional), evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict}). Each metrics dict includes `production_ready` (bool): classifiers require roc_auc_mean >= 0.65; regressors require r2_mean >= 0.0.
+- `train_all(data_dir, model_dir)` -- trains 3-5 models (dev_approved retired; permit and survival models optional), evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict}). Each metrics dict includes `production_ready` (bool): classifiers require roc_auc_mean >= 0.65; regressors require r2_mean >= 0.10 (raised from 0.0 — models explaining <10% of variance are not useful).
   Optional survival model (trained if `dev_days_observed` present in enriched dev parquet):
   dev_days_to_decision. Survival model uses c-index threshold (>= 0.65) for `production_ready`.
 
@@ -225,8 +231,10 @@ Batch and single-application inference from trained joblib models:
 
 **Batch scoring** (`score_all`):
 - Reads enriched parquet from `data/enriched/`, loads models from `models/`
+- Checks `models/metrics.json` for `production_ready` flags; skips models where `production_ready: false`
 - For classifiers: outputs `pred_<label>` (int) and `prob_<label>` (float) columns
 - For regressors: outputs `pred_<label>` (float) column only
+- Survival model (`dev_days_to_decision`) only scores OZ+SA rows; non-OZ/SA rows get null
 - Writes scored parquet to `data/scores/dev_applications.parquet`, `data/scores/coa.parquet`,
   and optionally `data/scores/permits_cleared.parquet` (skips if enriched file absent)
 
@@ -234,6 +242,7 @@ Batch and single-application inference from trained joblib models:
 - `score_one(source, features, model_dir)` -- scores one application dict
 - `source` must be `"dev_applications"`, `"coa"`, or `"permits_cleared"`
 - `features` is a dict with keys matching the feature column lists
+- Survival model only runs if `features["application_type"]` is `"OZ"` or `"SA"`
 - Returns dict of prediction/probability values
 
 **Output columns added by scoring**:
@@ -255,7 +264,7 @@ Computes feature importance for trained models via two methods:
 - `builtin=True`: gain-based importance from HistGradientBoosting internal tree structure (fast, no data needed). Unwraps `CalibratedClassifierCV` wrapper automatically.
 - `builtin=False` (default): permutation importance on enriched parquet (slower, more reliable)
 
-**Supported models** (`_MODEL_META` registry): dev_applications_appealed, coa_approved, coa_days_to_approval, permit_issuance_days, dev_days_to_decision (dev_applications_approved retired)
+**Supported models** (`_MODEL_META` registry): dev_applications_appealed, coa_approved, coa_days_to_approval, permit_issuance_days, dev_days_to_decision
 
 Note: `dev_days_to_decision` only supports `--builtin` mode (gain-based). Permutation importance raises an error because sksurv does not support standard sklearn scorers.
 

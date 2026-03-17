@@ -79,7 +79,6 @@ def model_dir(tmp_path: Path) -> Path:
         DEV_CAT_COLS, DEV_NUM_COLS, HistGradientBoostingClassifier(random_state=0)
     )
     dev_pipe.fit(X_dev, y_binary)
-    joblib.dump(dev_pipe, d / "dev_applications_approved.joblib")
     joblib.dump(dev_pipe, d / "dev_applications_appealed.joblib")
 
     # COA classifier
@@ -172,7 +171,7 @@ def enriched_dir(tmp_path: Path) -> Path:
 
 def test_feature_importance_columns(model_dir: Path, enriched_dir: Path) -> None:
     result = feature_importance(
-        "dev_applications_approved",
+        "dev_applications_appealed",
         data_dir=enriched_dir,
         model_dir=model_dir,
     )
@@ -183,7 +182,7 @@ def test_feature_importance_columns(model_dir: Path, enriched_dir: Path) -> None
 def test_feature_importance_row_count(model_dir: Path, enriched_dir: Path) -> None:
     """One row per feature."""
     result = feature_importance(
-        "dev_applications_approved",
+        "dev_applications_appealed",
         data_dir=enriched_dir,
         model_dir=model_dir,
     )
@@ -194,7 +193,7 @@ def test_feature_importance_sorted_descending(
     model_dir: Path, enriched_dir: Path
 ) -> None:
     result = feature_importance(
-        "dev_applications_approved",
+        "dev_applications_appealed",
         data_dir=enriched_dir,
         model_dir=model_dir,
     )

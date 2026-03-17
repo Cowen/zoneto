@@ -555,12 +555,30 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
             return_dtype=pl.Int8,
         )
         .alias("dev_approved"),
-        pl.col("status")
-        .map_elements(
-            # 1 = appeal filed, 0 = approved without appeal
-            lambda v: _label_from_sets(v, _DEV_APPEALED_SET, _DEV_APPROVED_SET),
-            return_dtype=pl.Int8,
+        # dev_appealed: 1=appeal filed, 0=closed without appeal, null=active/non-OZ/SA.
+        # Restricted to OZ+SA only — these are the types with AIC decision milestones.
+        # Covers ALL closed OZ/SA applications (not just explicitly-approved ones) so
+        # the training base rate reflects the true Toronto appeal rate (~15-25%),
+        # not a selection-biased 50/50 split.
+        pl.when(~pl.col("application_type").is_in(list(_DEV_SURVIVAL_TYPES)))
+        .then(None)
+        .when(pl.col("status").is_null())
+        .then(None)
+        .when(
+            pl.col("status")
+            .str.strip_chars()
+            .str.to_lowercase()
+            .is_in(list(_DEV_ACTIVE_SET))
         )
+        .then(None)
+        .when(
+            pl.col("status")
+            .str.strip_chars()
+            .str.to_lowercase()
+            .is_in(list(_DEV_APPEALED_SET))
+        )
+        .then(pl.lit(1, dtype=pl.Int8))
+        .otherwise(pl.lit(0, dtype=pl.Int8))
         .alias("dev_appealed"),
     )
 

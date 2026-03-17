@@ -798,3 +798,103 @@ def test_train_all_skips_survival_when_label_absent(tmp_path: Path) -> None:
 
     assert "dev_days_to_decision" not in counts
     assert "dev_days_to_decision" not in metrics
+
+
+# ---------------------------------------------------------------------------
+# P1: production_ready regressor threshold raised to R² >= 0.10
+# ---------------------------------------------------------------------------
+
+
+def test_train_all_production_ready_regressor_threshold_is_0_10(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regressors with r2_mean < 0.10 should be production_ready=False.
+
+    The previous threshold was r2_mean >= 0.0, which allowed permit_issuance_days
+    (R²=0.039) to pass. Raising to 0.10 correctly excludes models explaining <10%
+    of variance.
+    """
+    from zoneto.analytics.train import evaluate_source
+
+    _make_dev_enriched(tmp_path)
+    _make_coa_enriched(tmp_path)
+    _make_permits_enriched(tmp_path)
+    model_dir = tmp_path / "models"
+
+    original_evaluate = evaluate_source
+
+    def mock_evaluate(
+        enriched_path,
+        label_col,
+        cat_cols,
+        num_cols,
+        *,
+        regressor=False,
+        cv=5,
+        year_col="year_submitted",
+    ):
+        result = original_evaluate(
+            enriched_path=enriched_path,
+            label_col=label_col,
+            cat_cols=cat_cols,
+            num_cols=num_cols,
+            regressor=regressor,
+            cv=cv,
+            year_col=year_col,
+        )
+        if regressor:
+            # Simulate weak regressor (below new threshold, above old threshold)
+            result["r2_mean"] = 0.05
+        return result
+
+    monkeypatch.setattr("zoneto.analytics.train.evaluate_source", mock_evaluate)
+
+    _, metrics = train_all(data_dir=tmp_path, model_dir=model_dir)
+
+    # r2_mean=0.05 is below 0.10 threshold → not production_ready
+    assert metrics["coa_days_to_approval"]["production_ready"] is False
+    assert metrics["permit_issuance_days"]["production_ready"] is False
+
+
+def test_train_all_production_ready_regressor_at_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regressors with r2_mean == 0.10 should be production_ready=True."""
+    from zoneto.analytics.train import evaluate_source
+
+    _make_dev_enriched(tmp_path)
+    _make_coa_enriched(tmp_path)
+    _make_permits_enriched(tmp_path)
+    model_dir = tmp_path / "models"
+
+    original_evaluate = evaluate_source
+
+    def mock_evaluate(
+        enriched_path,
+        label_col,
+        cat_cols,
+        num_cols,
+        *,
+        regressor=False,
+        cv=5,
+        year_col="year_submitted",
+    ):
+        result = original_evaluate(
+            enriched_path=enriched_path,
+            label_col=label_col,
+            cat_cols=cat_cols,
+            num_cols=num_cols,
+            regressor=regressor,
+            cv=cv,
+            year_col=year_col,
+        )
+        if regressor:
+            result["r2_mean"] = 0.10  # Exactly at threshold
+        return result
+
+    monkeypatch.setattr("zoneto.analytics.train.evaluate_source", mock_evaluate)
+
+    _, metrics = train_all(data_dir=tmp_path, model_dir=model_dir)
+
+    assert metrics["coa_days_to_approval"]["production_ready"] is True
+    assert metrics["permit_issuance_days"]["production_ready"] is True

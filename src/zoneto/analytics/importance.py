@@ -19,13 +19,8 @@ from zoneto.analytics.features import (
 )
 
 # Model registry: model_name → (enriched_parquet, label_col, cat_cols, num_cols)
+# dev_applications_approved retired: dataset frozen, 97.3% class imbalance.
 _MODEL_META: dict[str, tuple[str, str, list[str], list[str]]] = {
-    "dev_applications_approved": (
-        "dev_applications",
-        "dev_approved",
-        DEV_CAT_COLS,
-        DEV_NUM_COLS,
-    ),
     "dev_applications_appealed": (
         "dev_applications",
         "dev_appealed",
