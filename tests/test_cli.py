@@ -111,6 +111,53 @@ def test_enrich_no_fetch_aic_skips_aic(
     assert not mock_fetch_aic.called
 
 
+def test_summary_shows_score_distributions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """zoneto summary reads scored parquet and prints percentile distributions."""
+    monkeypatch.setattr("zoneto.cli.DATA_DIR", tmp_path)
+    scores_dir = tmp_path / "scores"
+    scores_dir.mkdir(parents=True)
+
+    # Write a minimal scored dev_applications parquet
+    df = pl.DataFrame(
+        {
+            "application_type": ["OZ"] * 10,
+            "pred_dev_appealed": [0, 0, 0, 1, 1, 0, 0, 1, 0, 0],
+            "prob_dev_appealed": [0.1, 0.2, 0.3, 0.8, 0.9, 0.15, 0.25, 0.7, 0.05, 0.35],
+            "pred_dev_days_to_decision": [
+                500.0,
+                600.0,
+                700.0,
+                800.0,
+                900.0,
+                1000.0,
+                1100.0,
+                1200.0,
+                1300.0,
+                1400.0,
+            ],
+        }
+    )
+    df.write_parquet(scores_dir / "dev_applications.parquet")
+
+    result = runner.invoke(app, ["summary"])
+    assert result.exit_code == 0
+    assert "dev_applications" in result.output
+    assert "prob_dev_appealed" in result.output
+    assert "pred_dev_days_to_decision" in result.output
+
+
+def test_summary_no_scores_exits_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """zoneto summary with no scored data prints a message and exits 0."""
+    monkeypatch.setattr("zoneto.cli.DATA_DIR", tmp_path)
+    result = runner.invoke(app, ["summary"])
+    assert result.exit_code == 0
+    assert "no scored data" in result.output.lower()
+
+
 def test_enrich_fetch_aic_default_calls_aic(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

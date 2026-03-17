@@ -24,6 +24,10 @@ train:
 score:
     uv run zoneto score
 
+# Show score distributions
+summary:
+    uv run zoneto summary
+
 # Measure importance of all model input features
 importance-all:
 	ls models/ | grep joblib | sed 's/.joblib//g' | xargs -n1 just importance

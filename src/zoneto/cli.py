@@ -244,6 +244,56 @@ def importance(
 
 
 @app.command()
+def summary() -> None:
+    """Print percentile distributions for all scored prediction columns."""
+    scores_dir = DATA_DIR / "scores"
+    if not scores_dir.exists():
+        console.print("[dim]No scored data found.[/dim]")
+        return
+
+    import polars as pl
+
+    parquet_files = sorted(scores_dir.glob("*.parquet"))
+    if not parquet_files:
+        console.print("[dim]No scored data found.[/dim]")
+        return
+
+    percentiles = [0.05, 0.25, 0.50, 0.75, 0.95]
+    pct_labels = ["p5", "p25", "p50", "p75", "p95"]
+
+    for path in parquet_files:
+        source = path.stem
+        df = pl.read_parquet(path)
+        score_cols = sorted(
+            c for c in df.columns if c.startswith("pred_") or c.startswith("prob_")
+        )
+        if not score_cols:
+            continue
+
+        table = Table(title=f"{source} ({len(df):,} rows)")
+        table.add_column("Column", style="bold")
+        table.add_column("Mean", justify="right")
+        for label in pct_labels:
+            table.add_column(label, justify="right")
+
+        for col in score_cols:
+            series = df[col].drop_nulls()
+            if series.len() == 0:
+                continue
+            mean = series.mean()
+            pcts = [series.quantile(p) for p in percentiles]
+            fmt = ".3f" if (mean is not None and abs(mean) < 10) else ".0f"  # type: ignore[arg-type]
+            table.add_row(
+                col,
+                f"{mean:{fmt}}",
+                *[f"{v:{fmt}}" for v in pcts],
+            )
+
+        console.print(table)
+        console.print()
+
+
+@app.command()
 def score(
     model_dir: Annotated[
         Path,
