@@ -162,6 +162,9 @@ def train(
         table.add_column("N rows", justify="right")
         table.add_column("Primary metric", justify="right")
         table.add_column("Secondary metric", justify="right")
+        table.add_column("Status", justify="center")
+
+        _TRACKING_ONLY = {"coa_days_to_approval"}
 
         for name, count in counts.items():
             metric = metrics[name]
@@ -179,7 +182,15 @@ def train(
             else:
                 primary = f"R² {metric['r2_mean']:.3f}±{metric['r2_std']:.3f}"
                 secondary = f"MAE {metric['mae_mean']:.0f}d"
-            table.add_row(name, f"{count:,}", primary, secondary)
+
+            if name in _TRACKING_ONLY:
+                status = "[yellow]tracking only[/yellow]"
+            elif metric.get("production_ready"):
+                status = "[green]production[/green]"
+            else:
+                status = "[red]not ready[/red]"
+
+            table.add_row(name, f"{count:,}", primary, secondary, status)
 
         console.print(table)
         console.print(f"[green]✓[/green] Metrics saved to {model_dir / 'metrics.json'}")
@@ -338,5 +349,7 @@ def serve(
 
     from zoneto.api.app import create_app
 
-    application = create_app(data_dir=data_dir, model_dir=model_dir, static_dir=static_dir)
+    application = create_app(
+        data_dir=data_dir, model_dir=model_dir, static_dir=static_dir
+    )
     uvicorn.run(application, host=host, port=port)
