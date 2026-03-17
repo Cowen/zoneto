@@ -33,7 +33,9 @@ class AICSource:
         """
         from zoneto.sources.aic import fetch_aic_applications  # noqa: PLC0415
 
-        fetch_aic_applications(self._data_dir, batch_size=self._batch_size)
+        count = fetch_aic_applications(self._data_dir, batch_size=self._batch_size)
+        if count == 0:
+            return pl.DataFrame()
         return pl.read_parquet(
             self._data_dir / "aic_applications",
             hive_partitioning=True,

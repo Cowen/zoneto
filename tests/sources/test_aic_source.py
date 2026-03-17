@@ -181,3 +181,56 @@ def test_aic_source_in_registry() -> None:
     assert "aic_applications" in SOURCES, (
         "'aic_applications' must be registered in SOURCES"
     )
+
+
+def test_aic_source_fetch_returns_dataframe(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    """AICSource.fetch() returns pl.DataFrame with rows when data exists."""
+    from zoneto.sources.aic_source import AICSource
+
+    # Mock the full flow: metadata → count → features
+    httpx_mock.add_response(
+        url=_ARCGIS_META_URL + "?f=json", text=_meta_resp(SAMPLE_FIELDS)
+    )
+    httpx_mock.add_response(
+        url=_ARCGIS_QUERY_URL,
+        method="POST",
+        text=_count_resp(1),
+    )
+    httpx_mock.add_response(
+        url=_ARCGIS_QUERY_URL,
+        method="POST",
+        text=_features_resp([SAMPLE_FEATURE]),
+    )
+
+    source = AICSource(data_dir=tmp_path)
+    df = source.fetch()
+
+    assert isinstance(df, pl.DataFrame), "fetch() must return pl.DataFrame"
+    assert len(df) == 1, "Expected 1 row in returned DataFrame"
+    assert "folderrsn" in df.columns
+    assert "source_name" in df.columns
+
+
+def test_aic_source_fetch_empty_returns_empty_dataframe(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    """AICSource.fetch() returns empty DataFrame when ArcGIS has no records."""
+    from zoneto.sources.aic_source import AICSource
+
+    # Mock metadata and count=0 (no features to fetch)
+    httpx_mock.add_response(
+        url=_ARCGIS_META_URL + "?f=json", text=_meta_resp(SAMPLE_FIELDS)
+    )
+    httpx_mock.add_response(
+        url=_ARCGIS_QUERY_URL,
+        method="POST",
+        text=_count_resp(0),
+    )
+
+    source = AICSource(data_dir=tmp_path)
+    df = source.fetch()
+
+    assert isinstance(df, pl.DataFrame), "fetch() must return pl.DataFrame"
+    assert len(df) == 0, "Expected empty DataFrame when ArcGIS returns 0 records"
