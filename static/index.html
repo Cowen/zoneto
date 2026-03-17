@@ -241,7 +241,7 @@
 
     async function fetchScore(features) {
       try {
-        const res = await fetch('/score', {
+        const res = await fetch('/score?explain=true', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ source: 'dev_applications', features }),
@@ -250,6 +250,7 @@
         const data = await res.json();
         if (!data.production_ready_models.length) return;
         renderPredictions(data.predictions);
+        if (data.explanations) renderExplanations(data.explanations);
       } catch (_) {
         // predictions are optional — fail silently
       }
@@ -267,6 +268,29 @@
       if (rows) {
         predictionsEl.innerHTML = rows;
         scoreSection.style.display = 'block';
+      }
+    }
+
+    function renderExplanations(explanations) {
+      const entries = Object.entries(explanations);
+      if (!entries.length) return;
+      const rows = entries.flatMap(([modelName, contribs]) =>
+        contribs.map(c => {
+          const sign = c.direction === 'increases_risk' ? '+' : '−';
+          const color = c.direction === 'increases_risk' ? '#dc3545' : '#198754';
+          const label = escHtml(c.feature.replace(/__/g, ': ').replace(/_/g, ' '));
+          return `<div class="pred-row">
+            <span class="pred-label">${label}</span>
+            <span class="pred-value" style="color:${color}">${sign}${Math.abs(c.shap_value).toFixed(3)}</span>
+          </div>`;
+        })
+      ).join('');
+      if (rows) {
+        predictionsEl.innerHTML += `
+          <div style="margin-top:0.75rem;border-top:1px solid #dee2e6;padding-top:0.75rem">
+            <div style="font-size:0.75rem;color:#6c757d;margin-bottom:0.4rem">Top contributing factors</div>
+            ${rows}
+          </div>`;
       }
     }
 
