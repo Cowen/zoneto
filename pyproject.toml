@@ -53,6 +53,8 @@ filterwarnings = [
     "ignore:Only one class is present in y_true:sklearn.exceptions.UndefinedMetricWarning",
     "ignore:No positive class found in y_true:UserWarning:sklearn",
     "ignore:Skipping features without any observed values:UserWarning:sklearn",
+    # TruncatedSVD warns on tiny corpus (expected when testing with minimal fixtures)
+    "ignore::RuntimeWarning:sklearn",
 ]
 
 [tool.ruff]

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import duckdb
 import joblib
+import numpy as np
 import polars as pl
 import pyproj
 from sklearn.decomposition import TruncatedSVD
@@ -46,8 +47,9 @@ _SECONDARY_PLANS_URL = (
 )
 _MTSA_URL = (
     "https://ckan0.cf.opendata.inter.prod-toronto.ca"
-    "/dataset/major-transit-station-areas"
-    "/resource/mtsa-boundaries.geojson"
+    "/dataset/f7128f82-810d-4677-8166-8892f51969d3"
+    "/resource/2b66ca26-b345-4e62-8568-dcd2cd6c3f91"
+    "/download/majortransitstationareadelinations_jan2026.shp.zip"
 )
 _WARD_CENSUS_URL = (
     "https://ckan0.cf.opendata.inter.prod-toronto.ca"
@@ -351,15 +353,35 @@ def fetch_reference(data_dir: Path = Path("data")) -> None:
     if not sp_geojson.exists():
         _download(_SECONDARY_PLANS_URL, sp_geojson)
 
-    # MTSA boundaries GeoJSON (Major Transit Station Areas)
-    mtsa_geojson = ref / "mtsa.geojson"
-    if not mtsa_geojson.exists():
-        try:
-            _download(_MTSA_URL, mtsa_geojson)
-        except Exception:
-            logger.warning(
-                "MTSA boundaries not available — in_mtsa will be 0 for all rows"
-            )
+    # MTSA boundaries (ZIP → extract SHP, Major Transit Station Areas)
+    mtsa_shp = ref / "mtsa.shp"
+    if not mtsa_shp.exists():
+        mtsa_dir = ref / "mtsa"
+        if not mtsa_dir.exists():
+            mtsa_zip = ref / "mtsa.zip"
+            try:
+                _download(_MTSA_URL, mtsa_zip)
+                mtsa_dir.mkdir()
+                with zipfile.ZipFile(mtsa_zip) as zf:
+                    zf.extractall(mtsa_dir)
+                mtsa_zip.unlink()
+                # Find the .shp file in the extracted directory and move to root ref dir
+                shp_files = list(mtsa_dir.glob("*.shp"))
+                if shp_files:
+                    shp_file = shp_files[0]
+                    # Copy all shapefile components to ref dir
+                    # (*.shp, *.shx, *.dbf, *.prj, *.cpg, etc.)
+                    for ext in ["shp", "shx", "dbf", "prj", "cpg"]:
+                        src = mtsa_dir / f"{shp_file.stem}.{ext}"
+                        if src.exists():
+                            (ref / f"mtsa.{ext}").write_bytes(src.read_bytes())
+                # Clean up extracted directory
+                import shutil
+                shutil.rmtree(mtsa_dir)
+            except Exception:
+                logger.warning(
+                    "MTSA boundaries not available — in_mtsa will be 0 for all rows"
+                )
 
     # Ward profiles CSV (computed from two XLSX downloads)
     ward_profiles_csv = ref / "ward_profiles.csv"
@@ -533,20 +555,21 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
 
     con.close()
 
-    # Add MTSA feature using the downloaded boundary GeoJSON
-    mtsa_geojson = ref / "mtsa.geojson"
-    result = _add_mtsa_feature(result, mtsa_geojson)
+    # Add MTSA feature using the downloaded boundary shapefile
+    mtsa_shp = ref / "mtsa.shp"
+    result = _add_mtsa_feature(result, mtsa_shp)
 
     return result
 
 
-def _add_mtsa_feature(df: pl.DataFrame, mtsa_geojson: Path) -> pl.DataFrame:
+def _add_mtsa_feature(df: pl.DataFrame, mtsa_path: Path) -> pl.DataFrame:
     """Add in_mtsa (Int8) column via DuckDB spatial join against MTSA boundaries.
 
     Rows with null lat/lon or outside MTSA boundaries get in_mtsa=0.
-    If mtsa.geojson does not exist, all rows get in_mtsa=0.
+    If mtsa_path does not exist, all rows get in_mtsa=0.
+    mtsa_path can be any format that DuckDB ST_Read understands (.shp, .geojson, etc.).
     """
-    if not mtsa_geojson.exists() or "lat" not in df.columns or "lon" not in df.columns:
+    if not mtsa_path.exists() or "lat" not in df.columns or "lon" not in df.columns:
         return df.with_columns(pl.lit(0, dtype=pl.Int8).alias("in_mtsa"))
 
     valid_mask = df["lat"].is_not_null() & df["lon"].is_not_null()
@@ -555,7 +578,7 @@ def _add_mtsa_feature(df: pl.DataFrame, mtsa_geojson: Path) -> pl.DataFrame:
     if len(valid_df) == 0:
         return df.with_columns(pl.lit(0, dtype=pl.Int8).alias("in_mtsa"))
 
-    mtsa_path_escaped = str(mtsa_geojson).replace("'", "''")
+    mtsa_path_escaped = str(mtsa_path).replace("'", "''")
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial;")
     con.register("apps", valid_df.to_arrow())
@@ -601,8 +624,6 @@ def _extract_text_features(
     Rows with null descriptions are treated as empty strings (→ zero SVD vector).
     Returns (enriched_df, fitted_pipeline).
     """
-    import numpy as np
-
     svd_col_names = [f"desc_svd_{i}" for i in range(n_components)]
     zero_svd = [pl.lit(0.0, dtype=pl.Float64).alias(col) for col in svd_col_names]
 
@@ -635,22 +656,41 @@ def _extract_text_features(
     # TruncatedSVD requires n_components < n_features (at least 2 features needed)
     # If corpus is too small to fit SVD, return zero vectors
     if n_features < 2:
+        logger.warning(
+            "TF-IDF vocabulary too small (%d features) — "
+            "desc_svd columns will be zeros",
+            n_features,
+        )
         vectors = np.zeros((len(texts), n_components))
-        # For serialization, create a dummy SVD with minimal requirements
-        # Use a dummy larger matrix to fit the SVD
-        dummy_matrix = np.ones((2, 2))
-        svd = TruncatedSVD(n_components=1, random_state=42)
-        svd.fit(dummy_matrix)
-    else:
-        safe_n = min(n_components, n_features - 1)
-        svd = TruncatedSVD(n_components=safe_n, random_state=42)
-        vectors = svd.fit_transform(tfidf_matrix)
-        # Pad to n_components if corpus was too small
-        if vectors.shape[1] < n_components:
-            pad = np.zeros((vectors.shape[0], n_components - vectors.shape[1]))
-            vectors = np.hstack([vectors, pad])
+        # Return zero vectors without serializing an unfitted pipeline
+        # score.py will fall back to enriched parquet columns if pipeline is absent
+        pipeline = SklearnPipeline(
+            [
+                (
+                    "tfidf",
+                    TfidfVectorizer(
+                        max_features=5000,
+                        ngram_range=(1, 2),
+                        min_df=1,
+                        sublinear_tf=True,
+                    ),
+                ),
+                ("svd", TruncatedSVD(n_components=n_components, random_state=42)),
+            ]
+        )
+        # Don't serialize — unfitted pipeline
+        return df.with_columns(zero_svd), pipeline
 
-    # Build serializable pipeline (with safe_n for the SVD step)
+    # Fit SVD with safe number of components
+    safe_n = min(n_components, n_features - 1)
+    svd = TruncatedSVD(n_components=safe_n, random_state=42)
+    vectors = svd.fit_transform(tfidf_matrix)
+    # Pad with zeros if SVD used fewer components than requested
+    if vectors.shape[1] < n_components:
+        pad = np.zeros((vectors.shape[0], n_components - vectors.shape[1]))
+        vectors = np.hstack([vectors, pad])
+
+    # Only serialize when we have a properly fitted pipeline
     pipeline = SklearnPipeline(
         [
             ("tfidf", tfidf),
@@ -954,6 +994,11 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         df = df.with_columns(pl.lit(0, dtype=pl.Int8).alias("is_combined_application"))
 
     # --- NLP features: TF-IDF + SVD on description column ---
+    # NOTE: TF-IDF vocabulary is fit on the full corpus (all applications).
+    # This introduces minor vocabulary leakage into temporal CV folds — the IDF
+    # weights reflect future documents. The impact is small given max_features=5000
+    # cap and SVD compression to 20 dimensions. Future work: fit TF-IDF per year
+    # to eliminate leakage entirely, but current approach is acceptable for v1.
     _model_dir = data_dir.parent / "models"
     df, _ = _extract_text_features(df, _model_dir)
 

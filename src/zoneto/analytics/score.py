@@ -119,8 +119,13 @@ def score_all(
     df_dev = pl.read_parquet(dev_enriched)
 
     # Apply NLP vectorizer if available (adds desc_svd_0..19 columns)
+    # Skip if enriched parquet already has SVD columns (idempotency check)
     _tfidf_path = model_dir / "desc_tfidf.joblib"
-    if _tfidf_path.exists() and "description" in df_dev.columns:
+    if (
+        _tfidf_path.exists()
+        and "description" in df_dev.columns
+        and "desc_svd_0" not in df_dev.columns
+    ):
         _tfidf_pipe = joblib.load(_tfidf_path)
         _texts = df_dev["description"].fill_null("").cast(pl.String).to_list()
         _vectors = _tfidf_pipe.transform(_texts)
