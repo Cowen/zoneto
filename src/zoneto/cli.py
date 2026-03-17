@@ -328,11 +328,15 @@ def serve(
         Path,
         typer.Option(help="Model directory."),
     ] = Path("models"),
+    static_dir: Annotated[
+        Path,
+        typer.Option(help="Static files directory."),
+    ] = Path("static"),
 ) -> None:
     """Start the FastAPI serving layer."""
     import uvicorn
 
     from zoneto.api.app import create_app
 
-    application = create_app(data_dir=data_dir, model_dir=model_dir)
+    application = create_app(data_dir=data_dir, model_dir=model_dir, static_dir=static_dir)
     uvicorn.run(application, host=host, port=port)

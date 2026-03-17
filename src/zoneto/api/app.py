@@ -1,4 +1,5 @@
 """FastAPI application factory for Zoneto serving layer."""
+
 from __future__ import annotations
 
 import json
@@ -16,19 +17,18 @@ def _load_production_ready(model_dir: Path) -> dict[str, bool]:
         return {}
     with open(metrics_path) as f:
         metrics: dict[str, Any] = json.load(f)
-    return {
-        name: bool(m.get("production_ready", False))
-        for name, m in metrics.items()
-    }
+    return {name: bool(m.get("production_ready", False)) for name, m in metrics.items()}
 
 
 def create_app(
     data_dir: Path | None = None,
     model_dir: Path | None = None,
+    static_dir: Path | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application."""
     resolved_data_dir = data_dir or Path("data")
     resolved_model_dir = model_dir or Path("models")
+    resolved_static_dir = static_dir or Path("static")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -45,4 +45,14 @@ def create_app(
     )
 
     app.include_router(router)
+
+    if resolved_static_dir.exists():
+        from fastapi.staticfiles import StaticFiles  # noqa: PLC0415
+
+        app.mount(
+            "/",
+            StaticFiles(directory=resolved_static_dir, html=True),
+            name="static",
+        )
+
     return app
