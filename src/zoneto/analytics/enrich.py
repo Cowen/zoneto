@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import zipfile
 from datetime import date as _date
 from pathlib import Path
@@ -9,6 +10,8 @@ from pathlib import Path
 import duckdb
 import polars as pl
 import pyproj
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Reference dataset URLs
@@ -560,6 +563,44 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
     Writes data/enriched/dev_applications.parquet. Returns row count.
     """
     df = pl.read_parquet(data_dir / "dev_applications", hive_partitioning=True)
+
+    # --- AIC application records: prefer over CKAN for matching folderrsn ---
+    # If data/aic_applications/ exists (from 'zoneto aic --full'), merge it:
+    # - AIC records override CKAN records for the same folderrsn
+    # - AIC-only records (not in CKAN) are added to the dataset
+    aic_apps_path = data_dir / "aic_applications"
+    if aic_apps_path.exists() and any(aic_apps_path.rglob("*.parquet")):
+        aic_df = pl.read_parquet(aic_apps_path, hive_partitioning=True)
+        # Ensure folderrsn is String for join
+        if "folderrsn" in aic_df.columns:
+            aic_df = aic_df.with_columns(pl.col("folderrsn").cast(pl.String))
+        if "folderrsn" in df.columns:
+            df = df.with_columns(pl.col("folderrsn").cast(pl.String))
+        # Align schemas: use CKAN schema as base, update matching rows from AIC
+        aic_rsns = (
+            set(aic_df["folderrsn"].to_list())
+            if "folderrsn" in aic_df.columns
+            else set()
+        )
+        # Keep CKAN rows not in AIC; replace CKAN rows that AIC has; add AIC-only rows
+        ckan_only = df.filter(~pl.col("folderrsn").is_in(list(aic_rsns)))
+        # For AIC records, map column names to CKAN schema where possible
+        shared_cols = [c for c in df.columns if c in aic_df.columns]
+        aic_aligned = aic_df.select(shared_cols)
+        # Add missing CKAN columns as nulls
+        for col in df.columns:
+            if col not in aic_aligned.columns:
+                aic_aligned = aic_aligned.with_columns(
+                    pl.lit(None).cast(df[col].dtype).alias(col)
+                )
+        aic_aligned = aic_aligned.select(df.columns)
+        df = pl.concat([ckan_only, aic_aligned], how="diagonal")
+        logger.info(
+            "enrich_dev: merged AIC records — %d CKAN-only, %d from AIC (%d total)",
+            len(ckan_only),
+            len(aic_aligned),
+            len(df),
+        )
 
     # year_submitted and _submitted_date from date_submitted
     # (may be Date/Datetime or String like "2022-08-09T00:00:00")
