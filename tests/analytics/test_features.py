@@ -31,6 +31,9 @@ def test_dev_num_cols() -> None:
         "ward_pct_detached",
         "has_parent_application",
         "is_combined_application",
+        "proposed_storeys",
+        "proposed_units",
+        "ward_appeal_rate_3y",
     ]
 
 

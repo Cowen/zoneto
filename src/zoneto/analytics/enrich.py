@@ -513,6 +513,47 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     return result
 
 
+def _compute_ward_appeal_rate_3y(df: pl.DataFrame) -> pl.DataFrame:
+    """Add ward_appeal_rate_3y: rolling 3-year appeal rate per ward.
+
+    For each row, computes the appeal rate in the same ward using only
+    OZ/SA rows from the 3 years strictly before the row's year_submitted.
+    Returns null when no prior data exists for the ward.
+    """
+    # Build per-ward-per-year appeal stats from labeled OZ/SA rows
+    labeled = df.filter(pl.col("dev_appealed").is_not_null()).select(
+        ["ward_number", "year_submitted", "dev_appealed"]
+    )
+    if labeled.is_empty():
+        return df.with_columns(
+            pl.lit(None, dtype=pl.Float64).alias("ward_appeal_rate_3y")
+        )
+
+    ward_year_stats = labeled.group_by(["ward_number", "year_submitted"]).agg(
+        pl.col("dev_appealed").sum().alias("appeals"),
+        pl.col("dev_appealed").count().alias("total"),
+    )
+
+    # For each unique (ward, year) in the data, compute rolling 3-year rate
+    unique_ward_years = df.select(["ward_number", "year_submitted"]).unique()
+    # Cross-join with ward_year_stats and filter to prior 3 years
+    rates = (
+        unique_ward_years.join(ward_year_stats, on="ward_number", suffix="_hist")
+        .filter(
+            (pl.col("year_submitted_hist") < pl.col("year_submitted"))
+            & (pl.col("year_submitted_hist") >= pl.col("year_submitted") - 3)
+        )
+        .group_by(["ward_number", "year_submitted"])
+        .agg(
+            (pl.col("appeals").sum() / pl.col("total").sum()).alias(
+                "ward_appeal_rate_3y"
+            ),
+        )
+    )
+
+    return df.join(rates, on=["ward_number", "year_submitted"], how="left")
+
+
 def enrich_dev(data_dir: Path = Path("data")) -> int:
     """Enrich dev_applications parquet with spatial features and outcome labels.
 
@@ -593,6 +634,11 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         )
         .alias("is_active")
     )
+
+    # ward_appeal_rate_3y: rolling 3-year appeal rate per ward using only prior years.
+    # Avoids temporal leakage — each row only sees data from years before its own.
+    # Uses OZ+SA rows with non-null dev_appealed for the base rate calculation.
+    df = _compute_ward_appeal_rate_3y(df)
 
     # has_parent_application: SA/CD linked to a parent OZ implies upstream rezoning
     # decided
@@ -677,6 +723,28 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         .alias("dev_days_observed")
     )
     df = df.drop("_raw_days", "_submitted_date")
+
+    # proposed_storeys: extract storey count from description (e.g. "12 storey",
+    # "28-storey", "3 storeys") — regex captures first match, case-insensitive.
+    if "description" in df.columns:
+        df = df.with_columns(
+            pl.col("description")
+            .str.extract(r"(?i)(\d+)\s*-?\s*store?ys?", 1)
+            .cast(pl.Int32, strict=False)
+            .alias("proposed_storeys")
+        )
+        # proposed_units: extract unit count (e.g. "551 units", "186 dwelling units")
+        df = df.with_columns(
+            pl.col("description")
+            .str.extract(r"(?i)(\d+)\s+(?:dwelling\s+)?units?", 1)
+            .cast(pl.Int32, strict=False)
+            .alias("proposed_units")
+        )
+    else:
+        df = df.with_columns(
+            pl.lit(None, dtype=pl.Int32).alias("proposed_storeys"),
+            pl.lit(None, dtype=pl.Int32).alias("proposed_units"),
+        )
 
     # is_combined_application: OZ with OPA in description field (case-insensitive)
     if "description" in df.columns:

@@ -65,32 +65,45 @@ def _predict_regressor(pipe: Any, X: pd.DataFrame, pred_col: str) -> dict[str, l
     return {pred_col: preds}
 
 
-def _predict_survival_median(
-    pipe: Any, X: pd.DataFrame, pred_col: str
-) -> dict[str, list]:
-    """Extract median survival time (time at which S(t) crosses 0.5).
+def _survival_percentile(times: Any, probs: Any, quantile: float) -> float:
+    """Extract the time at which S(t) crosses the given quantile threshold.
 
-    Falls back to max observed time if the survival function never crosses 0.5
-    within the fitted range (right-censored upper tail).
+    For p25 (quantile=0.25): find where S(t) <= 0.75 (75% still surviving).
+    For p50 (quantile=0.50): find where S(t) <= 0.50 (median).
+    For p75 (quantile=0.75): find where S(t) <= 0.25 (25% still surviving).
+
+    Falls back to max observed time if the curve never crosses.
+    """
+    threshold = 1.0 - quantile
+    crossing = times[probs <= threshold]
+    if len(crossing) > 0:
+        return float(crossing[0])
+    return float(times[-1])
+
+
+def _predict_survival_percentiles(pipe: Any, X: pd.DataFrame) -> dict[str, list[float]]:
+    """Extract p25/p50/p75 survival times from fitted survival pipeline.
 
     IMPORTANT: sklearn Pipeline does not proxy predict_survival_function().
     We preprocess X through all pipeline steps except the last (estimator),
     then call predict_survival_function() on the estimator directly.
     """
-    # Preprocess X through all pipeline steps except the final estimator
     X_transformed = pipe[:-1].transform(X)
-    # Call predict_survival_function on the estimator (last pipeline step)
     survival_fns = pipe[-1].predict_survival_function(X_transformed)
-    medians: list[float] = []
+    p25s: list[float] = []
+    p50s: list[float] = []
+    p75s: list[float] = []
     for fn in survival_fns:
         times = fn.x
         probs = fn.y
-        crossing = times[probs <= 0.5]
-        if len(crossing) > 0:
-            medians.append(float(crossing[0]))
-        else:
-            medians.append(float(times[-1]))
-    return {pred_col: medians}
+        p25s.append(_survival_percentile(times, probs, 0.25))
+        p50s.append(_survival_percentile(times, probs, 0.50))
+        p75s.append(_survival_percentile(times, probs, 0.75))
+    return {
+        "pred_dev_days_p25": p25s,
+        "pred_dev_days_p50": p50s,
+        "pred_dev_days_p75": p75s,
+    }
 
 
 def score_all(
@@ -126,25 +139,36 @@ def score_all(
     # Survival model (optional — skip if .joblib absent or not production_ready).
     # Only scores OZ+SA applications — model trained exclusively on OZ+SA; CD/SB/PL
     # have fundamentally different timelines and were never in training data.
+    # Outputs p25/p50/p75 percentiles instead of single median for better UX.
     _surv_model_path = model_dir / "dev_days_to_decision.joblib"
     if _surv_model_path.exists() and production_ready.get("dev_days_to_decision", True):
         _surv_pipe = _load(model_dir, "dev_days_to_decision")
         oz_sa_mask = df_dev["application_type"].is_in(list(_SURVIVAL_TYPES))
         oz_sa_indices = oz_sa_mask.arg_true().to_list()
-        pred_days: list[float | None] = [None] * len(df_dev)
+        _pct_cols = ["pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"]
+        pct_lists: dict[str, list[float | None]] = {
+            c: [None] * len(df_dev) for c in _pct_cols
+        }
         if oz_sa_indices:
             X_surv = df_dev.filter(oz_sa_mask).select(all_dev_cols).to_pandas()
-            surv_result = _predict_survival_median(
-                _surv_pipe, X_surv, "pred_dev_days_to_decision"
-            )
-            for i, val in zip(oz_sa_indices, surv_result["pred_dev_days_to_decision"]):
-                pred_days[i] = val
-        extra["pred_dev_days_to_decision"] = pred_days
+            surv_result = _predict_survival_percentiles(_surv_pipe, X_surv)
+            for col in _pct_cols:
+                for i, val in zip(oz_sa_indices, surv_result[col]):
+                    pct_lists[col][i] = val
+        extra.update(pct_lists)
 
     df_dev_scored = df_dev.with_columns(
         [pl.Series(name=k, values=v) for k, v in extra.items()]
     )
     df_dev_scored.write_parquet(scores_dir / "dev_applications.parquet")
+
+    # Write active applications separately for product visibility.
+    # Active apps are where commercial value lives — developers want to know
+    # about *their* pending application, not historical data.
+    if "is_active" in df_dev_scored.columns:
+        df_active = df_dev_scored.filter(pl.col("is_active") == 1)
+        if len(df_active) > 0:
+            df_active.write_parquet(scores_dir / "dev_applications_active.parquet")
 
     # --- coa ---
     coa_enriched = data_dir / "enriched" / "coa.parquet"
@@ -232,15 +256,13 @@ def score_one(
 
     # Survival model for dev_applications (OZ+SA only — skip non-OZ/SA types and
     # skip if .joblib absent; CD/SB/PL have different timelines and were never trained)
+    # Returns p25/p50/p75 percentiles for project finance timeline planning.
     if source == "dev_applications":
         _surv_path = model_dir / "dev_days_to_decision.joblib"
         if _surv_path.exists() and features.get("application_type") in _SURVIVAL_TYPES:
             _surv_pipe = _load(model_dir, "dev_days_to_decision")
-            _surv_preds = _predict_survival_median(
-                _surv_pipe, X, "pred_dev_days_to_decision"
-            )
-            result["pred_dev_days_to_decision"] = float(
-                _surv_preds["pred_dev_days_to_decision"][0]
-            )
+            _surv_preds = _predict_survival_percentiles(_surv_pipe, X)
+            for key in ("pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"):
+                result[key] = float(_surv_preds[key][0])
 
     return result

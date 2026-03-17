@@ -957,3 +957,194 @@ def test_enrich_dev_appealed_oz_sa_label_coverage(
     assert df.filter(pl.col("folderrsn") == "A4")["dev_appealed"][0] == 0
     # A5: CD + "Refused" → null (not OZ/SA — different appeal mechanism)
     assert df.filter(pl.col("folderrsn") == "A5")["dev_appealed"][0] is None
+
+
+# ---------------------------------------------------------------------------
+# enrich_dev — extract storeys and units from description (P0)
+# ---------------------------------------------------------------------------
+
+
+def _make_dev_parquet_descriptions(tmp_path: Path) -> None:
+    """Write dev_applications parquet with various description patterns."""
+    df = pl.DataFrame(
+        {
+            "folderrsn": ["D1", "D2", "D3", "D4", "D5", "D6"],
+            "application_url": [None] * 6,
+            "description": [
+                "Proposed 12 storey mixed-use building with 551 units",
+                "28-storey residential tower, 186 dwelling units",
+                "3 storeys, no unit count mentioned",
+                "Rezoning to permit commercial use",
+                "A 40 STOREY building with 320 UNITS near transit",
+                None,
+            ],
+            "date_submitted": ["2021-01-01"] * 6,
+            "status": ["Closed"] * 6,
+            "application_type": ["OZ"] * 6,
+            "ward_number": ["Ward 1"] * 6,
+            "community_meeting_date": [None] * 6,
+            "parent_folder_number": [None] * 6,
+            "postal": [None] * 6,
+            "x": [None] * 6,
+            "y": [None] * 6,
+            "source_name": ["dev_applications"] * 6,
+            "year": [2021] * 6,
+        },
+        schema={
+            "folderrsn": pl.Utf8,
+            "application_url": pl.Utf8,
+            "description": pl.Utf8,
+            "date_submitted": pl.Utf8,
+            "status": pl.Utf8,
+            "application_type": pl.Utf8,
+            "ward_number": pl.Utf8,
+            "community_meeting_date": pl.Utf8,
+            "parent_folder_number": pl.Utf8,
+            "postal": pl.Utf8,
+            "x": pl.Utf8,
+            "y": pl.Utf8,
+            "source_name": pl.Utf8,
+            "year": pl.Int32,
+        },
+    ).with_columns(pl.col("date_submitted").str.to_date())
+    out = tmp_path / "dev_applications" / "year=2021"
+    out.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(out / "part0.parquet")
+
+
+def test_enrich_dev_extracts_storeys(
+    tmp_path: Path,
+    stub_spatial_join: None,
+) -> None:
+    """Extract proposed storey count from description via regex."""
+    _make_dev_parquet_descriptions(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+
+    # "12 storey" → 12
+    assert df.filter(pl.col("folderrsn") == "D1")["proposed_storeys"][0] == 12
+    # "28-storey" → 28
+    assert df.filter(pl.col("folderrsn") == "D2")["proposed_storeys"][0] == 28
+    # "3 storeys" → 3
+    assert df.filter(pl.col("folderrsn") == "D3")["proposed_storeys"][0] == 3
+    # No storey mention → null
+    assert df.filter(pl.col("folderrsn") == "D4")["proposed_storeys"][0] is None
+    # "40 STOREY" (case insensitive) → 40
+    assert df.filter(pl.col("folderrsn") == "D5")["proposed_storeys"][0] == 40
+    # null description → null
+    assert df.filter(pl.col("folderrsn") == "D6")["proposed_storeys"][0] is None
+
+
+def test_enrich_dev_extracts_units(
+    tmp_path: Path,
+    stub_spatial_join: None,
+) -> None:
+    """Extract proposed unit count from description via regex."""
+    _make_dev_parquet_descriptions(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+
+    # "551 units" → 551
+    assert df.filter(pl.col("folderrsn") == "D1")["proposed_units"][0] == 551
+    # "186 dwelling units" → 186
+    assert df.filter(pl.col("folderrsn") == "D2")["proposed_units"][0] == 186
+    # No unit mention → null
+    assert df.filter(pl.col("folderrsn") == "D3")["proposed_units"][0] is None
+    # No unit mention → null
+    assert df.filter(pl.col("folderrsn") == "D4")["proposed_units"][0] is None
+    # "320 UNITS" (case insensitive) → 320
+    assert df.filter(pl.col("folderrsn") == "D5")["proposed_units"][0] == 320
+    # null description → null
+    assert df.filter(pl.col("folderrsn") == "D6")["proposed_units"][0] is None
+
+
+# ---------------------------------------------------------------------------
+# enrich_dev — ward rolling 3-year appeal rate (P1)
+# ---------------------------------------------------------------------------
+
+
+def _make_dev_parquet_ward_rates(tmp_path: Path) -> None:
+    """Write dev_applications parquet spanning multiple years/wards for rate tests."""
+    # Ward 1: 2018 (2 apps, 1 appeal), 2019 (2 apps, 0 appeals), 2021 (1 app)
+    # Ward 2: 2018 (1 app, 0 appeals), 2021 (1 app)
+    rows = [
+        ("W1A", "2018-03-01", "OMB Appeal", "OZ", "Ward 1"),
+        ("W1B", "2018-06-01", "Closed", "OZ", "Ward 1"),
+        ("W1C", "2019-02-01", "Refused", "SA", "Ward 1"),
+        ("W1D", "2019-08-01", "Council Approved", "OZ", "Ward 1"),
+        ("W1E", "2021-04-01", "Under Review", "OZ", "Ward 1"),
+        ("W2A", "2018-05-01", "Closed", "SA", "Ward 2"),
+        ("W2B", "2021-06-01", "Under Review", "OZ", "Ward 2"),
+    ]
+    df = pl.DataFrame(
+        {
+            "folderrsn": [r[0] for r in rows],
+            "application_url": [None] * len(rows),
+            "description": ["Rezoning"] * len(rows),
+            "date_submitted": [r[1] for r in rows],
+            "status": [r[2] for r in rows],
+            "application_type": [r[3] for r in rows],
+            "ward_number": [r[4] for r in rows],
+            "community_meeting_date": [None] * len(rows),
+            "parent_folder_number": [None] * len(rows),
+            "postal": [None] * len(rows),
+            "x": [None] * len(rows),
+            "y": [None] * len(rows),
+            "source_name": ["dev_applications"] * len(rows),
+            "year": [int(r[1][:4]) for r in rows],
+        },
+        schema={
+            "folderrsn": pl.Utf8,
+            "application_url": pl.Utf8,
+            "description": pl.Utf8,
+            "date_submitted": pl.Utf8,
+            "status": pl.Utf8,
+            "application_type": pl.Utf8,
+            "ward_number": pl.Utf8,
+            "community_meeting_date": pl.Utf8,
+            "parent_folder_number": pl.Utf8,
+            "postal": pl.Utf8,
+            "x": pl.Utf8,
+            "y": pl.Utf8,
+            "source_name": pl.Utf8,
+            "year": pl.Int32,
+        },
+    ).with_columns(pl.col("date_submitted").str.to_date())
+    out = tmp_path / "dev_applications" / "year=2018"
+    out.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(out / "part0.parquet")
+
+
+def test_enrich_dev_ward_appeal_rate_3y(
+    tmp_path: Path,
+    stub_spatial_join: None,
+) -> None:
+    """Ward rolling 3-year appeal rate uses only prior data, avoids leakage."""
+    _make_dev_parquet_ward_rates(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+
+    assert "ward_appeal_rate_3y" in df.columns
+
+    # W1A (2018, Ward 1): no prior data → null
+    w1a = df.filter(pl.col("folderrsn") == "W1A")["ward_appeal_rate_3y"][0]
+    assert w1a is None
+
+    # W1C (2019, Ward 1): prior data is 2018 Ward 1 (1 appeal / 2 OZ/SA = 0.5)
+    w1c = df.filter(pl.col("folderrsn") == "W1C")["ward_appeal_rate_3y"][0]
+    assert w1c is not None
+    assert abs(w1c - 0.5) < 0.01
+
+    # W1E (2021, Ward 1): prior 3yr = 2018-2020. 2018: 1/2, 2019: 0/2 → 1/4 = 0.25
+    w1e = df.filter(pl.col("folderrsn") == "W1E")["ward_appeal_rate_3y"][0]
+    assert w1e is not None
+    assert abs(w1e - 0.25) < 0.01
+
+    # W2A (2018, Ward 2): no prior data → null
+    w2a = df.filter(pl.col("folderrsn") == "W2A")["ward_appeal_rate_3y"][0]
+    assert w2a is None
+
+    # W2B (2021, Ward 2): prior 3yr = 2018-2020 Ward 2: 0 appeals / 1 app = 0.0
+    w2b = df.filter(pl.col("folderrsn") == "W2B")["ward_appeal_rate_3y"][0]
+    assert w2b is not None
+    assert abs(w2b - 0.0) < 0.01

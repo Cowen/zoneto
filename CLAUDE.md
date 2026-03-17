@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
 <!-- Freshness: 2026-03-16 -->
-<!-- Last reviewed against: main branch (model-critique phase: dev_appealed OZ/SA restriction, production_ready gating, summary command) -->
+<!-- Last reviewed against: main branch (P0/P1: storeys/units extraction, survival percentiles, ward rolling rates, active scoring) -->
 
 ## Purpose
 
@@ -149,7 +149,7 @@ NOTE: Though the CKAN data source identifies `dev_applications` as retired, it s
 Canonical feature column lists for machine learning models:
 
 - `DEV_CAT_COLS` -- categorical features for development applications (application_type, ward_number, zoning_class, secondary_plan_name)
-- `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, has_parent_application, is_combined_application)
+- `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, has_parent_application, is_combined_application, proposed_storeys, proposed_units, ward_appeal_rate_3y)
 - `COA_CAT_COLS` -- categorical features for COA (application_type, sub_type, ward_number, zoning_designation, planning_district, work_type)
 - `COA_NUM_COLS` -- numeric features for COA (year_submitted)
 - `PERMIT_CAT_COLS` -- categorical features for permits (permit_type, structure_type, ward_grid)
@@ -184,6 +184,11 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
   `dev_decision_event` (Int8|null, 1=closed/0=active/null=non-OZ/SA),
   `dev_days_observed` (Int32|null, days_to_decision for events; today-submitted for censored).
   New feature: `is_combined_application` (Int8, 1 if OZ with OPA in description).
+  New features: `proposed_storeys` (Int32|null, regex-extracted from description),
+  `proposed_units` (Int32|null, regex-extracted from description).
+  New feature: `ward_appeal_rate_3y` (Float64|null, rolling 3-year appeal rate for
+  the same ward using only OZ/SA data from years strictly before the application's
+  year_submitted; null when no prior data exists). Temporal leakage-safe.
   `dev_appealed` label (Int8|null): restricted to OZ+SA only. 1=appeal filed, 0=closed without appeal
   (any non-active closed status), null=active/non-OZ/SA. Covers ALL closed OZ+SA apps to preserve
   the true base rate (~15-25%); previously only explicitly-approved rows got 0, causing 50/50 bias.
@@ -234,9 +239,12 @@ Batch and single-application inference from trained joblib models:
 - Checks `models/metrics.json` for `production_ready` flags; skips models where `production_ready: false`
 - For classifiers: outputs `pred_<label>` (int) and `prob_<label>` (float) columns
 - For regressors: outputs `pred_<label>` (float) column only
-- Survival model (`dev_days_to_decision`) only scores OZ+SA rows; non-OZ/SA rows get null
+- Survival model (`dev_days_to_decision`) only scores OZ+SA rows; non-OZ/SA rows get null.
+  Outputs p25/p50/p75 percentile columns instead of single median for better UX.
 - Writes scored parquet to `data/scores/dev_applications.parquet`, `data/scores/coa.parquet`,
   and optionally `data/scores/permits_cleared.parquet` (skips if enriched file absent)
+- Writes `data/scores/dev_applications_active.parquet` containing only active (under-review)
+  applications — the commercially valuable subset for developers querying pending apps
 
 **Single scoring** (`score_one`):
 - `score_one(source, features, model_dir)` -- scores one application dict
@@ -250,7 +258,9 @@ Batch and single-application inference from trained joblib models:
 |---|---|---|---|
 | dev_applications | `pred_dev_appealed` | int | 0/1 appeal prediction |
 | dev_applications | `prob_dev_appealed` | float | appeal probability |
-| dev_applications | `pred_dev_days_to_decision` | float | predicted median days to decision (survival model) |
+| dev_applications | `pred_dev_days_p25` | float | predicted 25th percentile days to decision (survival) |
+| dev_applications | `pred_dev_days_p50` | float | predicted median days to decision (survival) |
+| dev_applications | `pred_dev_days_p75` | float | predicted 75th percentile days to decision (survival) |
 | coa | `pred_coa_approved` | int | 0/1 approval prediction |
 | coa | `prob_coa_approved` | float | approval probability |
 | coa | `pred_coa_days_to_approval` | float | predicted days to approval |

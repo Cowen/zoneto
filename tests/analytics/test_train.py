@@ -37,6 +37,9 @@ def _make_dev_enriched(tmp_path: Path) -> Path:
             "ward_pop_density": [3500.0, 4200.0, 3800.0, 3500.0, 4500.0],
             "ward_pct_detached": [25.5, 20.0, 30.0, 25.5, 18.0],
             "is_combined_application": [0, 0, 0, 0, 0],
+            "proposed_storeys": [12, None, 5, 28, None],
+            "proposed_units": [200, None, 10, 400, None],
+            "ward_appeal_rate_3y": [0.15, None, 0.10, 0.20, None],
             "dev_approved": [1, 0, 1, 1, 0],
             "dev_appealed": [0, None, 0, 1, 0],
         }
@@ -69,6 +72,9 @@ def _make_dev_enriched_large(tmp_path: Path) -> Path:
             "ward_pop_density": ([3500.0 + i * 50 for i in range(n)]),
             "ward_pct_detached": ([25.5 + i * 0.3 for i in range(n)]),
             "is_combined_application": ([0, 1] * 15),
+            "proposed_storeys": ([12, None] * 15),
+            "proposed_units": ([200, None] * 15),
+            "ward_appeal_rate_3y": ([0.15, None] * 15),
             "dev_approved": ([1, 0] * 15),
             "dev_appealed": ([0, 1] * 15),
         }
@@ -715,6 +721,9 @@ def _make_dev_enriched_survival(tmp_path: Path) -> Path:
             "ward_pct_detached": ([20.0 + i * 0.5 for i in range(n)]),
             "has_parent_application": ([0, 1] * 10),
             "is_combined_application": ([1, 0] * 10),
+            "proposed_storeys": ([12, None] * 10),
+            "proposed_units": ([200, None] * 10),
+            "ward_appeal_rate_3y": ([0.15, None] * 10),
             "dev_approved": ([1, 0] * 10),
             "dev_appealed": ([0, 1] * 10),
             # Survival columns:

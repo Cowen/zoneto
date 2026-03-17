@@ -139,6 +139,9 @@ def _make_dev_enriched(tmp_path: Path) -> None:
             "has_community_meeting": [1, 0],
             "has_parent_application": [0, 1],
             "is_combined_application": [1, 0],
+            "proposed_storeys": [12, 0],
+            "proposed_units": [200, 0],
+            "ward_appeal_rate_3y": [0.15, 0.0],
             "ward_pct_renters": [45.5, 50.2],
             "ward_median_income": [75000.0, 80000.0],
             "ward_pop_density": [3500.0, 4200.0],
@@ -274,6 +277,9 @@ def test_score_one_returns_dict(tmp_path: Path) -> None:
             "has_community_meeting": 0,
             "has_parent_application": 0,
             "is_combined_application": 0,
+            "proposed_storeys": 10,
+            "proposed_units": 50,
+            "ward_appeal_rate_3y": 0.15,
             "ward_pct_renters": 45.5,
             "ward_median_income": 75000.0,
             "ward_pop_density": 3500.0,
@@ -373,10 +379,10 @@ def test_score_one_permits(tmp_path: Path) -> None:
     assert "pred_permit_issuance_days" in result
 
 
-def test_score_all_writes_pred_dev_days_to_decision(
+def test_score_all_writes_survival_percentiles(
     tmp_path: Path,
 ) -> None:
-    """score_all() appends pred_dev_days_to_decision when model exists."""
+    """score_all() appends pred_dev_days_p25/p50/p75 when model exists."""
     _make_dev_enriched(tmp_path)
     _make_coa_enriched(tmp_path)
     model_dir = _setup_models(tmp_path)
@@ -384,14 +390,15 @@ def test_score_all_writes_pred_dev_days_to_decision(
     score_all(data_dir=tmp_path, model_dir=model_dir)
 
     df = pl.read_parquet(tmp_path / "scores" / "dev_applications.parquet")
-    assert "pred_dev_days_to_decision" in df.columns
-    assert df["pred_dev_days_to_decision"].dtype in (pl.Float32, pl.Float64)
+    for col in ["pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"]:
+        assert col in df.columns
+        assert df[col].dtype in (pl.Float32, pl.Float64)
 
 
 def test_score_all_skips_survival_model_when_absent(
     tmp_path: Path,
 ) -> None:
-    """score_all() runs without pred_dev_days_to_decision when model .joblib absent."""
+    """score_all() runs without survival percentiles when model .joblib absent."""
     _make_dev_enriched(tmp_path)
     _make_coa_enriched(tmp_path)
     model_dir = tmp_path / "models"
@@ -407,21 +414,23 @@ def test_score_all_skips_survival_model_when_absent(
     score_all(data_dir=tmp_path, model_dir=model_dir)
 
     df = pl.read_parquet(tmp_path / "scores" / "dev_applications.parquet")
-    assert "pred_dev_days_to_decision" not in df.columns
+    for col in ["pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"]:
+        assert col not in df.columns
 
 
-def test_score_one_returns_pred_dev_days_to_decision(
+def test_score_one_returns_survival_percentiles(
     tmp_path: Path,
 ) -> None:
-    """score_one() returns pred_dev_days_to_decision for dev_applications source."""
+    """score_one() returns pred_dev_days_p25/p50/p75 for OZ dev_applications."""
     model_dir = _setup_models(tmp_path)
     features = {col: 0 for col in DEV_CAT_COLS + DEV_NUM_COLS}
     features["application_type"] = "OZ"
 
     result = score_one("dev_applications", features, model_dir=model_dir)
 
-    assert "pred_dev_days_to_decision" in result
-    assert isinstance(result["pred_dev_days_to_decision"], float)
+    for key in ("pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"):
+        assert key in result
+        assert isinstance(result[key], float)
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +454,9 @@ def _make_dev_enriched_mixed_types(tmp_path: Path) -> None:
             "has_community_meeting": [1, 0, 0],
             "has_parent_application": [0, 1, 0],
             "is_combined_application": [1, 0, 0],
+            "proposed_storeys": [12, 0, 5],
+            "proposed_units": [200, 0, 10],
+            "ward_appeal_rate_3y": [0.15, 0.0, 0.0],
             "ward_pct_renters": [45.5, 50.2, 48.0],
             "ward_median_income": [75000.0, 80000.0, 78000.0],
             "ward_pop_density": [3500.0, 4200.0, 3800.0],
@@ -462,7 +474,7 @@ def _make_dev_enriched_mixed_types(tmp_path: Path) -> None:
 
 
 def test_score_all_survival_null_for_non_oz_sa(tmp_path: Path) -> None:
-    """Non-OZ/SA rows should have null pred_dev_days_to_decision."""
+    """Non-OZ/SA rows should have null survival percentiles."""
     _make_dev_enriched_mixed_types(tmp_path)
     _make_coa_enriched(tmp_path)
     model_dir = _setup_models(tmp_path)
@@ -470,24 +482,98 @@ def test_score_all_survival_null_for_non_oz_sa(tmp_path: Path) -> None:
     score_all(data_dir=tmp_path, model_dir=model_dir)
 
     df = pl.read_parquet(tmp_path / "scores" / "dev_applications.parquet")
-    assert "pred_dev_days_to_decision" in df.columns
-    # CD row should be null
-    cd_row = df.filter(pl.col("application_type") == "CD")
-    assert cd_row["pred_dev_days_to_decision"][0] is None
-    # OZ and SA rows should have predictions
+    for col in ["pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"]:
+        assert col in df.columns
+        # CD row should be null
+        cd_row = df.filter(pl.col("application_type") == "CD")
+        assert cd_row[col][0] is None
+    # OZ rows should have predictions
     oz_row = df.filter(pl.col("application_type") == "OZ")
-    assert oz_row["pred_dev_days_to_decision"][0] is not None
+    assert oz_row["pred_dev_days_p50"][0] is not None
 
 
 def test_score_one_survival_skipped_for_non_oz_sa(tmp_path: Path) -> None:
-    """score_one omits pred_dev_days_to_decision for non-OZ/SA application types."""
+    """score_one omits survival percentiles for non-OZ/SA application types."""
     model_dir = _setup_models(tmp_path)
     features = {col: 0 for col in DEV_CAT_COLS + DEV_NUM_COLS}
     features["application_type"] = "CD"
 
     result = score_one("dev_applications", features, model_dir=model_dir)
 
-    assert "pred_dev_days_to_decision" not in result
+    for key in ("pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"):
+        assert key not in result
+
+
+# ---------------------------------------------------------------------------
+# P1: Separate active-application scoring output
+# ---------------------------------------------------------------------------
+
+
+def _make_dev_enriched_with_active(tmp_path: Path) -> None:
+    """Enriched dev parquet with active and closed rows."""
+    df = pl.DataFrame(
+        {
+            "application_type": ["OZ", "SA", "OZ"],
+            "ward_number": ["Ward 1", "Ward 2", "Ward 3"],
+            "zoning_class": ["RS", None, "CR"],
+            "secondary_plan_name": [None, "Midtown", None],
+            "postal_fsa": ["M5V", "M4K", "M6K"],
+            "year_submitted": [2021, 2022, 2023],
+            "in_heritage_register": [0, 1, 0],
+            "in_heritage_district": [0, 0, 0],
+            "in_secondary_plan": [0, 1, 0],
+            "has_community_meeting": [1, 0, 0],
+            "has_parent_application": [0, 1, 0],
+            "is_combined_application": [1, 0, 0],
+            "proposed_storeys": [12, 0, 5],
+            "proposed_units": [200, 0, 10],
+            "ward_appeal_rate_3y": [0.15, 0.0, 0.0],
+            "ward_pct_renters": [45.5, 50.2, 48.0],
+            "ward_median_income": [75000.0, 80000.0, 78000.0],
+            "ward_pop_density": [3500.0, 4200.0, 3800.0],
+            "ward_pct_detached": [25.5, 20.0, 30.0],
+            "dev_approved": [1, 0, None],
+            "dev_appealed": [0, 1, None],
+            "dev_decision_event": [1, 0, None],
+            "dev_days_observed": [525, 800, None],
+            "dev_days_to_decision": [525, None, None],
+            "is_active": [0, 0, 1],
+        }
+    )
+    out = tmp_path / "enriched"
+    out.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(out / "dev_applications.parquet")
+
+
+def test_score_all_writes_active_parquet(tmp_path: Path) -> None:
+    """score_all writes a separate dev_applications_active.parquet for active rows."""
+    _make_dev_enriched_with_active(tmp_path)
+    _make_coa_enriched(tmp_path)
+    model_dir = _setup_models(tmp_path)
+
+    score_all(data_dir=tmp_path, model_dir=model_dir)
+
+    active_path = tmp_path / "scores" / "dev_applications_active.parquet"
+    assert active_path.exists()
+    df_active = pl.read_parquet(active_path)
+    # Only the active row (is_active=1)
+    assert len(df_active) == 1
+    assert df_active["is_active"][0] == 1
+    assert df_active["year_submitted"][0] == 2023
+    # Should have prediction columns
+    assert "pred_dev_appealed" in df_active.columns
+
+
+def test_score_all_active_parquet_absent_when_no_active(tmp_path: Path) -> None:
+    """score_all writes active parquet even if 0 active rows (empty file)."""
+    _make_dev_enriched(tmp_path)  # has no is_active column by default
+    _make_coa_enriched(tmp_path)
+    model_dir = _setup_models(tmp_path)
+
+    score_all(data_dir=tmp_path, model_dir=model_dir)
+
+    # Should still produce the main file
+    assert (tmp_path / "scores" / "dev_applications.parquet").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -534,3 +620,51 @@ def test_score_all_scores_when_metrics_absent(tmp_path: Path) -> None:
     score_all(data_dir=tmp_path, model_dir=model_dir)
     df = pl.read_parquet(tmp_path / "scores" / "coa.parquet")
     assert "pred_coa_approved" in df.columns
+
+
+# ---------------------------------------------------------------------------
+# P0: Survival model percentile output (p25/p50/p75)
+# ---------------------------------------------------------------------------
+
+
+def test_score_all_survival_percentile_columns(tmp_path: Path) -> None:
+    """score_all outputs pred_dev_days_p25, p50, p75 columns for survival model."""
+    _make_dev_enriched_mixed_types(tmp_path)
+    _make_coa_enriched(tmp_path)
+    model_dir = _setup_models(tmp_path)
+
+    score_all(data_dir=tmp_path, model_dir=model_dir)
+
+    df = pl.read_parquet(tmp_path / "scores" / "dev_applications.parquet")
+    for col in ["pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"]:
+        assert col in df.columns, f"Missing column {col}"
+    # OZ/SA rows should have values
+    oz_row = df.filter(pl.col("application_type") == "OZ")
+    assert oz_row["pred_dev_days_p25"][0] is not None
+    assert oz_row["pred_dev_days_p50"][0] is not None
+    assert oz_row["pred_dev_days_p75"][0] is not None
+    # p25 <= p50 <= p75
+    assert oz_row["pred_dev_days_p25"][0] <= oz_row["pred_dev_days_p50"][0]
+    assert oz_row["pred_dev_days_p50"][0] <= oz_row["pred_dev_days_p75"][0]
+    # CD rows should be null
+    cd_row = df.filter(pl.col("application_type") == "CD")
+    assert cd_row["pred_dev_days_p25"][0] is None
+    # Old single median column should be removed
+    assert "pred_dev_days_to_decision" not in df.columns
+
+
+def test_score_one_survival_percentiles(tmp_path: Path) -> None:
+    """score_one returns percentile keys for OZ applications."""
+    model_dir = _setup_models(tmp_path)
+    features = {col: 0 for col in DEV_CAT_COLS + DEV_NUM_COLS}
+    features["application_type"] = "OZ"
+
+    result = score_one("dev_applications", features, model_dir=model_dir)
+
+    assert "pred_dev_days_p25" in result
+    assert "pred_dev_days_p50" in result
+    assert "pred_dev_days_p75" in result
+    assert result["pred_dev_days_p25"] <= result["pred_dev_days_p50"]
+    assert result["pred_dev_days_p50"] <= result["pred_dev_days_p75"]
+    # Old key should not be present
+    assert "pred_dev_days_to_decision" not in result
