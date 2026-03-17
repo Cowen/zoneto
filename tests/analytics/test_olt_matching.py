@@ -1,4 +1,5 @@
 """Tests for OLT-to-dev_applications fuzzy address matching."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,7 +24,7 @@ def olt_parquet(tmp_path: Path) -> Path:
                 "999 Remote Ave, Toronto",
             ],
         }
-    )
+    ).cast({"decision_date": pl.Date})
     path = tmp_path / "reference" / "olt_decisions.parquet"
     path.parent.mkdir(parents=True)
     df.write_parquet(path)
@@ -96,7 +97,7 @@ def test_match_olt_confidence_threshold_filters_weak_matches(
             "decision_date": ["2022-11-30"],
             "address": ["9999 Completely Different Rd, Toronto"],
         }
-    )
+    ).cast({"decision_date": pl.Date})
     olt_path = tmp_path / "reference" / "olt_decisions.parquet"
     olt_path.parent.mkdir(parents=True)
     olt_df.write_parquet(olt_path)
@@ -111,3 +112,50 @@ def test_match_olt_confidence_threshold_filters_weak_matches(
     )
     result = match_olt_to_dev(dev_df, tmp_path)
     assert result["olt_case_number"][0] is None
+
+
+def test_match_olt_uses_street_number_index_for_performance(
+    tmp_path: Path,
+) -> None:
+    """Matching is accelerated via street-number indexing."""
+    # Create OLT data with many addresses, most with street number 999
+    olt_rows = [
+        {
+            "case_number": f"OLT-22-{i:03d}",
+            "outcome": "Dismissed",
+            "decision_date": "2022-11-30",
+            "address": f"999 Oak Ave {i}, Toronto",
+        }
+        for i in range(100)
+    ]
+    # Add a few with street number 100
+    olt_rows.extend(
+        [
+            {
+                "case_number": "OLT-22-100A",
+                "outcome": "Allowed",
+                "decision_date": "2023-02-14",
+                "address": "100 King St W, Toronto",
+            }
+        ]
+    )
+
+    olt_df = pl.DataFrame(olt_rows).cast({"decision_date": pl.Date})
+    olt_path = tmp_path / "reference" / "olt_decisions.parquet"
+    olt_path.parent.mkdir(parents=True)
+    olt_df.write_parquet(olt_path)
+
+    # Create a dev application that should match the 100 King St OLT case
+    dev_df = pl.DataFrame(
+        {
+            "folderrsn": ["F001"],
+            "street_num": ["100"],
+            "street_name": ["King St W"],
+            "year_submitted": pl.Series([2021], dtype=pl.Int32),
+        }
+    )
+
+    result = match_olt_to_dev(dev_df, tmp_path)
+    # Should match the 100 King St case, not any 999 Oak Ave case
+    assert result["olt_case_number"][0] == "OLT-22-100A"
+    assert result["olt_outcome"][0] == "Allowed"

@@ -78,6 +78,8 @@ def test_fetch_olt_decisions_writes_parquet(
     assert "outcome" in df.columns
     assert "decision_date" in df.columns
     assert "address" in df.columns
+    assert df["decision_date"].dtype == pl.Date
+    assert df["hearing_date"].dtype == pl.Date
 
 
 def test_fetch_olt_decisions_parses_case_fields(
@@ -109,6 +111,8 @@ def test_fetch_olt_decisions_parses_case_fields(
     assert df["case_number"][0] == "OLT-22-000123"
     assert df["outcome"][0] == "Allowed"
     assert df["address"][0] == "200 Front St W, Toronto"
+    assert df["decision_date"].dtype == pl.Date
+    assert df["hearing_date"].dtype == pl.Date
 
 
 def test_fetch_olt_decisions_empty_results(
@@ -150,3 +154,30 @@ def test_fetch_olt_decisions_paginates(tmp_path: Path, httpx_mock: HTTPXMock) ->
 
     count = fetch_olt_decisions(tmp_path, delay=0.0)
     assert count == 5
+
+
+def test_fetch_olt_decisions_handles_http_error(
+    tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    """Stops pagination on HTTP error and returns collected data."""
+    page1 = [
+        {"case_number": "PL220001", "address": "100 King St"}
+    ]
+    httpx_mock.add_response(
+        url=re.compile(r"https://olt\.gov\.on\.ca/decisions/"),
+        text=_make_search_html(page1),
+    )
+    httpx_mock.add_response(
+        url=re.compile(r"https://olt\.gov\.on\.ca/decisions/"),
+        status_code=503,
+    )
+
+    count = fetch_olt_decisions(tmp_path, delay=0.0)
+    # Should return the count from page 1 since pagination stopped at page 2 error
+    assert count == 1
+
+    out_path = tmp_path / "reference" / "olt_decisions.parquet"
+    assert out_path.exists()
+    df = pl.read_parquet(out_path)
+    assert len(df) == 1
+    assert df["case_number"][0] == "PL220001"

@@ -39,9 +39,9 @@ def _parse_decisions_page(html: str) -> list[dict]:
             continue
         row: dict = {
             "case_number": cells[0].get_text(strip=True),
-            "municipality": cells[1].get_text(strip=True) if len(cells) > 1 else "",
-            "hearing_date": cells[2].get_text(strip=True) if len(cells) > 2 else "",
-            "decision_date": cells[3].get_text(strip=True) if len(cells) > 3 else "",
+            "municipality": cells[1].get_text(strip=True),
+            "hearing_date": cells[2].get_text(strip=True),
+            "decision_date": cells[3].get_text(strip=True),
             "outcome": cells[4].get_text(strip=True) if len(cells) > 4 else "",
             "address": cells[5].get_text(strip=True) if len(cells) > 5 else "",
         }
@@ -74,8 +74,16 @@ def fetch_olt_decisions(
                 "municipality": municipality,
                 "page": page_num,
             }
-            resp = client.get(_OLT_SEARCH_URL, params=params)
-            resp.raise_for_status()
+            try:
+                resp = client.get(_OLT_SEARCH_URL, params=params)
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                logger.warning(
+                    "OLT: HTTP %d at page %d — stopping",
+                    e.response.status_code,
+                    page_num,
+                )
+                break
 
             rows = _parse_decisions_page(resp.text)
             if not rows:
@@ -99,7 +107,14 @@ def fetch_olt_decisions(
     for row in all_rows:
         row["scraped_at"] = today
 
-    df = pl.DataFrame(all_rows).cast({"scraped_at": pl.Date})
+    df = pl.DataFrame(all_rows).cast(
+        {
+            "scraped_at": pl.Date,
+            "hearing_date": pl.Date,
+            "decision_date": pl.Date,
+        },
+        strict=False,
+    )
     out_path = data_dir / "reference" / "olt_decisions.parquet"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.write_parquet(out_path)
