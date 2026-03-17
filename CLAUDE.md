@@ -1,15 +1,15 @@
 # Zoneto -- Toronto Building Data Pipeline
 
-<!-- Freshness: 2026-03-16 -->
-<!-- Last reviewed against: main branch (P0/P1: storeys/units extraction, survival percentiles, ward rolling rates, active scoring) -->
+<!-- Freshness: 2026-03-17 -->
+<!-- Last reviewed against: product-strategy-pivot branch (Phase 8: SHAP explanations) -->
 
 ## Purpose
 
-Zoneto is a CLI pipeline that fetches City of Toronto building-permit and
-planning-application datasets from the city's CKAN open-data portal, normalizes
-them, stores them as Hive-partitioned Parquet files, and trains ML models to
-predict development application outcomes (approval likelihood, appeal risk,
-and processing time).
+Zoneto is a development application intelligence platform for Toronto. It provides development professionals with structured data on comparable planning applications, outcome patterns, and expected timelines — using ML models to rank and prioritize where the data supports it, and presenting raw data where it doesn't.
+
+The pipeline fetches planning and permit data from the City of Toronto CKAN portal and AIC (Application Information Centre), normalizes it into Hive-partitioned Parquet files, trains ML models on enriched data, and serves predictions and comparables via a FastAPI HTTP API.
+
+**Target user:** Development firms doing site acquisition due diligence.
 
 ## Quick Start
 
@@ -64,16 +64,32 @@ src/zoneto/
     registry.py      SOURCES dict -- the single source of truth for datasets
   analytics/
     __init__.py      Analytics subpackage (empty)
+    explain.py       SHAP feature importance explanations
     features.py      Canonical feature column lists for ML models
     enrich.py        Reference data downloads and enrichment pipelines
     importance.py    Feature importance (permutation + built-in gain)
     train.py         sklearn pipelines and training functions
     score.py         Batch and single-application scoring
+  api/
+    __init__.py      API subpackage
+    app.py           FastAPI app factory with lifespan
+    comps.py         DuckDB query builder for comparables
+    routes.py        GET /health, GET /ready, GET /comps, POST /score
 ```
+
+**Serving layer** (`src/zoneto/api/`):
+- `GET /health` — returns `{"status": "ok"}`
+- `GET /ready` — returns 200 when models + data loaded, 503 otherwise
+- `GET /comps?ward=10&type=OZ&lat=43.65&lon=-79.38&radius_m=500&years=5` — comparable applications
+- `POST /score` — predictions from production-ready models only
+- `POST /score?explain=true` — includes top-5 SHAP contributions per model
+
+Static frontend: `static/index.html` served at `/`.
 
 Data flows:
 - Ingest: CLI -> registry -> source.fetch() -> storage.write_source() -> data/<name>/year=YYYY/*.parquet
 - Analytics: data/<name>/ -> enrich -> data/enriched/*.parquet -> train -> models/*.joblib -> score -> data/scores/*.parquet
+- Serving: models/*.joblib + data/enriched/*.parquet -> FastAPI endpoints
 
 ## Contracts
 
@@ -284,6 +300,7 @@ Note: `dev_days_to_decision` only supports `--builtin` mode (gain-based). Permut
 |---|---|
 | beautifulsoup4 | HTML parsing for AIC scraper |
 | duckdb | OLAP database for analytics |
+| fastapi[standard] | HTTP API framework |
 | httpx | HTTP client for CKAN API |
 | joblib | Serialization and parallel computing for ML models |
 | pandas | DataFrame interchange with scikit-learn |
@@ -294,8 +311,10 @@ Note: `dev_days_to_decision` only supports `--builtin` mode (gain-based). Permut
 | rich | Terminal formatting |
 | scikit-learn | Machine learning library |
 | scikit-survival | Survival analysis (GradientBoostingSurvivalAnalysis, concordance_index_censored) |
+| shap | SHAP feature importance explanations |
 | shapely | Spatial geometry operations |
 | typer | CLI framework |
+| uvicorn[standard] | ASGI server for FastAPI |
 
 Dev: pytest, pytest-httpx, ruff, ty.
 
