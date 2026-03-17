@@ -1,0 +1,36 @@
+# Git and CI
+.git
+.github
+.gitignore
+
+# Development artifacts
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+.pytest_cache
+.ruff_cache
+.ty_cache
+
+# Tests and docs
+tests/
+docs/
+specs/
+scripts/
+*.md
+
+# Raw data (excluded from image — only enriched/scores are needed)
+data/
+!data/enriched/
+!data/scores/
+
+# Models directory excluded by default — COPY models/ in Dockerfile handles it
+# (included via explicit COPY above)
+
+# Editor files
+.vscode
+.idea
+*.swp
+*.swo
