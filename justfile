@@ -12,6 +12,10 @@ status:
 aic:
     uv run zoneto aic
 
+# Fetch full AIC application records (replacement for CKAN dev_applications)
+aic-full:
+    uv run zoneto aic --full
+
 # Enrich data
 enrich:
     uv run zoneto enrich

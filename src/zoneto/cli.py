@@ -87,13 +87,32 @@ def aic(
         float,
         typer.Option(help="Seconds to sleep between AIC requests."),
     ] = 1.0,
+    full: Annotated[
+        bool,
+        typer.Option(
+            "--full/--no-full",
+            help="Fetch full application records from ArcGIS (replaces CKAN).",
+        ),
+    ] = False,
 ) -> None:
-    """Fetch AIC decision dates via ArcGIS REST API (fast, structured data)."""
+    """Scrape AIC portal for OZ/SA decision milestone dates.
+
+    With --full: also fetches complete application records from ArcGIS,
+    writing to data/aic_applications/. This provides a live replacement
+    for the retired CKAN dev_applications dataset.
+    """
     logging.basicConfig(format="%(message)s", level=logging.INFO)
-    console.print("[bold]Fetching AIC decision dates (ArcGIS)...[/bold]")
+    console.print("[bold]Scraping AIC portal...[/bold]")
     try:
-        count = fetch_aic_decisions_arcgis(DATA_DIR)
-        console.print(f"  [green]✓[/green] {count:,} applications fetched")
+        n = fetch_aic_decisions_arcgis(DATA_DIR)
+        console.print(f"[green]✓[/green] AIC decisions: {n} new rows")
+
+        if full:
+            from zoneto.sources.aic import fetch_aic_applications  # noqa: PLC0415
+
+            console.print("[bold]Fetching full AIC application records...[/bold]")
+            n_full = fetch_aic_applications(DATA_DIR)
+            console.print(f"[green]✓[/green] AIC applications: {n_full} rows written")
     except Exception as exc:
         console.print(f"  [red]✗ {exc}[/red]")
         raise typer.Exit(code=1)
