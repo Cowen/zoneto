@@ -16,6 +16,10 @@ aic:
 aic-full:
     uv run zoneto aic --full
 
+# Scrape OLT decisions for Toronto
+olt:
+    uv run zoneto olt
+
 # Enrich data
 enrich:
     uv run zoneto enrich
