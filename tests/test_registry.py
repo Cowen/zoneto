@@ -11,6 +11,7 @@ def test_all_sources_present() -> None:
         "permits_cleared",
         "coa",
         "dev_applications",
+        "aic_applications",
     }
 
 

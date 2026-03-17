@@ -162,3 +162,22 @@ def test_fetch_aic_applications_empty_response(
 
     count = fetch_aic_applications(tmp_path)
     assert count == 0
+
+
+def test_aic_source_implements_protocol(tmp_path: Path) -> None:
+    """AICSource satisfies the Source runtime-checkable protocol."""
+    from zoneto.sources.aic_source import AICSource
+    from zoneto.sources.base import Source
+
+    source = AICSource(data_dir=tmp_path)
+    assert isinstance(source, Source), "AICSource must satisfy Source protocol"
+    assert source.name == "aic_applications"
+
+
+def test_aic_source_in_registry() -> None:
+    """aic_applications key exists in SOURCES dict."""
+    from zoneto.sources.registry import SOURCES
+
+    assert "aic_applications" in SOURCES, (
+        "'aic_applications' must be registered in SOURCES"
+    )
