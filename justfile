@@ -28,6 +28,10 @@ score:
 summary:
     uv run zoneto summary
 
+# Start the FastAPI serving layer
+serve:
+    uv run zoneto serve
+
 # Measure importance of all model input features
 importance-all:
 	ls models/ | grep joblib | sed 's/.joblib//g' | xargs -n1 just importance

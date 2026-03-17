@@ -308,3 +308,31 @@ def score(
     except Exception as exc:
         console.print(f"  [red]✗ {exc}[/red]")
         raise typer.Exit(code=1)
+
+
+@app.command()
+def serve(
+    port: Annotated[
+        int,
+        typer.Option(help="Port to listen on."),
+    ] = 8000,
+    host: Annotated[
+        str,
+        typer.Option(help="Host to bind to."),
+    ] = "0.0.0.0",
+    data_dir: Annotated[
+        Path,
+        typer.Option(help="Data directory."),
+    ] = DATA_DIR,
+    model_dir: Annotated[
+        Path,
+        typer.Option(help="Model directory."),
+    ] = Path("models"),
+) -> None:
+    """Start the FastAPI serving layer."""
+    import uvicorn
+
+    from zoneto.api.app import create_app
+
+    application = create_app(data_dir=data_dir, model_dir=model_dir)
+    uvicorn.run(application, host=host, port=port)
