@@ -8,6 +8,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from zoneto.analytics.explain import explain_one
 from zoneto.analytics.score import score_one
 from zoneto.api.comps import query_comps
 
@@ -49,6 +50,7 @@ class ScoreRequest(BaseModel):
 class ScoreResponse(BaseModel):
     predictions: dict[str, Any]
     production_ready_models: list[str]
+    explanations: dict[str, list[dict[str, Any]]] | None = None
 
 
 # --- endpoints ---
@@ -108,8 +110,8 @@ def comps(
     return CompsResponse(applications=applications, total=len(applications))
 
 
-@router.post("/score", response_model=ScoreResponse)
-def score(request: Request, body: ScoreRequest) -> ScoreResponse:
+@router.post("/score", response_model=ScoreResponse, response_model_exclude_none=True)
+def score(request: Request, body: ScoreRequest, explain: bool = False) -> ScoreResponse:
     model_dir: Path = getattr(request.app.state, "model_dir", Path("models"))
     production_ready: dict[str, bool] = getattr(
         request.app.state, "production_ready", {}
@@ -117,14 +119,33 @@ def score(request: Request, body: ScoreRequest) -> ScoreResponse:
     ready_model_names = [k for k, v in production_ready.items() if v]
 
     if not ready_model_names:
-        return ScoreResponse(predictions={}, production_ready_models=[])
+        return ScoreResponse(
+            predictions={},
+            production_ready_models=[],
+            explanations={} if explain else None,
+        )
 
     try:
         predictions = score_one(body.source, body.features, model_dir)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    explanations: dict[str, list[dict[str, Any]]] | None = None
+    if explain:
+        explanations = {}
+        for model_name in ready_model_names:
+            contribs = explain_one(
+                source=body.source,
+                features=body.features,
+                model_dir=model_dir,
+                model_name=model_name,
+                top_n=5,
+            )
+            if contribs:
+                explanations[model_name] = contribs
+
     return ScoreResponse(
         predictions=predictions,
         production_ready_models=ready_model_names,
+        explanations=explanations,
     )
