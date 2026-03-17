@@ -1,4 +1,5 @@
 """SHAP-based per-application explanation for trained classifiers."""
+
 from __future__ import annotations
 
 import logging
@@ -84,17 +85,20 @@ def explain_one(
             feature_names: list[str] = list(
                 base_pipe.named_steps["preprocessor"].get_feature_names_out()
             )
-        except Exception:
+        except AttributeError as exc:
+            logger.warning("explain_one: could not get feature names: %s", exc)
             feature_names = [f"feature_{i}" for i in range(len(values))]
 
         # Sort by absolute SHAP value, take top_n
-        indexed = sorted(
-            enumerate(values), key=lambda x: abs(x[1]), reverse=True
-        )[:top_n]
+        indexed = sorted(enumerate(values), key=lambda x: abs(x[1]), reverse=True)[
+            :top_n
+        ]
 
         return [
             {
-                "feature": feature_names[i] if i < len(feature_names) else f"feature_{i}",
+                "feature": feature_names[i]
+                if i < len(feature_names)
+                else f"feature_{i}",
                 "shap_value": round(float(v), 4),
                 "direction": "increases_risk" if v > 0 else "decreases_risk",
             }

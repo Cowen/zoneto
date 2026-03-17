@@ -274,8 +274,9 @@
     function renderExplanations(explanations) {
       const entries = Object.entries(explanations);
       if (!entries.length) return;
-      const rows = entries.flatMap(([modelName, contribs]) =>
-        contribs.map(c => {
+      const rows = entries.flatMap(([modelName, contribs]) => {
+        const modelLabel = `<div style="font-size:0.7rem;color:#adb5bd;margin-bottom:0.25rem">${escHtml(modelName.replace(/_/g, ' '))}</div>`;
+        const contribRows = contribs.map(c => {
           const sign = c.direction === 'increases_risk' ? '+' : '−';
           const color = c.direction === 'increases_risk' ? '#dc3545' : '#198754';
           const label = escHtml(c.feature.replace(/__/g, ': ').replace(/_/g, ' '));
@@ -283,8 +284,9 @@
             <span class="pred-label">${label}</span>
             <span class="pred-value" style="color:${color}">${sign}${Math.abs(c.shap_value).toFixed(3)}</span>
           </div>`;
-        })
-      ).join('');
+        }).join('');
+        return modelLabel + contribRows;
+      }).join('');
       if (rows) {
         predictionsEl.innerHTML += `
           <div style="margin-top:0.75rem;border-top:1px solid #dee2e6;padding-top:0.75rem">

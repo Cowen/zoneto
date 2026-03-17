@@ -1,4 +1,5 @@
 """Tests for SHAP explanation generation."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -99,6 +100,7 @@ def test_explain_one_returns_list(trained_model: Path) -> None:
         top_n=5,
     )
     assert isinstance(result, list)
+    assert len(result) > 0
 
 
 def test_explain_one_top_n_limit(trained_model: Path) -> None:
@@ -122,12 +124,12 @@ def test_explain_one_result_shape(trained_model: Path) -> None:
         model_name="dev_applications_appealed",
         top_n=5,
     )
-    if result:
-        for item in result:
-            assert "feature" in item
-            assert "shap_value" in item
-            assert "direction" in item
-            assert item["direction"] in ("increases_risk", "decreases_risk")
+    assert len(result) > 0
+    for item in result:
+        assert "feature" in item
+        assert "shap_value" in item
+        assert "direction" in item
+        assert item["direction"] in ("increases_risk", "decreases_risk")
 
 
 def test_explain_one_missing_model_returns_empty(tmp_path: Path) -> None:

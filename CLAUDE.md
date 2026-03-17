@@ -282,6 +282,14 @@ Batch and single-application inference from trained joblib models:
 | coa | `pred_coa_days_to_approval` | float | predicted days to approval |
 | permits_cleared | `pred_permit_issuance_days` | float | predicted days to permit issuance |
 
+### Explanations (`analytics/explain.py`)
+
+Per-application SHAP feature contributions via TreeExplainer:
+
+- `explain_one(source, features, model_dir, model_name, *, top_n)` -- returns top-N SHAP values for a single application
+- Returns list of dicts with keys: `feature` (str), `shap_value` (float), `direction` (str: "increases_risk" or "decreases_risk")
+- Note: `explain_one()` currently only supports `source="dev_applications"`. Other sources return `[]`.
+
 ### Feature Importance (`analytics/importance.py`)
 
 Computes feature importance for trained models via two methods:

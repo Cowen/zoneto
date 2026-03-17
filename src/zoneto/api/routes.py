@@ -134,6 +134,10 @@ def score(request: Request, body: ScoreRequest, explain: bool = False) -> ScoreR
     if explain:
         explanations = {}
         for model_name in ready_model_names:
+            # Only explain models for the requested source
+            source_prefix = body.source.split("_")[0]  # "dev", "coa", "permits"
+            if not model_name.startswith(source_prefix):
+                continue
             contribs = explain_one(
                 source=body.source,
                 features=body.features,
