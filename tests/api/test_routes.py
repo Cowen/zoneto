@@ -1,0 +1,233 @@
+"""Tests for FastAPI endpoint handlers."""
+from __future__ import annotations
+
+import datetime
+import json
+from collections.abc import Generator
+from pathlib import Path
+
+import polars as pl
+import pytest
+from starlette.testclient import TestClient
+
+from zoneto.api.app import create_app
+
+
+@pytest.fixture
+def data_dir(tmp_path: Path) -> Path:
+    """Minimal test data directory with enriched dev_applications parquet."""
+    enriched_dir = tmp_path / "enriched"
+    enriched_dir.mkdir(parents=True)
+
+    current_year = datetime.date.today().year
+    df = pl.DataFrame(
+        {
+            "folderrsn": ["F001", "F002"],
+            "application_type": ["OZ", "SA"],
+            "ward_number": ["10", "11"],
+            "zoning_class": ["RA1", "RM"],
+            "status": ["Approved", "Active"],
+            "year_submitted": pl.Series(
+                [current_year - 1, current_year - 2], dtype=pl.Int32
+            ),
+            "lat": [43.650, 43.651],
+            "lon": [-79.380, -79.381],
+            "dev_approved": pl.Series([1, None], dtype=pl.Int8),
+            "dev_appealed": pl.Series([0, None], dtype=pl.Int8),
+            "dev_days_to_decision": pl.Series([365, None], dtype=pl.Int32),
+            "proposed_storeys": pl.Series([10, None], dtype=pl.Int32),
+            "proposed_units": pl.Series([100, None], dtype=pl.Int32),
+            "description": ["OZ application", "SA application"],
+            "street_num": ["100", "200"],
+            "street_name": ["King St", "Queen St"],
+        }
+    )
+    df.write_parquet(enriched_dir / "dev_applications.parquet")
+    return tmp_path
+
+
+@pytest.fixture
+def client(data_dir: Path) -> Generator[TestClient, None, None]:
+    """TestClient with app pointed at test data directory (lifespan active)."""
+    app = create_app(data_dir=data_dir, model_dir=data_dir / "models")
+    with TestClient(app) as client:
+        yield client
+
+
+# --- /health ---
+
+
+def test_health_returns_ok(client: TestClient) -> None:
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+# --- /ready ---
+
+
+def test_ready_no_enriched_data_returns_503(tmp_path: Path) -> None:
+    """503 when enriched/dev_applications.parquet does not exist."""
+    app = create_app(data_dir=tmp_path, model_dir=tmp_path / "models")
+    with TestClient(app, raise_server_exceptions=False) as c:
+        response = c.get("/ready")
+    assert response.status_code == 503
+
+
+def test_ready_with_data_returns_200(client: TestClient) -> None:
+    response = client.get("/ready")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["data_available"] is True
+    assert isinstance(body["models_loaded"], list)
+
+
+def test_ready_lists_production_ready_models(tmp_path: Path) -> None:
+    """Lists only models with production_ready=true."""
+    enriched_dir = tmp_path / "enriched"
+    enriched_dir.mkdir(parents=True)
+    # create minimal parquet so /ready passes data check
+    current_year = datetime.date.today().year
+    pl.DataFrame(
+        {
+            "folderrsn": ["F001"],
+            "application_type": ["OZ"],
+            "ward_number": ["10"],
+            "zoning_class": ["RA1"],
+            "status": ["Active"],
+            "year_submitted": pl.Series([current_year - 1], dtype=pl.Int32),
+            "lat": [43.65],
+            "lon": [-79.38],
+            "dev_approved": pl.Series([None], dtype=pl.Int8),
+            "dev_appealed": pl.Series([None], dtype=pl.Int8),
+            "dev_days_to_decision": pl.Series([None], dtype=pl.Int32),
+            "proposed_storeys": pl.Series([None], dtype=pl.Int32),
+            "proposed_units": pl.Series([None], dtype=pl.Int32),
+            "description": ["desc"],
+            "street_num": ["1"],
+            "street_name": ["Main St"],
+        }
+    ).write_parquet(enriched_dir / "dev_applications.parquet")
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    metrics = {
+        "dev_applications_appealed": {"production_ready": True},
+        "coa_approved": {"production_ready": False},
+    }
+    (models_dir / "metrics.json").write_text(json.dumps(metrics))
+
+    app = create_app(data_dir=tmp_path, model_dir=models_dir)
+    with TestClient(app) as c:
+        response = c.get("/ready")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["models_loaded"] == ["dev_applications_appealed"]
+
+
+# --- /comps ---
+
+
+def test_comps_returns_applications(client: TestClient) -> None:
+    response = client.get("/comps")
+    assert response.status_code == 200
+    body = response.json()
+    assert "applications" in body
+    assert isinstance(body["applications"], list)
+    assert body["total"] == len(body["applications"])
+
+
+def test_comps_filters_by_type(client: TestClient) -> None:
+    response = client.get("/comps?type=OZ")
+    assert response.status_code == 200
+    apps = response.json()["applications"]
+    assert all(a["application_type"] == "OZ" for a in apps)
+
+
+def test_comps_filters_by_ward(client: TestClient) -> None:
+    response = client.get("/comps?ward=10")
+    assert response.status_code == 200
+    apps = response.json()["applications"]
+    assert all(a["ward_number"] == "10" for a in apps)
+
+
+def test_comps_missing_data_returns_503(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path, model_dir=tmp_path / "models")
+    with TestClient(app, raise_server_exceptions=False) as c:
+        response = c.get("/comps")
+    assert response.status_code == 503
+
+
+# --- /score ---
+
+
+def test_score_delegates_to_score_one(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /score calls score_one and returns its result."""
+    monkeypatch.setattr(
+        "zoneto.api.routes.score_one",
+        lambda source, features, model_dir: {"prob_dev_appealed": 0.15},
+    )
+    response = client.post(
+        "/score",
+        json={
+            "source": "dev_applications",
+            "features": {"application_type": "OZ", "ward_number": "10"},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["predictions"]["prob_dev_appealed"] == pytest.approx(0.15)
+
+
+def test_score_invalid_source_returns_422(client: TestClient) -> None:
+    response = client.post(
+        "/score",
+        json={"source": "invalid_source", "features": {}},
+    )
+    assert response.status_code == 422
+
+
+def test_score_no_production_ready_models_returns_empty(
+    tmp_path: Path,
+) -> None:
+    """Returns empty predictions when no models are production_ready."""
+    current_year = datetime.date.today().year
+    enriched_dir = tmp_path / "enriched"
+    enriched_dir.mkdir(parents=True)
+    pl.DataFrame(
+        {
+            "folderrsn": ["F001"],
+            "application_type": ["OZ"],
+            "ward_number": ["10"],
+            "zoning_class": ["RA1"],
+            "status": ["Active"],
+            "year_submitted": pl.Series([current_year - 1], dtype=pl.Int32),
+            "lat": [43.65],
+            "lon": [-79.38],
+            "dev_approved": pl.Series([None], dtype=pl.Int8),
+            "dev_appealed": pl.Series([None], dtype=pl.Int8),
+            "dev_days_to_decision": pl.Series([None], dtype=pl.Int32),
+            "proposed_storeys": pl.Series([None], dtype=pl.Int32),
+            "proposed_units": pl.Series([None], dtype=pl.Int32),
+            "description": ["desc"],
+            "street_num": ["1"],
+            "street_name": ["Main St"],
+        }
+    ).write_parquet(enriched_dir / "dev_applications.parquet")
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "metrics.json").write_text(
+        json.dumps({"dev_applications_appealed": {"production_ready": False}})
+    )
+    app = create_app(data_dir=tmp_path, model_dir=models_dir)
+    with TestClient(app) as c:
+        response = c.post(
+            "/score",
+            json={"source": "dev_applications", "features": {}},
+        )
+    assert response.status_code == 200
+    assert response.json()["predictions"] == {}
