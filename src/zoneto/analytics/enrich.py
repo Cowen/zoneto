@@ -8,8 +8,12 @@ from datetime import date as _date
 from pathlib import Path
 
 import duckdb
+import joblib
 import polars as pl
 import pyproj
+from sklearn.decomposition import TruncatedSVD
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.pipeline import Pipeline as SklearnPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -582,6 +586,88 @@ def _add_mtsa_feature(df: pl.DataFrame, mtsa_geojson: Path) -> pl.DataFrame:
     return df.with_columns(in_mtsa_series)
 
 
+def _extract_text_features(
+    df: pl.DataFrame,
+    model_dir: Path,
+    *,
+    n_components: int = 20,
+) -> tuple[pl.DataFrame, SklearnPipeline]:
+    """Extract TF-IDF + TruncatedSVD features from the description column.
+
+    Fits TfidfVectorizer (max_features=5000) + TruncatedSVD on the description
+    column. Serializes the pipeline to model_dir/desc_tfidf.joblib.
+    Adds desc_svd_0..{n_components-1} columns to the DataFrame.
+
+    Rows with null descriptions are treated as empty strings (→ zero SVD vector).
+    Returns (enriched_df, fitted_pipeline).
+    """
+    import numpy as np
+
+    svd_col_names = [f"desc_svd_{i}" for i in range(n_components)]
+    zero_svd = [pl.lit(0.0, dtype=pl.Float64).alias(col) for col in svd_col_names]
+
+    if "description" not in df.columns:
+        pipeline = SklearnPipeline(
+            [
+                (
+                    "tfidf",
+                    TfidfVectorizer(
+                        max_features=5000,
+                        ngram_range=(1, 2),
+                        min_df=1,
+                        sublinear_tf=True,
+                    ),
+                ),
+                ("svd", TruncatedSVD(n_components=n_components, random_state=42)),
+            ]
+        )
+        return df.with_columns(zero_svd), pipeline
+
+    texts = df["description"].fill_null("").cast(pl.String).to_list()
+
+    # Fit TF-IDF first to know vocabulary size
+    tfidf = TfidfVectorizer(
+        max_features=5000, ngram_range=(1, 2), min_df=1, sublinear_tf=True
+    )
+    tfidf_matrix = tfidf.fit_transform(texts)
+    n_features = tfidf_matrix.shape[1]
+
+    # TruncatedSVD requires n_components < n_features (at least 2 features needed)
+    # If corpus is too small to fit SVD, return zero vectors
+    if n_features < 2:
+        vectors = np.zeros((len(texts), n_components))
+        # For serialization, create a dummy SVD with minimal requirements
+        # Use a dummy larger matrix to fit the SVD
+        dummy_matrix = np.ones((2, 2))
+        svd = TruncatedSVD(n_components=1, random_state=42)
+        svd.fit(dummy_matrix)
+    else:
+        safe_n = min(n_components, n_features - 1)
+        svd = TruncatedSVD(n_components=safe_n, random_state=42)
+        vectors = svd.fit_transform(tfidf_matrix)
+        # Pad to n_components if corpus was too small
+        if vectors.shape[1] < n_components:
+            pad = np.zeros((vectors.shape[0], n_components - vectors.shape[1]))
+            vectors = np.hstack([vectors, pad])
+
+    # Build serializable pipeline (with safe_n for the SVD step)
+    pipeline = SklearnPipeline(
+        [
+            ("tfidf", tfidf),
+            ("svd", svd),
+        ]
+    )
+
+    model_dir.mkdir(parents=True, exist_ok=True)
+    joblib.dump(pipeline, model_dir / "desc_tfidf.joblib")
+
+    svd_cols = [
+        pl.Series(f"desc_svd_{i}", vectors[:, i].tolist(), dtype=pl.Float64)
+        for i in range(n_components)
+    ]
+    return df.with_columns(svd_cols), pipeline
+
+
 def _compute_ward_appeal_rate_3y(df: pl.DataFrame) -> pl.DataFrame:
     """Add ward_appeal_rate_3y: rolling 3-year appeal rate per ward.
 
@@ -866,6 +952,10 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         )
     else:
         df = df.with_columns(pl.lit(0, dtype=pl.Int8).alias("is_combined_application"))
+
+    # --- NLP features: TF-IDF + SVD on description column ---
+    _model_dir = data_dir.parent / "models"
+    df, _ = _extract_text_features(df, _model_dir)
 
     out = data_dir / "enriched"
     out.mkdir(parents=True, exist_ok=True)

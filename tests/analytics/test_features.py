@@ -19,7 +19,8 @@ def test_dev_cat_cols() -> None:
 
 def test_dev_num_cols() -> None:
     # is_tlab_era removed: redundant with year_submitted (year >= 2017)
-    assert DEV_NUM_COLS == [
+    assert len(DEV_NUM_COLS) == 35  # 15 base + 20 SVD
+    assert DEV_NUM_COLS[:15] == [
         "year_submitted",
         "in_heritage_register",
         "in_heritage_district",
@@ -37,6 +38,8 @@ def test_dev_num_cols() -> None:
         "in_mtsa",
     ]
     assert "in_mtsa" in DEV_NUM_COLS
+    assert "desc_svd_0" in DEV_NUM_COLS
+    assert "desc_svd_19" in DEV_NUM_COLS
 
 
 def test_coa_cat_cols() -> None:

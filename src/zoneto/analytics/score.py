@@ -117,6 +117,19 @@ def score_all(
     # --- dev_applications ---
     dev_enriched = data_dir / "enriched" / "dev_applications.parquet"
     df_dev = pl.read_parquet(dev_enriched)
+
+    # Apply NLP vectorizer if available (adds desc_svd_0..19 columns)
+    _tfidf_path = model_dir / "desc_tfidf.joblib"
+    if _tfidf_path.exists() and "description" in df_dev.columns:
+        _tfidf_pipe = joblib.load(_tfidf_path)
+        _texts = df_dev["description"].fill_null("").cast(pl.String).to_list()
+        _vectors = _tfidf_pipe.transform(_texts)
+        _svd_cols = [
+            pl.Series(f"desc_svd_{i}", _vectors[:, i].tolist(), dtype=pl.Float64)
+            for i in range(_vectors.shape[1])
+        ]
+        df_dev = df_dev.with_columns(_svd_cols)
+
     all_dev_cols = DEV_CAT_COLS + DEV_NUM_COLS
     X_dev = df_dev.select(all_dev_cols).to_pandas()
 
@@ -178,6 +191,14 @@ def score_one(
     if source == "dev_applications":
         models = _DEV_MODELS
         all_cols = DEV_CAT_COLS + DEV_NUM_COLS
+        # Apply NLP vectorizer if available
+        _tfidf_path = model_dir / "desc_tfidf.joblib"
+        if _tfidf_path.exists() and "description" in features:
+            _tfidf_pipe = joblib.load(_tfidf_path)
+            _text = str(features.get("description") or "")
+            _vec = _tfidf_pipe.transform([_text])
+            for i in range(_vec.shape[1]):
+                features = {**features, f"desc_svd_{i}": float(_vec[0, i])}
     elif source == "coa":
         models = _COA_MODELS
         all_cols = COA_CAT_COLS + COA_NUM_COLS
