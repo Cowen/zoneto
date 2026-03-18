@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
 <!-- Freshness: 2026-03-17 -->
-<!-- Last reviewed against: product-strategy-pivot branch (Phase 8: SHAP explanations) -->
+<!-- Last reviewed against: product-strategy-pivot branch (all 8 phases complete) -->
 
 ## Purpose
 
@@ -20,9 +20,12 @@ just lint                  # ruff check + ty check
 just sync                  # fetch all sources -> data/
 just status                # show row counts and last-modified
 just aic                   # scrape AIC portal for decision dates
+just aic-full              # scrape AIC + fetch full application records from ArcGIS
+just olt                   # scrape Ontario Land Tribunal decisions
 just enrich                # enrich raw parquet with spatial + outcome labels
 just train                 # train ML models from enriched parquet
 just score                 # batch inference -> data/scores/
+just serve                 # start FastAPI serving layer (port 8000)
 just pipeline              # enrich -> train -> score in sequence
 just importance <model>    # permutation feature importance for one model
 just importance-all        # feature importance for all models
@@ -30,6 +33,8 @@ just regression            # performance regression tests (synthetic data, CI-sa
 just regression-integration # performance regression tests against real enriched data
 just update-baselines      # regenerate tests/fixtures/model_baselines.json
 just summary               # print score distributions (percentiles)
+just docker-build          # build Docker image
+just docker-run            # run Docker container (port 8000)
 just fmt                   # ruff format
 ```
 
@@ -41,7 +46,7 @@ The CLI entrypoint is `zoneto` (mapped to `zoneto.cli:app` in pyproject.toml).
 ### Checking data freshness
 
 Always run `just status` before analyzing model results or running the pipeline.
-It shows row counts and last-modified timestamps for all four sources.
+It shows row counts and last-modified timestamps for all five sources.
 
 **COA freshness caveat:** The `coa` source will always show a narrow date range
 (in_date spanning ~2014–2023, heavily concentrated in 2022) even when fully synced.
@@ -54,19 +59,21 @@ within the last two weeks.
 
 ```
 src/zoneto/
-  cli.py             Typer app: `sync`, `status`, `aic`, `enrich`, `train`, `score`, `summary` commands
+  cli.py             Typer app: `sync`, `status`, `aic`, `olt`, `enrich`, `train`, `score`, `summary`, `serve` commands
   models.py          CKANConfig pydantic model
   storage.py         write_source / source_row_counts / last_modified
   sources/
-    aic.py           AIC scraper: fetch_aic_decisions() for OZ/SA milestone dates
+    aic.py           AIC scraper: fetch_aic_decisions_arcgis(), fetch_aic_applications()
+    aic_source.py    AICSource: Source protocol impl for AIC ArcGIS FeatureServer
     base.py          Source protocol (runtime_checkable)
     ckan.py          CKANSource (datastore + bulk_csv modes)
+    olt.py           OLT scraper: fetch_olt_decisions() for Ontario Land Tribunal cases
     registry.py      SOURCES dict -- the single source of truth for datasets
   analytics/
     __init__.py      Analytics subpackage (empty)
     explain.py       SHAP feature importance explanations
     features.py      Canonical feature column lists for ML models
-    enrich.py        Reference data downloads and enrichment pipelines
+    enrich.py        Reference data downloads, NLP vectorization, and enrichment pipelines
     importance.py    Feature importance (permutation + built-in gain)
     train.py         sklearn pipelines and training functions
     score.py         Batch and single-application scoring
@@ -75,6 +82,9 @@ src/zoneto/
     app.py           FastAPI app factory with lifespan
     comps.py         DuckDB query builder for comparables
     routes.py        GET /health, GET /ready, GET /comps, POST /score
+static/
+  index.html         Frontend: comps search, score, SHAP explanations
+Dockerfile           Production container (Python 3.13-slim, uvicorn)
 ```
 
 **Serving layer** (`src/zoneto/api/`):
@@ -133,30 +143,40 @@ creates correct Hive directories while pyarrow creates flat files.
 |---|---|---|---|---|
 | `permits_active` | building-permits-active-permits | datastore | 2020 | `application_date` (default) |
 | `permits_cleared` | building-permits-cleared-permits | datastore | 2020 | `application_date` (default) |
-| `coa` | committee-of-adjustment-applications | bulk_csv | 2015 | `application_date` (default) |
+| `coa` | committee-of-adjustment-applications | bulk_csv | 2018 | `application_date` (default) |
 | `dev_applications` | development-applications | datastore | 2000 | `date_submitted` |
+| `aic_applications` | AIC ArcGIS FeatureServer | AICSource | — | — |
 
 NOTE: Though the CKAN data source identifies `dev_applications` as retired, it still has data indicating it is being actively updated.
+`aic_applications` fetches live records from the AIC ArcGIS REST API (COTGEO_IBMS_AIC_POINT),
+providing a live alternative to the retired CKAN dev_applications dataset.
 
 ### CLI (`cli.py`)
 
 - `zoneto sync [--source NAME]` -- fetches one or all sources, writes Parquet
   to `./data/`. Prints colored output via Rich.
 - `zoneto status` -- prints a Rich table of row counts and last-modified times.
-- `zoneto aic [--delay FLOAT]` -- scrapes AIC portal for OZ/SA decision milestone dates.
-  Caches results to `data/reference/aic_decisions.parquet`. Default delay: 1.0s/request.
-- `zoneto enrich [--fetch-ref/--no-fetch-ref] [--fetch-aic/--no-fetch-aic]` -- enriches raw parquet with outcome
-  labels and spatial features. Downloads reference datasets to `data/reference/` if
-  `--fetch-ref` (default). Scrapes AIC portal for decision dates if `--fetch-aic` (default).
-  Enriches COA, dev_applications, and permits_cleared.
-  Writes enriched parquet to `data/enriched/`.
-- `zoneto train [--model-dir PATH]` -- trains 3-5 outcome-prediction models from
-  enriched parquet (permit and survival models optional). Serializes to `models/*.joblib` (default: `./models`).
-  dev_applications_approved is retired (dataset frozen, 97.3% class imbalance).
+- `zoneto aic [--delay FLOAT] [--full/--no-full]` -- scrapes AIC portal (ArcGIS FeatureServer)
+  for OZ/SA decision milestone dates. Caches results to `data/reference/aic_decisions.parquet`.
+  With `--full`: also fetches complete application records to `data/aic_applications/`.
+- `zoneto olt [--delay FLOAT]` -- scrapes Ontario Land Tribunal decisions for Toronto.
+  Writes `data/reference/olt_decisions.parquet`. Default delay: 2.0s/request.
+- `zoneto enrich [--fetch-ref/--no-fetch-ref] [--fetch-aic/--no-fetch-aic] [--fetch-olt/--no-fetch-olt]` --
+  enriches raw parquet with outcome labels and spatial features. Downloads reference
+  datasets to `data/reference/` if `--fetch-ref` (default). Scrapes AIC portal for
+  decision dates if `--fetch-aic` (default). With `--fetch-olt`: fuzzy-matches OLT
+  decisions to dev_applications (requires prior `zoneto olt` run). Enriches COA,
+  dev_applications, and permits_cleared. Writes enriched parquet to `data/enriched/`.
+- `zoneto train [--model-dir PATH]` -- trains 2-3 outcome-prediction models from
+  enriched parquet (survival model optional). Serializes to `models/*.joblib` (default: `./models`).
+  Retired models: dev_applications_approved, coa_approved, permit_issuance_days.
+  coa_days_to_approval is trained for metric tracking only (not served).
 - `zoneto score [--model-dir PATH]` -- runs batch inference on enriched parquet using
   trained models. Writes scored parquet to `data/scores/`.
 - `zoneto summary` -- prints percentile distributions (p5/p25/p50/p75/p95) and mean
   for all `pred_*` and `prob_*` columns in scored parquet files under `data/scores/`.
+- `zoneto serve [--port INT] [--host STR] [--data-dir PATH] [--model-dir PATH] [--static-dir PATH]` --
+  starts the FastAPI serving layer. Default: `0.0.0.0:8000`.
 
 `DATA_DIR` defaults to `Path("data")` (cwd-relative).
 
@@ -165,7 +185,7 @@ NOTE: Though the CKAN data source identifies `dev_applications` as retired, it s
 Canonical feature column lists for machine learning models:
 
 - `DEV_CAT_COLS` -- categorical features for development applications (application_type, ward_number, zoning_class, secondary_plan_name)
-- `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, has_parent_application, is_combined_application, proposed_storeys, proposed_units, ward_appeal_rate_3y)
+- `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, has_parent_application, is_combined_application, proposed_storeys, proposed_units, ward_appeal_rate_3y, in_mtsa, desc_svd_0..desc_svd_19)
 - `COA_CAT_COLS` -- categorical features for COA (application_type, sub_type, ward_number, zoning_designation, planning_district, work_type)
 - `COA_NUM_COLS` -- numeric features for COA (year_submitted)
 - `PERMIT_CAT_COLS` -- categorical features for permits (permit_type, structure_type, ward_grid)
@@ -180,14 +200,20 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
 - Heritage register (ZIP → SHP with WGS84 points) -- flag properties in register
 - Heritage districts (ZIP → SHP) -- flag properties in district
 - Secondary plans (GeoJSON) -- flag properties in plan area
-- AIC decisions (scraped via `fetch_aic_decisions()` — `data/reference/aic_decisions.parquet`)
+- MTSA boundaries (ZIP -> SHP — `mtsa/`) -- Major Transit Station Areas; flag properties in MTSA zones
+- AIC decisions (scraped via `fetch_aic_decisions_arcgis()` — `data/reference/aic_decisions.parquet`)
   Schema: `folderrsn (String), decision_date (Date|null), complete_date (Date|null), scraped_at (Date)`
   OZ: "City Council Decision Made"; SA: "Statement of Approval Issued"
+- OLT decisions (scraped via `fetch_olt_decisions()` — `data/reference/olt_decisions.parquet`)
+  Schema: `case_number (String), municipality (String), hearing_date (Date|null), decision_date (Date|null), outcome (String), address (String), scraped_at (Date)`
 
 **Enrichment functions**:
-- `fetch_reference(data_dir)` -- downloads/extracts all reference datasets (idempotent)
-- `fetch_aic_decisions(data_dir, *, delay=1.0)` -- scrapes AIC portal for OZ+SA milestone dates.
+- `fetch_reference(data_dir)` -- downloads/extracts all reference datasets including MTSA (idempotent)
+- `fetch_aic_decisions_arcgis(data_dir, *, batch_size=200)` -- scrapes AIC ArcGIS FeatureServer for OZ+SA milestone dates.
   Idempotent: skips already-scraped `folderrsn` values. Returns count of newly scraped rows.
+- `fetch_aic_applications(data_dir, *, batch_size=200)` -- fetches ALL AIC application records from ArcGIS
+  FeatureServer. Writes Hive-partitioned Parquet to `data/aic_applications/year=YYYY/`. Provides a live
+  replacement for the retired CKAN dev_applications dataset.
 - `enrich_coa(data_dir)` -- deduplicates on `reference_file` (handles consolidated CSV overlap),
   enriches COA with outcome labels, ward_number, year_submitted,
   planning_district (preserved from source), coa_approved (1/0/null), coa_days_to_approval regression target.
@@ -208,6 +234,14 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
   `dev_appealed` label (Int8|null): restricted to OZ+SA only. 1=appeal filed, 0=closed without appeal
   (any non-active closed status), null=active/non-OZ/SA. Covers ALL closed OZ+SA apps to preserve
   the true base rate (~15-25%); previously only explicitly-approved rows got 0, causing 50/50 bias.
+  New spatial feature: `in_mtsa` (Int8, 1 if application point falls within MTSA boundary polygon).
+  NLP features: `desc_svd_0..desc_svd_19` (Float64) -- TF-IDF vectorization of application
+  description text, reduced to 20 dimensions via TruncatedSVD. The TF-IDF+SVD pipeline is
+  serialized to `models/desc_tfidf.joblib` for reuse during scoring.
+- `match_olt_to_dev(dev_df, data_dir, *, confidence_threshold=0.75)` -- fuzzy-matches OLT decisions
+  to dev_applications via address similarity (difflib.SequenceMatcher). Adds columns:
+  `olt_case_number` (String|null), `olt_outcome` (String|null), `olt_decision_date` (Date|null).
+  Indexed by street number for performance. Returns enriched DataFrame.
 - `enrich_permits(data_dir)` -- enriches permits_cleared with application_year (Int32,
   from application_date year) and permit_issuance_days (Int32, issued_date - application_date
   in calendar days). Drops rows with non-positive issuance days. Writes
@@ -218,15 +252,16 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
 Trains sklearn HistGradientBoosting classifiers and regressors from enriched parquet:
 
 **Models**:
-| File | Type | Target | Source | Label filter |
+| File | Type | Target | Source | Status |
 |---|---|---|---|---|
-| `dev_applications_appealed.joblib` | CalibratedClassifierCV(HistGradientBoostingClassifier) | `dev_appealed` | enriched dev_applications | drop null |
-| `coa_approved.joblib` | CalibratedClassifierCV(HistGradientBoostingClassifier) | `coa_approved` | enriched coa | drop null |
-| `coa_days_to_approval.joblib` | HistGradientBoostingRegressor | `coa_days_to_approval` | enriched coa | drop null |
-| `permit_issuance_days.joblib` | HistGradientBoostingRegressor | `permit_issuance_days` | enriched permits_cleared | drop null (optional, skip if absent) |
-| `dev_days_to_decision.joblib` | GradientBoostingSurvivalAnalysis | `dev_days_observed`/`dev_decision_event` | enriched dev_applications | OZ+SA only (null event = excluded); trained only if AIC scraped |
+| `dev_applications_appealed.joblib` | CalibratedClassifierCV(HistGradientBoostingClassifier) | `dev_appealed` | enriched dev_applications | **production** |
+| `coa_days_to_approval.joblib` | HistGradientBoostingRegressor | `coa_days_to_approval` | enriched coa | **tracking only** (not served) |
+| `dev_days_to_decision.joblib` | GradientBoostingSurvivalAnalysis | `dev_days_observed`/`dev_decision_event` | enriched dev_applications | optional (requires AIC scrape) |
 
-Note: `dev_applications_approved` is retired — dataset frozen (no new records), 97.3% class imbalance, ±0.267 AUC variance. Not trained or scored.
+**Retired models** (not trained or scored):
+- `dev_applications_approved` -- dataset frozen (no new records), 97.3% class imbalance, +/-0.267 AUC variance
+- `coa_approved` -- AUC 0.535 with 94% base rate; worse than majority class. Cannot be improved with structured features
+- `permit_issuance_days` -- R-squared 0.039 on 133K rows; queue depth (primary driver) not in open data
 
 **Pipeline architecture**:
 - ColumnTransformer with OrdinalEncoder for categorical features
@@ -242,7 +277,7 @@ Note: `dev_applications_approved` is retired — dataset frozen (no new records)
 - `train_survival(enriched_path, time_col, event_col, cat_cols, num_cols, model_name, model_dir)` -- trains a GradientBoostingSurvivalAnalysis model. Filters to non-null event rows (OZ+SA only). Labels are structured numpy array `[(event: bool, time: int)]`. No calibration. Returns row count.
 - `evaluate_source(enriched_path, label_col, cat_cols, num_cols, *, regressor, cv, year_col)` -- temporal CV evaluation; returns per-metric mean/std dict. Uses `TimeSeriesSplit` when `year_col` is set and present (avoids future-data leakage). Caps cv at n_samples - 1 for all splitter types. Classifiers return roc_auc, neg_brier_score, avg_precision; regressors return r2, neg_mae, neg_rmse.
 - `evaluate_survival(enriched_path, time_col, event_col, cat_cols, num_cols, *, cv, year_col)` -- temporal CV for survival model. Uses `concordance_index_censored` for scoring each fold. Returns concordance_index_mean/std and n.
-- `train_all(data_dir, model_dir)` -- trains 3-5 models (dev_approved retired; permit and survival models optional), evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict}). Each metrics dict includes `production_ready` (bool): classifiers require roc_auc_mean >= 0.65; regressors require r2_mean >= 0.10 (raised from 0.0 — models explaining <10% of variance are not useful).
+- `train_all(data_dir, model_dir)` -- trains 2-3 models (dev_applications_appealed + coa_days_to_approval always; survival optional). Evaluates with temporal CV, returns ({model_name: row_count}, {model_name: metrics_dict}). Each metrics dict includes `production_ready` (bool): classifiers require roc_auc_mean >= 0.65; regressors require r2_mean >= 0.10. `coa_days_to_approval` is forced `production_ready: false` regardless of metrics (tracking only). Retired: dev_approved, coa_approved, permit_issuance_days.
   Optional survival model (trained if `dev_days_observed` present in enriched dev parquet):
   dev_days_to_decision. Survival model uses c-index threshold (>= 0.65) for `production_ready`.
 
@@ -253,12 +288,13 @@ Batch and single-application inference from trained joblib models:
 **Batch scoring** (`score_all`):
 - Reads enriched parquet from `data/enriched/`, loads models from `models/`
 - Checks `models/metrics.json` for `production_ready` flags; skips models where `production_ready: false`
+- Only dev_applications models are scored (coa and permit models are retired/tracking-only)
+- Applies NLP vectorizer (`models/desc_tfidf.joblib`) to add `desc_svd_*` columns if not already present
 - For classifiers: outputs `pred_<label>` (int) and `prob_<label>` (float) columns
 - For regressors: outputs `pred_<label>` (float) column only
 - Survival model (`dev_days_to_decision`) only scores OZ+SA rows; non-OZ/SA rows get null.
   Outputs p25/p50/p75 percentile columns instead of single median for better UX.
-- Writes scored parquet to `data/scores/dev_applications.parquet`, `data/scores/coa.parquet`,
-  and optionally `data/scores/permits_cleared.parquet` (skips if enriched file absent)
+- Writes scored parquet to `data/scores/dev_applications.parquet`
 - Writes `data/scores/dev_applications_active.parquet` containing only active (under-review)
   applications — the commercially valuable subset for developers querying pending apps
 
@@ -277,10 +313,8 @@ Batch and single-application inference from trained joblib models:
 | dev_applications | `pred_dev_days_p25` | float | predicted 25th percentile days to decision (survival) |
 | dev_applications | `pred_dev_days_p50` | float | predicted median days to decision (survival) |
 | dev_applications | `pred_dev_days_p75` | float | predicted 75th percentile days to decision (survival) |
-| coa | `pred_coa_approved` | int | 0/1 approval prediction |
-| coa | `prob_coa_approved` | float | approval probability |
-| coa | `pred_coa_days_to_approval` | float | predicted days to approval |
-| permits_cleared | `pred_permit_issuance_days` | float | predicted days to permit issuance |
+
+Note: COA and permit scoring columns are no longer produced (models retired).
 
 ### Explanations (`analytics/explain.py`)
 
@@ -301,6 +335,35 @@ Computes feature importance for trained models via two methods:
 **Supported models** (`_MODEL_META` registry): dev_applications_appealed, coa_approved, coa_days_to_approval, permit_issuance_days, dev_days_to_decision
 
 Note: `dev_days_to_decision` only supports `--builtin` mode (gain-based). Permutation importance raises an error because sksurv does not support standard sklearn scorers.
+
+### OLT Scraper (`sources/olt.py`)
+
+Scrapes Ontario Land Tribunal decisions for Toronto:
+
+- `fetch_olt_decisions(data_dir, *, delay=2.0, municipality="Toronto", max_pages=500)` -- paginates OLT search results, rate-limited. Writes `data/reference/olt_decisions.parquet`. Returns count of decisions fetched.
+- Schema: `case_number, municipality, hearing_date, decision_date, outcome, address, scraped_at`
+
+### AIC Source (`sources/aic_source.py`)
+
+`AICSource` implements the Source protocol for the AIC ArcGIS FeatureServer:
+
+- `name = "aic_applications"`
+- `fetch()` calls `fetch_aic_applications()` and returns the full DataFrame
+- Registered in `SOURCES` dict alongside CKAN sources
+
+### Comps Query Builder (`api/comps.py`)
+
+- `query_comps(enriched_path, *, application_type, ward_number, lat, lon, radius_m, years, limit)` -- queries comparable development applications from enriched Parquet via DuckDB
+- Supports spatial filtering with bounding box approximation (lat/lon + radius_m)
+- Returns applications sorted by proximity (when lat/lon provided) or recency (year_submitted DESC)
+- Returns list of dicts with: folderrsn, application_type, ward_number, zoning_class, status, year_submitted, lat, lon, dev_approved, dev_appealed, dev_days_to_decision, proposed_storeys, proposed_units, description, street_address, dist_sq
+
+### App Factory (`api/app.py`)
+
+- `create_app(data_dir, model_dir, static_dir)` -- creates configured FastAPI application
+- Lifespan loads `production_ready` flags from `metrics.json` into app state
+- Mounts `static/` directory for HTML frontend if it exists
+- Static files mounted at `/` with `html=True` (serves `index.html` as default)
 
 ## Dependencies
 
@@ -325,6 +388,17 @@ Note: `dev_days_to_decision` only supports `--builtin` mode (gain-based). Permut
 | uvicorn[standard] | ASGI server for FastAPI |
 
 Dev: pytest, pytest-httpx, ruff, ty.
+
+## Docker
+
+Production container uses `python:3.13-slim` with `uv` for dependency management.
+Build requires `data/enriched/`, `data/scores/`, `models/`, and `static/` to exist
+(generated by the pipeline). Runs as non-root `appuser`.
+
+```bash
+just docker-build          # builds zoneto:latest
+just docker-run            # runs on port 8000
+```
 
 ## Invariants
 
