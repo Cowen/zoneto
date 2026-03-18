@@ -156,3 +156,4 @@ def test_explain_one_works_with_calibrated_model(
         top_n=5,
     )
     assert isinstance(result, list)
+    assert len(result) > 0
