@@ -160,9 +160,7 @@ def test_fetch_olt_decisions_handles_http_error(
     tmp_path: Path, httpx_mock: HTTPXMock
 ) -> None:
     """Stops pagination on HTTP error and returns collected data."""
-    page1 = [
-        {"case_number": "PL220001", "address": "100 King St"}
-    ]
+    page1 = [{"case_number": "PL220001", "address": "100 King St"}]
     httpx_mock.add_response(
         url=re.compile(r"https://olt\.gov\.on\.ca/decisions/"),
         text=_make_search_html(page1),

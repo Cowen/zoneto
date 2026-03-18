@@ -377,6 +377,7 @@ def fetch_reference(data_dir: Path = Path("data")) -> None:
                             (ref / f"mtsa.{ext}").write_bytes(src.read_bytes())
                 # Clean up extracted directory
                 import shutil
+
                 shutil.rmtree(mtsa_dir)
             except Exception:
                 logger.warning(

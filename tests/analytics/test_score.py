@@ -417,8 +417,10 @@ def _make_dev_enriched_mixed_types(tmp_path: Path) -> None:
             "proposed_units": [200, 0, 10],
             "ward_appeal_rate_3y": [0.15, 0.0, 0.0],
             "in_mtsa": [1, 0, 0],
-            **{f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3), float((i + 2) % 3)]
-               for i in range(20)},
+            **{
+                f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3), float((i + 2) % 3)]
+                for i in range(20)
+            },
             "ward_pct_renters": [45.5, 50.2, 48.0],
             "ward_median_income": [75000.0, 80000.0, 78000.0],
             "ward_pop_density": [3500.0, 4200.0, 3800.0],
@@ -491,8 +493,10 @@ def _make_dev_enriched_with_active(tmp_path: Path) -> None:
             "proposed_units": [200, 0, 10],
             "ward_appeal_rate_3y": [0.15, 0.0, 0.0],
             "in_mtsa": [1, 0, 0],
-            **{f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3), float((i + 2) % 3)]
-               for i in range(20)},
+            **{
+                f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3), float((i + 2) % 3)]
+                for i in range(20)
+            },
             "ward_pct_renters": [45.5, 50.2, 48.0],
             "ward_median_income": [75000.0, 80000.0, 78000.0],
             "ward_pop_density": [3500.0, 4200.0, 3800.0],

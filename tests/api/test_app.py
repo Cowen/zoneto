@@ -53,24 +53,26 @@ def test_frontend_served_at_root(tmp_path: Path) -> None:
     current_year = datetime.date.today().year
     enriched_dir = tmp_path / "enriched"
     enriched_dir.mkdir(parents=True)
-    pl.DataFrame({
-        "folderrsn": ["F001"],
-        "application_type": ["OZ"],
-        "ward_number": ["10"],
-        "zoning_class": ["RA1"],
-        "status": ["Active"],
-        "year_submitted": pl.Series([current_year - 1], dtype=pl.Int32),
-        "lat": [43.65],
-        "lon": [-79.38],
-        "dev_approved": pl.Series([None], dtype=pl.Int8),
-        "dev_appealed": pl.Series([None], dtype=pl.Int8),
-        "dev_days_to_decision": pl.Series([None], dtype=pl.Int32),
-        "proposed_storeys": pl.Series([None], dtype=pl.Int32),
-        "proposed_units": pl.Series([None], dtype=pl.Int32),
-        "description": ["desc"],
-        "street_num": ["1"],
-        "street_name": ["Main St"],
-    }).write_parquet(enriched_dir / "dev_applications.parquet")
+    pl.DataFrame(
+        {
+            "folderrsn": ["F001"],
+            "application_type": ["OZ"],
+            "ward_number": ["10"],
+            "zoning_class": ["RA1"],
+            "status": ["Active"],
+            "year_submitted": pl.Series([current_year - 1], dtype=pl.Int32),
+            "lat": [43.65],
+            "lon": [-79.38],
+            "dev_approved": pl.Series([None], dtype=pl.Int8),
+            "dev_appealed": pl.Series([None], dtype=pl.Int8),
+            "dev_days_to_decision": pl.Series([None], dtype=pl.Int32),
+            "proposed_storeys": pl.Series([None], dtype=pl.Int32),
+            "proposed_units": pl.Series([None], dtype=pl.Int32),
+            "description": ["desc"],
+            "street_num": ["1"],
+            "street_name": ["Main St"],
+        }
+    ).write_parquet(enriched_dir / "dev_applications.parquet")
 
     # create static/index.html in a temp static dir
     static_dir = tmp_path / "static"
