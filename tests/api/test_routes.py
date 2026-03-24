@@ -7,8 +7,10 @@ import json
 from collections.abc import Generator
 from pathlib import Path
 
+import httpx
 import polars as pl
 import pytest
+from pytest_httpx import HTTPXMock
 from starlette.testclient import TestClient
 
 from zoneto.api.app import create_app
@@ -278,3 +280,52 @@ def test_score_returns_empty_when_no_metrics_file(tmp_path: Path) -> None:
         )
     assert response.status_code == 200
     assert response.json()["predictions"] == {}
+
+
+# --- /geocode ---
+
+
+def test_geocode_returns_lat_lon(client: TestClient, httpx_mock: HTTPXMock) -> None:
+    """GET /geocode returns lat, lon, display_name from Nominatim."""
+    httpx_mock.add_response(
+        json=[
+            {
+                "lat": "43.6426",
+                "lon": "-79.3871",
+                "display_name": "441 King St W, Toronto, ON",
+            }
+        ]
+    )
+    response = client.get("/geocode?address=441+King+St+W")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["lat"] == pytest.approx(43.6426)
+    assert body["lon"] == pytest.approx(-79.3871)
+    assert body["display_name"] == "441 King St W, Toronto, ON"
+
+
+def test_geocode_no_results_returns_404(
+    client: TestClient, httpx_mock: HTTPXMock
+) -> None:
+    """GET /geocode returns 404 when Nominatim returns empty list."""
+    httpx_mock.add_response(json=[])
+    response = client.get("/geocode?address=nonexistent+place+xyz")
+    assert response.status_code == 404
+
+
+def test_geocode_nominatim_timeout_returns_504(
+    client: TestClient, httpx_mock: HTTPXMock
+) -> None:
+    """GET /geocode returns 504 when Nominatim times out."""
+    httpx_mock.add_exception(httpx.TimeoutException("timed out"))
+    response = client.get("/geocode?address=441+King+St+W")
+    assert response.status_code == 504
+
+
+def test_geocode_nominatim_upstream_error_returns_502(
+    client: TestClient, httpx_mock: HTTPXMock
+) -> None:
+    """GET /geocode returns 502 when Nominatim returns a non-2xx status."""
+    httpx_mock.add_response(status_code=503)
+    response = client.get("/geocode?address=441+King+St+W")
+    assert response.status_code == 502
