@@ -102,16 +102,12 @@
           </select>
         </div>
         <div>
-          <label for="ward">Ward Number</label>
+          <label for="ward">Ward (auto-filled)</label>
           <input type="text" id="ward" name="ward" placeholder="e.g. 10" />
         </div>
         <div>
-          <label for="lat">Latitude</label>
-          <input type="number" id="lat" name="lat" step="any" placeholder="e.g. 43.6532" />
-        </div>
-        <div>
-          <label for="lon">Longitude</label>
-          <input type="number" id="lon" name="lon" step="any" placeholder="e.g. -79.3832" />
+          <label for="address">Address</label>
+          <input type="text" id="address" name="address" placeholder="e.g. 441 King St W, Toronto" />
         </div>
         <div>
           <label for="radius">Radius (m)</label>
@@ -150,23 +146,38 @@
       e.preventDefault();
       const btn = form.querySelector('button[type="submit"]');
       btn.disabled = true;
-      statusEl.textContent = 'Searching…';
       resultsCard.style.display = 'none';
       scoreSection.style.display = 'none';
 
       try {
-        const params = new URLSearchParams();
+        const address = document.getElementById('address').value.trim();
         const type = document.getElementById('type').value;
-        const ward = document.getElementById('ward').value.trim();
-        const lat = document.getElementById('lat').value.trim();
-        const lon = document.getElementById('lon').value.trim();
+        const wardEl = document.getElementById('ward');
         const radius = document.getElementById('radius').value;
         const years = document.getElementById('years').value;
 
-        if (type)   params.set('type', type);
-        if (ward)   params.set('ward', ward);
-        if (lat)    params.set('lat', lat);
-        if (lon)    params.set('lon', lon);
+        if (!address) {
+          throw new Error('Please enter an address.');
+        }
+
+        // Geocode address via backend proxy
+        statusEl.textContent = 'Geocoding address…';
+        const geoRes = await fetch('/geocode?' + new URLSearchParams({ address }));
+        if (!geoRes.ok) {
+          const err = await geoRes.json().catch(() => ({ detail: geoRes.statusText }));
+          throw new Error('Geocoding failed — ' + (err.detail || geoRes.statusText) + '. Try again.');
+        }
+        const geo = await geoRes.json();
+        const lat = geo.lat;
+        const lon = geo.lon;
+        statusEl.textContent = `Geocoded: ${geo.display_name}`;
+
+        // Fetch comparable applications
+        const params = new URLSearchParams();
+        if (type)                params.set('type', type);
+        if (wardEl.value.trim()) params.set('ward', wardEl.value.trim());
+        params.set('lat', lat);
+        params.set('lon', lon);
         if (radius) params.set('radius_m', radius);
         if (years)  params.set('years', years);
 
@@ -178,11 +189,16 @@
 
         const data = await res.json();
         renderResults(data);
-        statusEl.textContent = `${data.total} comparable application${data.total !== 1 ? 's' : ''} found`;
+        statusEl.textContent = `${geo.display_name} — ${data.total} comparable application${data.total !== 1 ? 's' : ''} found`;
 
-        // Attempt /score if lat+lon+type provided
-        if (lat && lon && type) {
-          await fetchScore({ application_type: type, ward_number: ward || null, lat: parseFloat(lat), lon: parseFloat(lon) });
+        // Auto-fill ward from first comparable result (only if user left ward blank)
+        if (!wardEl.value.trim() && data.applications[0]?.ward_number) {
+          wardEl.value = data.applications[0].ward_number;
+        }
+
+        // Score if application type provided
+        if (type) {
+          await fetchScore({ application_type: type, ward_number: wardEl.value || null, lat, lon });
         }
       } catch (err) {
         statusEl.textContent = 'Error: ' + err.message;
