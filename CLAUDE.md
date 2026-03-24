@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
-<!-- Freshness: 2026-03-17 -->
-<!-- Last reviewed against: product-strategy-pivot branch (all 8 phases complete) -->
+<!-- Freshness: 2026-03-24 -->
+<!-- Last reviewed against: product-strategy-pivot branch (address search feature) -->
 
 ## Purpose
 
@@ -81,7 +81,7 @@ src/zoneto/
     __init__.py      API subpackage
     app.py           FastAPI app factory with lifespan
     comps.py         DuckDB query builder for comparables
-    routes.py        GET /health, GET /ready, GET /comps, POST /score
+    routes.py        GET /health, GET /ready, GET /geocode, GET /comps, POST /score
 static/
   index.html         Frontend: comps search, score, SHAP explanations
 Dockerfile           Production container (Python 3.13-slim, uvicorn)
@@ -90,11 +90,12 @@ Dockerfile           Production container (Python 3.13-slim, uvicorn)
 **Serving layer** (`src/zoneto/api/`):
 - `GET /health` — returns `{"status": "ok"}`
 - `GET /ready` — returns 200 when models + data loaded, 503 otherwise
+- `GET /geocode?address=441+King+St+W` — proxies to Nominatim, returns `{lat, lon, display_name}`. Errors: 404 (not found), 504 (timeout), 502 (upstream error)
 - `GET /comps?ward=10&type=OZ&lat=43.65&lon=-79.38&radius_m=500&years=5` — comparable applications
 - `POST /score` — predictions from production-ready models only
 - `POST /score?explain=true` — includes top-5 SHAP contributions per model
 
-Static frontend: `static/index.html` served at `/`.
+Static frontend: `static/index.html` served at `/`. Uses address search (via `/geocode`) instead of raw lat/lon inputs.
 
 Data flows:
 - Ingest: CLI -> registry -> source.fetch() -> storage.write_source() -> data/<name>/year=YYYY/*.parquet
