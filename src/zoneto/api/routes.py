@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -53,12 +54,45 @@ class ScoreResponse(BaseModel):
     explanations: dict[str, list[dict[str, Any]]] | None = None
 
 
+class GeocodeResult(BaseModel):
+    lat: float
+    lon: float
+    display_name: str
+
+
 # --- endpoints ---
 
 
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/geocode", response_model=GeocodeResult)
+def geocode(address: str) -> GeocodeResult:
+    try:
+        resp = httpx.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": address, "format": "json", "countrycodes": "ca", "limit": 1},
+            headers={"User-Agent": "zoneto/1.0"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except httpx.TimeoutException as exc:
+        msg = "Geocoding service timed out"
+        raise HTTPException(status_code=504, detail=msg) from exc
+    except httpx.HTTPStatusError as exc:
+        msg = "Geocoding service unavailable"
+        raise HTTPException(status_code=502, detail=msg) from exc
+    results = resp.json()
+    if not results:
+        raise HTTPException(status_code=404, detail="Address not found")
+    first = results[0]
+    return GeocodeResult(
+        lat=float(first["lat"]),
+        lon=float(first["lon"]),
+        display_name=first["display_name"],
+    )
 
 
 @router.get("/ready")
