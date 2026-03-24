@@ -33,8 +33,6 @@ from zoneto.analytics.features import (
     COA_NUM_COLS,
     DEV_CAT_COLS,
     DEV_NUM_COLS,
-    PERMIT_CAT_COLS,
-    PERMIT_NUM_COLS,
 )
 
 logger = logging.getLogger(__name__)
@@ -387,7 +385,6 @@ def train_all(
     """
     dev_path = data_dir / "enriched" / "dev_applications.parquet"
     coa_path = data_dir / "enriched" / "coa.parquet"
-    permits_path = data_dir / "enriched" / "permits_cleared.parquet"
 
     jobs: list[tuple[Path, str, list[str], list[str], str, bool]] = [
         # dev_applications_approved retired: dataset frozen (no new records since city
@@ -401,7 +398,13 @@ def train_all(
             "dev_applications_appealed",
             False,
         ),
-        (coa_path, "coa_approved", COA_CAT_COLS, COA_NUM_COLS, "coa_approved", False),
+        # coa_approved retired: AUC 0.535 with 94% base rate. Worse than majority class.
+        # Cannot be improved with available structured features. COA approval is nearly
+        # certain; the meaningful question is "under what conditions"
+        # (requires text analysis, not classification).
+        #
+        # coa_days_to_approval trains for metric tracking only.
+        # production_ready is forced False below regardless of R².
         (
             coa_path,
             "coa_days_to_approval",
@@ -412,22 +415,16 @@ def train_all(
         ),
     ]
 
-    # Permit issuance model is optional — skip if enriched file absent
-    if permits_path.exists():
-        jobs.append(
-            (
-                permits_path,
-                "permit_issuance_days",
-                PERMIT_CAT_COLS,
-                PERMIT_NUM_COLS,
-                "permit_issuance_days",
-                True,
-            )
-        )
+    # permit_issuance_days retired: R² 0.039 on 133K rows is conclusive.
+    # Queue depth (the primary driver) is not in open data.
+    # Not trained even when enriched file is present.
 
     counts: dict[str, int] = {}
     metrics: dict[str, dict[str, float | int]] = {}
     for path, label, cat, num, name, is_reg in jobs:
+        # Skip if enriched file doesn't exist (e.g., COA not enriched)
+        if not path.exists():
+            continue
         count = train_source(
             enriched_path=path,
             label_col=label,
@@ -491,6 +488,12 @@ def train_all(
             m["production_ready"] = bool(m.get("r2_mean", float("nan")) >= 0.10)
         else:
             m["production_ready"] = bool(m.get("roc_auc_mean", 0.0) >= 0.65)
+
+    # Force coa_days_to_approval to production_ready=False regardless of metric score.
+    # It trains for tracking only — to monitor whether R² improves as data grows.
+    # Serving predictions from a model with R² < 0 is worse than presenting the mean.
+    if "coa_days_to_approval" in metrics:
+        metrics["coa_days_to_approval"]["production_ready"] = False
 
     # Save metrics.json (model_dir already created by train_source)
     metrics_file = model_dir / "metrics.json"

@@ -19,20 +19,15 @@ from zoneto.analytics.features import (
     PERMIT_NUM_COLS,
 )
 
-# Model registry: source → list of (model_name, pred_col, is_regressor)
-# dev_applications_approved retired: dataset is frozen (no new records), class
-# imbalance is 97.3% approved, and CV variance (±0.178 AUC) is too high for
-# reliable predictions. Re-enable when a live replacement dataset is found.
+# Model registry: dev_applications models only.
+# coa_approved: AUC 0.535 at 94% base rate — retired.
+# coa_days_to_approval: R² < 0 — tracking only, not served.
+# permit_issuance_days: R² 0.039 — retired (queue depth signal absent).
 _DEV_MODELS: list[tuple[str, str, bool]] = [
     ("dev_applications_appealed", "pred_dev_appealed", False),
 ]
-_COA_MODELS: list[tuple[str, str, bool]] = [
-    ("coa_approved", "pred_coa_approved", False),
-    ("coa_days_to_approval", "pred_coa_days_to_approval", True),
-]
-_PERMIT_MODELS: list[tuple[str, str, bool]] = [
-    ("permit_issuance_days", "pred_permit_issuance_days", True),
-]
+_COA_MODELS: list[tuple[str, str, bool]] = []
+_PERMIT_MODELS: list[tuple[str, str, bool]] = []
 
 
 _SURVIVAL_TYPES: frozenset[str] = frozenset({"OZ", "SA"})
@@ -122,6 +117,24 @@ def score_all(
     # --- dev_applications ---
     dev_enriched = data_dir / "enriched" / "dev_applications.parquet"
     df_dev = pl.read_parquet(dev_enriched)
+
+    # Apply NLP vectorizer if available (adds desc_svd_0..19 columns)
+    # Skip if enriched parquet already has SVD columns (idempotency check)
+    _tfidf_path = model_dir / "desc_tfidf.joblib"
+    if (
+        _tfidf_path.exists()
+        and "description" in df_dev.columns
+        and "desc_svd_0" not in df_dev.columns
+    ):
+        _tfidf_pipe = joblib.load(_tfidf_path)
+        _texts = df_dev["description"].fill_null("").cast(pl.String).to_list()
+        _vectors = _tfidf_pipe.transform(_texts)
+        _svd_cols = [
+            pl.Series(f"desc_svd_{i}", _vectors[:, i].tolist(), dtype=pl.Float64)
+            for i in range(_vectors.shape[1])
+        ]
+        df_dev = df_dev.with_columns(_svd_cols)
+
     all_dev_cols = DEV_CAT_COLS + DEV_NUM_COLS
     X_dev = df_dev.select(all_dev_cols).to_pandas()
 
@@ -170,53 +183,6 @@ def score_all(
         if len(df_active) > 0:
             df_active.write_parquet(scores_dir / "dev_applications_active.parquet")
 
-    # --- coa ---
-    coa_enriched = data_dir / "enriched" / "coa.parquet"
-    df_coa = pl.read_parquet(coa_enriched)
-    all_coa_cols = COA_CAT_COLS + COA_NUM_COLS
-    X_coa = df_coa.select(all_coa_cols).to_pandas()
-
-    extra_coa: dict[str, list] = {}
-    for model_name, pred_col, is_reg in _COA_MODELS:
-        if not production_ready.get(model_name, True):
-            continue
-        pipe = _load(model_dir, model_name)
-        prob_col = pred_col.replace("pred_", "prob_")
-        if is_reg:
-            extra_coa.update(_predict_regressor(pipe, X_coa, pred_col))
-        else:
-            extra_coa.update(_predict_classifier(pipe, X_coa, pred_col, prob_col))
-
-    df_coa_scored = df_coa.with_columns(
-        [pl.Series(name=k, values=v) for k, v in extra_coa.items()]
-    )
-    df_coa_scored.write_parquet(scores_dir / "coa.parquet")
-
-    # --- permits_cleared (optional: skip if enriched file absent) ---
-    permits_enriched = data_dir / "enriched" / "permits_cleared.parquet"
-    if permits_enriched.exists():
-        df_permits = pl.read_parquet(permits_enriched)
-        all_permit_cols = PERMIT_CAT_COLS + PERMIT_NUM_COLS
-        X_permits = df_permits.select(all_permit_cols).to_pandas()
-
-        extra_permits: dict[str, list] = {}
-        for model_name, pred_col, is_reg in _PERMIT_MODELS:
-            if not production_ready.get(model_name, True):
-                continue
-            pipe = _load(model_dir, model_name)
-            prob_col = pred_col.replace("pred_", "prob_")
-            if is_reg:
-                extra_permits.update(_predict_regressor(pipe, X_permits, pred_col))
-            else:
-                extra_permits.update(
-                    _predict_classifier(pipe, X_permits, pred_col, prob_col)
-                )
-
-        df_permits_scored = df_permits.with_columns(
-            [pl.Series(name=k, values=v) for k, v in extra_permits.items()]
-        )
-        df_permits_scored.write_parquet(scores_dir / "permits_cleared.parquet")
-
 
 def score_one(
     source: str,
@@ -230,6 +196,14 @@ def score_one(
     if source == "dev_applications":
         models = _DEV_MODELS
         all_cols = DEV_CAT_COLS + DEV_NUM_COLS
+        # Apply NLP vectorizer if available
+        _tfidf_path = model_dir / "desc_tfidf.joblib"
+        if _tfidf_path.exists() and "description" in features:
+            _tfidf_pipe = joblib.load(_tfidf_path)
+            _text = str(features.get("description") or "")
+            _vec = _tfidf_pipe.transform([_text])
+            for i in range(_vec.shape[1]):
+                features = {**features, f"desc_svd_{i}": float(_vec[0, i])}
     elif source == "coa":
         models = _COA_MODELS
         all_cols = COA_CAT_COLS + COA_NUM_COLS

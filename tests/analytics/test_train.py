@@ -441,16 +441,13 @@ def test_train_all_coa_uses_kfold_cv(
     train_all(data_dir=tmp_path, model_dir=model_dir)
 
     # Find the calls for COA and dev_appealed models
-    coa_approved_call = next(c for c in call_args if c["label_col"] == "coa_approved")
+    # coa_approved is retired — only coa_days_to_approval trains
     coa_days_call = next(
         c for c in call_args if c["label_col"] == "coa_days_to_approval"
     )
     dev_appealed_call = next(c for c in call_args if c["label_col"] == "dev_appealed")
 
     # COA models must use year_col=None (KFold)
-    assert coa_approved_call["year_col"] is None, (
-        "coa_approved should use KFold (year_col=None)"
-    )
     assert coa_days_call["year_col"] is None, (
         "coa_days_to_approval should use KFold (year_col=None)"
     )
@@ -526,32 +523,34 @@ def test_evaluate_source_regressor(tmp_path: Path) -> None:
 
 
 def test_train_all_creates_core_models(tmp_path: Path) -> None:
-    """train_all creates the three core model files (permits optional)."""
+    """train_all creates core model files (coa_approved retired)."""
     _make_dev_enriched(tmp_path)
     _make_coa_enriched(tmp_path)
     model_dir = tmp_path / "models"
     counts, metrics = train_all(data_dir=tmp_path, model_dir=model_dir)
     expected = [
         "dev_applications_appealed.joblib",
-        "coa_approved.joblib",
         "coa_days_to_approval.joblib",
     ]
     for name in expected:
         assert (model_dir / name).exists(), f"Missing {name}"
+    # coa_approved is retired (AUC 0.535 at 94% base rate)
+    assert not (model_dir / "coa_approved.joblib").exists()
     # dev_applications_approved is retired: dataset frozen, 97.3% class imbalance
     assert not (model_dir / "dev_applications_approved.joblib").exists()
 
 
 def test_train_all_creates_permit_model(tmp_path: Path) -> None:
-    """train_all creates permit_issuance_days.joblib when enriched permits exist."""
+    """permit_issuance_days retired — not trained when enriched permits exist."""
     _make_dev_enriched(tmp_path)
     _make_coa_enriched(tmp_path)
     _make_permits_enriched(tmp_path)
     model_dir = tmp_path / "models"
     counts, metrics = train_all(data_dir=tmp_path, model_dir=model_dir)
-    assert (model_dir / "permit_issuance_days.joblib").exists()
-    assert "permit_issuance_days" in metrics
-    assert "r2_mean" in metrics["permit_issuance_days"]
+    # permit_issuance_days is retired (R² 0.039, no queue depth signal in open data)
+    assert not (model_dir / "permit_issuance_days.joblib").exists()
+    assert "permit_issuance_days" not in counts
+    assert "permit_issuance_days" not in metrics
 
 
 def test_train_all_skips_permit_model_if_no_data(tmp_path: Path) -> None:
@@ -574,7 +573,6 @@ def test_train_all_returns_metrics(tmp_path: Path) -> None:
     assert isinstance(metrics, dict)
     expected_models = [
         "dev_applications_appealed",
-        "coa_approved",
         "coa_days_to_approval",
     ]
     for name in expected_models:
@@ -582,6 +580,8 @@ def test_train_all_returns_metrics(tmp_path: Path) -> None:
         assert "n" in metrics[name]
         # Classifiers have roc_auc; regressors have r2
         assert "roc_auc_mean" in metrics[name] or "r2_mean" in metrics[name]
+    # coa_approved is retired (AUC 0.535 at 94% base rate)
+    assert "coa_approved" not in metrics
     assert (model_dir / "metrics.json").exists()
 
 
@@ -861,8 +861,8 @@ def test_train_all_production_ready_regressor_threshold_is_0_10(
     _, metrics = train_all(data_dir=tmp_path, model_dir=model_dir)
 
     # r2_mean=0.05 is below 0.10 threshold → not production_ready
+    # permit_issuance_days is retired (not trained anymore)
     assert metrics["coa_days_to_approval"]["production_ready"] is False
-    assert metrics["permit_issuance_days"]["production_ready"] is False
 
 
 def test_train_all_production_ready_regressor_at_threshold(
@@ -905,5 +905,7 @@ def test_train_all_production_ready_regressor_at_threshold(
 
     _, metrics = train_all(data_dir=tmp_path, model_dir=model_dir)
 
-    assert metrics["coa_days_to_approval"]["production_ready"] is True
-    assert metrics["permit_issuance_days"]["production_ready"] is True
+    # coa_days_to_approval is tracking-only: forced to production_ready=False
+    # regardless of metric score
+    assert metrics["coa_days_to_approval"]["production_ready"] is False
+    # permit_issuance_days is retired (not trained anymore)

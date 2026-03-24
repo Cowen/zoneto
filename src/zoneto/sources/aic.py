@@ -170,6 +170,164 @@ def _epoch_ms_to_date(epoch_ms: int | None) -> date | None:
     return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).date()
 
 
+# Canonical ArcGIS field → snake_case output column mapping.
+# Derived from the COTGEO_IBMS_AIC_POINT feature layer schema.
+# Fields not in this map are included using their raw name lowercased.
+_AIC_FIELD_MAP: dict[str, str] = {
+    "FOLDERRSN": "folderrsn",
+    "FOLDERTYPE": "application_type",
+    "STATUS": "status",
+    "DATE_SUBMITTED": "date_submitted",
+    "LOCATION": "street_address",
+    "WARD": "ward_number",
+    "DESCRIPTION": "description",
+    "LATITUDE": "lat",
+    "LONGITUDE": "lon",
+    "LATEST_MILESTONE": "latest_milestone",
+    "LATEST_MILESTONE_DATE": "latest_milestone_date",
+    "COMPLETE_DATE": "complete_date",
+}
+
+_AIC_APP_BASE_URL = (
+    "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services"
+    "/COTGEO_IBMS_AIC_POINT/FeatureServer/0"
+)
+
+
+def _discover_aic_fields(client: httpx.Client) -> list[str]:
+    """Query ArcGIS layer metadata to get all available field names."""
+    resp = client.get(_AIC_APP_BASE_URL, params={"f": "json"})
+    resp.raise_for_status()
+    meta = resp.json()
+    return [f["name"] for f in meta.get("fields", [])]
+
+
+def fetch_aic_applications(
+    data_dir: Path,
+    *,
+    batch_size: int = 200,
+) -> int:
+    """Fetch full application records from ArcGIS COTGEO_IBMS_AIC_POINT FeatureServer.
+
+    Unlike fetch_aic_decisions_arcgis(), this fetches ALL records without
+    filtering by folderrsn — producing a live replacement for the retired
+    CKAN dev_applications dataset.
+
+    Discovers available fields via the layer metadata endpoint, then paginates
+    all records in batches of `batch_size`.
+
+    Writes Hive-partitioned Parquet to data_dir/aic_applications/year=YYYY/.
+    Returns count of fetched rows.
+    """
+    query_url = _AIC_APP_BASE_URL + "/query"
+    today = date.today()
+
+    with httpx.Client(timeout=30.0) as client:
+        # Discover available fields
+        available_fields = _discover_aic_fields(client)
+        # Request all known fields that exist in this layer
+        out_fields = [f for f in _AIC_FIELD_MAP if f in available_fields]
+        if not out_fields:
+            out_fields = available_fields
+        out_fields_str = ",".join(out_fields)
+
+        # Get total record count
+        count_resp = client.post(
+            query_url,
+            data={
+                "where": "1=1",
+                "returnCountOnly": "true",
+                "f": "json",
+            },
+        )
+        count_resp.raise_for_status()
+        total = count_resp.json().get("count", 0)
+
+        if total == 0:
+            logger.info("AIC applications: no records found")
+            return 0
+
+        logger.info("AIC applications: fetching %d total records", total)
+
+        all_rows: list[dict] = []
+        offset = 0
+        n_batches = math.ceil(total / batch_size)
+
+        for batch_num in range(n_batches):
+            resp = client.post(
+                query_url,
+                data={
+                    "where": "1=1",
+                    "outFields": out_fields_str,
+                    "resultOffset": str(offset),
+                    "resultRecordCount": str(batch_size),
+                    "f": "json",
+                },
+            )
+            resp.raise_for_status()
+            features = resp.json().get("features", [])
+            if not features:
+                break
+
+            for feat in features:
+                attrs = feat["attributes"]
+                row: dict = {}
+                for raw_field, out_field in _AIC_FIELD_MAP.items():
+                    if raw_field in attrs:
+                        val = attrs[raw_field]
+                        # Convert epoch-ms timestamps to date
+                        if raw_field in (
+                            "DATE_SUBMITTED",
+                            "LATEST_MILESTONE_DATE",
+                            "COMPLETE_DATE",
+                        ):
+                            val = _epoch_ms_to_date(val)
+                        row[out_field] = val
+                # Include any extra fields not in our map
+                for raw_field in attrs:
+                    if raw_field not in _AIC_FIELD_MAP:
+                        row[raw_field.lower()] = attrs[raw_field]
+                row["scraped_at"] = today
+                row["source_name"] = "aic_applications"
+                all_rows.append(row)
+
+            offset += len(features)
+            logger.info(
+                "AIC applications: batch %d/%d done (%d rows so far)",
+                batch_num + 1,
+                n_batches,
+                len(all_rows),
+            )
+
+    if not all_rows:
+        return 0
+
+    df = pl.DataFrame(all_rows)
+
+    # Derive year from date_submitted (required by Source protocol + Hive partitioning)
+    if "date_submitted" in df.columns:
+        df = df.with_columns(
+            pl.col("date_submitted")
+            .cast(pl.Date, strict=False)
+            .dt.year()
+            .cast(pl.Int32)
+            .fill_null(0)
+            .alias("year")
+        )
+    else:
+        df = df.with_columns(pl.lit(0, dtype=pl.Int32).alias("year"))
+
+    # Ensure folderrsn is String
+    if "folderrsn" in df.columns:
+        df = df.with_columns(pl.col("folderrsn").cast(pl.String))
+
+    from zoneto.storage import write_source  # noqa: PLC0415
+
+    written = write_source(df, "aic_applications", data_dir)
+    logger.info("AIC applications: wrote %d rows to aic_applications/", written)
+    return written
+
+
 def fetch_aic_decisions_arcgis(
     data_dir: Path,
     *,

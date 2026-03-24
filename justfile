@@ -12,6 +12,14 @@ status:
 aic:
     uv run zoneto aic
 
+# Fetch full AIC application records (replacement for CKAN dev_applications)
+aic-full:
+    uv run zoneto aic --full
+
+# Scrape OLT decisions for Toronto
+olt:
+    uv run zoneto olt
+
 # Enrich data
 enrich:
     uv run zoneto enrich
@@ -27,6 +35,18 @@ score:
 # Show score distributions
 summary:
     uv run zoneto summary
+
+# Start the FastAPI serving layer
+serve:
+    uv run zoneto serve
+
+# Build the Docker image for the serving layer
+docker-build:
+    docker build -t zoneto:latest .
+
+# Run the serving layer in Docker (requires prior docker-build and pipeline run)
+docker-run:
+    docker run --rm -p 8000:8000 zoneto:latest
 
 # Measure importance of all model input features
 importance-all:

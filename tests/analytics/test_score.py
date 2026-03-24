@@ -142,6 +142,8 @@ def _make_dev_enriched(tmp_path: Path) -> None:
             "proposed_storeys": [12, 0],
             "proposed_units": [200, 0],
             "ward_appeal_rate_3y": [0.15, 0.0],
+            "in_mtsa": [1, 0],
+            **{f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3)] for i in range(20)},
             "ward_pct_renters": [45.5, 50.2],
             "ward_median_income": [75000.0, 80000.0],
             "ward_pop_density": [3500.0, 4200.0],
@@ -215,7 +217,8 @@ def test_score_all_creates_parquet(tmp_path: Path) -> None:
     model_dir = _setup_models(tmp_path)
     score_all(data_dir=tmp_path, model_dir=model_dir)
     assert (tmp_path / "scores" / "dev_applications.parquet").exists()
-    assert (tmp_path / "scores" / "coa.parquet").exists()
+    # COA scoring is retired — no coa.parquet output
+    assert not (tmp_path / "scores" / "coa.parquet").exists()
 
 
 def test_score_all_dev_columns(tmp_path: Path) -> None:
@@ -233,14 +236,9 @@ def test_score_all_dev_columns(tmp_path: Path) -> None:
 
 
 def test_score_all_coa_columns(tmp_path: Path) -> None:
-    _make_dev_enriched(tmp_path)
-    _make_coa_enriched(tmp_path)
-    model_dir = _setup_models(tmp_path)
-    score_all(data_dir=tmp_path, model_dir=model_dir)
-    df = pl.read_parquet(tmp_path / "scores" / "coa.parquet")
-    assert "pred_coa_approved" in df.columns
-    assert "prob_coa_approved" in df.columns
-    assert "pred_coa_days_to_approval" in df.columns
+    """COA scoring is retired — this test is removed."""
+    # Models retired: coa_approved (AUC 0.535 at 94% base rate),
+    # coa_days_to_approval (tracking-only, not served)
 
 
 def test_score_all_prob_range(tmp_path: Path) -> None:
@@ -280,6 +278,8 @@ def test_score_one_returns_dict(tmp_path: Path) -> None:
             "proposed_storeys": 10,
             "proposed_units": 50,
             "ward_appeal_rate_3y": 0.15,
+            "in_mtsa": 1,
+            **{f"desc_svd_{i}": float(i % 3) for i in range(20)},
             "ward_pct_renters": 45.5,
             "ward_median_income": 75000.0,
             "ward_pop_density": 3500.0,
@@ -295,28 +295,9 @@ def test_score_one_returns_dict(tmp_path: Path) -> None:
 
 
 def test_score_one_coa(tmp_path: Path) -> None:
-    _make_coa_enriched(tmp_path)
-    model_dir = _setup_models(tmp_path)
-    result = score_one(
-        source="coa",
-        features={
-            "application_type": "Minor Variance",
-            "sub_type": "A",
-            "ward_number": "3",
-            "zoning_designation": "RM",
-            "planning_district": "North York",
-            "work_type": "Construction",
-            "year_submitted": 2021,
-            "ward_pct_renters": 48.0,
-            "ward_median_income": 78000.0,
-            "ward_pop_density": 3800.0,
-            "ward_pct_detached": 30.0,
-            "hearing_month": 6,
-        },
-        model_dir=model_dir,
-    )
-    assert "pred_coa_approved" in result
-    assert "pred_coa_days_to_approval" in result
+    """COA scoring is retired — models retired."""
+    # coa_approved: AUC 0.535 at 94% base rate
+    # coa_days_to_approval: tracking-only, not served
 
 
 def test_score_one_unknown_source(tmp_path: Path) -> None:
@@ -326,24 +307,19 @@ def test_score_one_unknown_source(tmp_path: Path) -> None:
 
 
 def test_score_all_permits_parquet(tmp_path: Path) -> None:
-    """score_all creates permits_cleared.parquet when enriched file exists."""
+    """permit_issuance_days is retired — no permits_cleared.parquet output."""
     _make_dev_enriched(tmp_path)
     _make_coa_enriched(tmp_path)
     _make_permits_enriched(tmp_path)
     model_dir = _setup_models(tmp_path)
     score_all(data_dir=tmp_path, model_dir=model_dir)
-    assert (tmp_path / "scores" / "permits_cleared.parquet").exists()
+    # Permits scoring is retired (R² 0.039, no queue depth signal in open data)
+    assert not (tmp_path / "scores" / "permits_cleared.parquet").exists()
 
 
 def test_score_all_permits_column(tmp_path: Path) -> None:
-    """scored permits parquet has pred_permit_issuance_days column."""
-    _make_dev_enriched(tmp_path)
-    _make_coa_enriched(tmp_path)
-    _make_permits_enriched(tmp_path)
-    model_dir = _setup_models(tmp_path)
-    score_all(data_dir=tmp_path, model_dir=model_dir)
-    df = pl.read_parquet(tmp_path / "scores" / "permits_cleared.parquet")
-    assert "pred_permit_issuance_days" in df.columns
+    """permit_issuance_days is retired — test removed."""
+    # R² 0.039 on 133K rows is conclusive; queue depth not in open data
 
 
 def test_score_all_no_permits_enriched(tmp_path: Path) -> None:
@@ -357,26 +333,9 @@ def test_score_all_no_permits_enriched(tmp_path: Path) -> None:
 
 
 def test_score_one_permits(tmp_path: Path) -> None:
-    """score_one supports permits_cleared source."""
-    model_dir = _setup_models(tmp_path)
-    result = score_one(
-        source="permits_cleared",
-        features={
-            "permit_type": "New Houses",
-            "structure_type": "Detached House",
-            "ward_grid": "W01",
-            "est_const_cost": 500000.0,
-            "dwelling_units_created": 1,
-            "dwelling_units_lost": 0,
-            "residential": 1,
-            "mercantile": 0,
-            "industrial": 0,
-            "institutional": 0,
-            "application_year": 2022,
-        },
-        model_dir=model_dir,
-    )
-    assert "pred_permit_issuance_days" in result
+    """permit_issuance_days is retired — test removed."""
+    # score_one() still supports permits_cleared source for API compatibility
+    # but returns empty dict (no production-ready models)
 
 
 def test_score_all_writes_survival_percentiles(
@@ -457,6 +416,11 @@ def _make_dev_enriched_mixed_types(tmp_path: Path) -> None:
             "proposed_storeys": [12, 0, 5],
             "proposed_units": [200, 0, 10],
             "ward_appeal_rate_3y": [0.15, 0.0, 0.0],
+            "in_mtsa": [1, 0, 0],
+            **{
+                f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3), float((i + 2) % 3)]
+                for i in range(20)
+            },
             "ward_pct_renters": [45.5, 50.2, 48.0],
             "ward_median_income": [75000.0, 80000.0, 78000.0],
             "ward_pop_density": [3500.0, 4200.0, 3800.0],
@@ -528,6 +492,11 @@ def _make_dev_enriched_with_active(tmp_path: Path) -> None:
             "proposed_storeys": [12, 0, 5],
             "proposed_units": [200, 0, 10],
             "ward_appeal_rate_3y": [0.15, 0.0, 0.0],
+            "in_mtsa": [1, 0, 0],
+            **{
+                f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3), float((i + 2) % 3)]
+                for i in range(20)
+            },
             "ward_pct_renters": [45.5, 50.2, 48.0],
             "ward_median_income": [75000.0, 80000.0, 78000.0],
             "ward_pop_density": [3500.0, 4200.0, 3800.0],
@@ -589,14 +558,14 @@ def test_score_all_skips_model_when_not_production_ready(tmp_path: Path) -> None
     _make_coa_enriched(tmp_path)
     model_dir = _setup_models(tmp_path)
 
-    # Mark coa_approved as not production_ready
+    # Mark dev_appealed as not production_ready
     (model_dir / "metrics.json").write_text(
         json.dumps(
             {
-                "coa_approved": {
+                "dev_applications_appealed": {
                     "production_ready": False,
-                    "roc_auc_mean": 0.535,
-                    "n": 100,
+                    "roc_auc_mean": 0.75,
+                    "n": 1000,
                 }
             }
         )
@@ -604,22 +573,20 @@ def test_score_all_skips_model_when_not_production_ready(tmp_path: Path) -> None
 
     score_all(data_dir=tmp_path, model_dir=model_dir)
 
-    df = pl.read_parquet(tmp_path / "scores" / "coa.parquet")
-    assert "pred_coa_approved" not in df.columns
-    assert "prob_coa_approved" not in df.columns
-    # Other COA model should still be scored
-    assert "pred_coa_days_to_approval" in df.columns
+    df = pl.read_parquet(tmp_path / "scores" / "dev_applications.parquet")
+    assert "pred_dev_appealed" not in df.columns
+    assert "prob_dev_appealed" not in df.columns
 
 
 def test_score_all_scores_when_metrics_absent(tmp_path: Path) -> None:
-    """score_all scores all models when metrics.json does not exist."""
+    """score_all scores available models when metrics.json does not exist."""
     _make_dev_enriched(tmp_path)
     _make_coa_enriched(tmp_path)
     model_dir = _setup_models(tmp_path)
-    # No metrics.json — default to scoring everything
+    # No metrics.json — default to scoring available models (dev_applications only)
     score_all(data_dir=tmp_path, model_dir=model_dir)
-    df = pl.read_parquet(tmp_path / "scores" / "coa.parquet")
-    assert "pred_coa_approved" in df.columns
+    df = pl.read_parquet(tmp_path / "scores" / "dev_applications.parquet")
+    assert "pred_dev_appealed" in df.columns
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,8 @@ DEV_NUM_COLS: list[str] = [
     "proposed_storeys",
     "proposed_units",
     "ward_appeal_rate_3y",
+    "in_mtsa",
+    *[f"desc_svd_{i}" for i in range(20)],
 ]
 
 COA_CAT_COLS: list[str] = [

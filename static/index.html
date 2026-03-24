@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zoneto — Toronto Development Application Intelligence</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f8f9fa;
+      color: #212529;
+      padding: 2rem;
+    }
+
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .tagline { color: #6c757d; font-size: 0.9rem; margin-bottom: 2rem; }
+
+    .card {
+      background: #fff;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      max-width: 900px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem; color: #495057; }
+    input, select {
+      width: 100%; padding: 0.5rem 0.75rem;
+      border: 1px solid #ced4da; border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    input:focus, select:focus { outline: 2px solid #0d6efd; outline-offset: 1px; }
+
+    button[type="submit"] {
+      background: #0d6efd; color: #fff;
+      border: none; border-radius: 4px;
+      padding: 0.6rem 1.5rem; font-size: 0.9rem; font-weight: 600;
+      cursor: pointer;
+    }
+    button[type="submit"]:hover { background: #0b5ed7; }
+    button[type="submit"]:disabled { background: #6c757d; cursor: not-allowed; }
+
+    #status { font-size: 0.85rem; color: #6c757d; margin-top: 0.5rem; min-height: 1.2rem; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th {
+      text-align: left; padding: 0.6rem 0.75rem;
+      border-bottom: 2px solid #dee2e6;
+      font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+      color: #6c757d;
+    }
+    td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #f1f3f5; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8f9fa; }
+
+    .badge {
+      display: inline-block; padding: 0.2rem 0.5rem;
+      border-radius: 3px; font-size: 0.75rem; font-weight: 600;
+    }
+    .badge-appealed { background: #fff3cd; color: #856404; }
+    .badge-approved { background: #d1e7dd; color: #0a3622; }
+    .badge-active   { background: #cff4fc; color: #055160; }
+
+    .pred-box {
+      background: #f8f9fa; border: 1px solid #dee2e6;
+      border-radius: 6px; padding: 1rem; margin-top: 0.5rem;
+    }
+    .pred-box h3 { font-size: 0.85rem; color: #6c757d; margin-bottom: 0.5rem; }
+    .pred-row { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 0.25rem; }
+    .pred-label { color: #495057; }
+    .pred-value { font-weight: 600; }
+
+    .empty { text-align: center; color: #6c757d; padding: 2rem; }
+
+    #score-section { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Zoneto</h1>
+  <p class="tagline">Toronto development application intelligence</p>
+
+  <div class="card">
+    <form id="query-form">
+      <div class="form-grid">
+        <div>
+          <label for="type">Application Type</label>
+          <select id="type" name="type">
+            <option value="">Any</option>
+            <option value="OZ">OZ — Official Plan / Zoning</option>
+            <option value="SA">SA — Site Plan Approval</option>
+            <option value="OPA">OPA — Official Plan Amendment</option>
+          </select>
+        </div>
+        <div>
+          <label for="ward">Ward (auto-filled)</label>
+          <input type="text" id="ward" name="ward" placeholder="e.g. 10" />
+        </div>
+        <div>
+          <label for="address">Address</label>
+          <input type="text" id="address" name="address" placeholder="e.g. 441 King St W, Toronto" />
+        </div>
+        <div>
+          <label for="radius">Radius (m)</label>
+          <input type="number" id="radius" name="radius" value="500" min="50" max="5000" />
+        </div>
+        <div>
+          <label for="years">Years back</label>
+          <input type="number" id="years" name="years" value="5" min="1" max="20" />
+        </div>
+      </div>
+      <button type="submit">Find Comparable Applications</button>
+      <div id="status"></div>
+    </form>
+  </div>
+
+  <div class="card" id="score-section">
+    <div class="pred-box">
+      <h3>ML Predictions (production-ready models only)</h3>
+      <div id="predictions"></div>
+    </div>
+  </div>
+
+  <div class="card" id="results-card" style="display:none">
+    <div id="results"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById('query-form');
+    const statusEl = document.getElementById('status');
+    const resultsCard = document.getElementById('results-card');
+    const resultsEl = document.getElementById('results');
+    const scoreSection = document.getElementById('score-section');
+    const predictionsEl = document.getElementById('predictions');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      resultsCard.style.display = 'none';
+      scoreSection.style.display = 'none';
+
+      try {
+        const address = document.getElementById('address').value.trim();
+        const type = document.getElementById('type').value;
+        const wardEl = document.getElementById('ward');
+        const radius = document.getElementById('radius').value;
+        const years = document.getElementById('years').value;
+
+        if (!address) {
+          throw new Error('Please enter an address.');
+        }
+
+        // Geocode address via backend proxy
+        statusEl.textContent = 'Geocoding address…';
+        const geoRes = await fetch('/geocode?' + new URLSearchParams({ address }));
+        if (!geoRes.ok) {
+          const err = await geoRes.json().catch(() => ({ detail: geoRes.statusText }));
+          throw new Error('Geocoding failed — ' + (err.detail || geoRes.statusText) + '. Try again.');
+        }
+        const geo = await geoRes.json();
+        const lat = geo.lat;
+        const lon = geo.lon;
+        statusEl.textContent = `Geocoded: ${geo.display_name}`;
+
+        // Fetch comparable applications
+        const params = new URLSearchParams();
+        if (type)                params.set('type', type);
+        if (wardEl.value.trim()) params.set('ward', wardEl.value.trim());
+        params.set('lat', lat);
+        params.set('lon', lon);
+        if (radius) params.set('radius_m', radius);
+        if (years)  params.set('years', years);
+
+        const res = await fetch('/comps?' + params.toString());
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || res.statusText);
+        }
+
+        const data = await res.json();
+        renderResults(data);
+        statusEl.textContent = `${geo.display_name} — ${data.total} comparable application${data.total !== 1 ? 's' : ''} found`;
+
+        // Auto-fill ward from first comparable result (only if user left ward blank)
+        if (!wardEl.value.trim() && data.applications[0]?.ward_number) {
+          wardEl.value = data.applications[0].ward_number;
+        }
+
+        // Score if application type provided
+        if (type) {
+          await fetchScore({ application_type: type, ward_number: wardEl.value || null, lat, lon });
+        }
+      } catch (err) {
+        statusEl.textContent = 'Error: ' + err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    function renderResults(data) {
+      if (!data.applications.length) {
+        resultsEl.innerHTML = '<p class="empty">No comparable applications found. Try broadening your search.</p>';
+        resultsCard.style.display = 'block';
+        return;
+      }
+
+      const rows = data.applications.map(app => {
+        const statusBadge = formatStatus(app.status);
+        const timeline = app.dev_days_to_decision ? `${Math.round(app.dev_days_to_decision / 30)} mo` : '—';
+        const storeys = app.proposed_storeys ?? '—';
+        const units = app.proposed_units ?? '—';
+        return `<tr>
+          <td>${escHtml(app.folderrsn ?? '')}</td>
+          <td>${escHtml(app.application_type ?? '')}</td>
+          <td>${escHtml(app.ward_number ?? '')}</td>
+          <td>${escHtml(app.zoning_class ?? '')}</td>
+          <td>${escHtml(app.year_submitted?.toString() ?? '')}</td>
+          <td>${statusBadge}</td>
+          <td>${timeline}</td>
+          <td>${storeys}</td>
+          <td>${units}</td>
+          <td>${escHtml(app.street_address?.trim() ?? '')}</td>
+        </tr>`;
+      }).join('');
+
+      resultsEl.innerHTML = `
+        <table>
+          <thead><tr>
+            <th>Folder RSN</th><th>Type</th><th>Ward</th><th>Zone</th>
+            <th>Year</th><th>Status</th><th>Timeline</th>
+            <th>Storeys</th><th>Units</th><th>Address</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+      resultsCard.style.display = 'block';
+    }
+
+    function formatStatus(status) {
+      if (!status) return '—';
+      const lc = status.toLowerCase();
+      if (lc.includes('appeal')) return `<span class="badge badge-appealed">${escHtml(status)}</span>`;
+      if (lc.includes('approv')) return `<span class="badge badge-approved">${escHtml(status)}</span>`;
+      if (lc.includes('active') || lc.includes('review') || lc.includes('circulat'))
+        return `<span class="badge badge-active">${escHtml(status)}</span>`;
+      return escHtml(status);
+    }
+
+    async function fetchScore(features) {
+      try {
+        const res = await fetch('/score?explain=true', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: 'dev_applications', features }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.production_ready_models.length) return;
+        renderPredictions(data.predictions);
+        if (data.explanations) renderExplanations(data.explanations);
+      } catch (_) {
+        // predictions are optional — fail silently
+      }
+    }
+
+    function renderPredictions(predictions) {
+      const rows = Object.entries(predictions).map(([key, val]) => {
+        const label = key.replace(/^(prob_|pred_)/, '').replace(/_/g, ' ');
+        const formatted = typeof val === 'number'
+          ? (val < 1 && val > 0 ? (val * 100).toFixed(1) + '%' : val.toFixed(1))
+          : String(val);
+        return `<div class="pred-row"><span class="pred-label">${escHtml(label)}</span><span class="pred-value">${escHtml(formatted)}</span></div>`;
+      }).join('');
+
+      if (rows) {
+        predictionsEl.innerHTML = rows;
+        scoreSection.style.display = 'block';
+      }
+    }
+
+    function renderExplanations(explanations) {
+      const entries = Object.entries(explanations);
+      if (!entries.length) return;
+      const rows = entries.flatMap(([modelName, contribs]) => {
+        const modelLabel = `<div style="font-size:0.7rem;color:#adb5bd;margin-bottom:0.25rem">${escHtml(modelName.replace(/_/g, ' '))}</div>`;
+        const contribRows = contribs.map(c => {
+          const sign = c.direction === 'increases_risk' ? '+' : '−';
+          const color = c.direction === 'increases_risk' ? '#dc3545' : '#198754';
+          const label = escHtml(c.feature.replace(/__/g, ': ').replace(/_/g, ' '));
+          return `<div class="pred-row">
+            <span class="pred-label">${label}</span>
+            <span class="pred-value" style="color:${color}">${sign}${Math.abs(c.shap_value).toFixed(3)}</span>
+          </div>`;
+        }).join('');
+        return modelLabel + contribRows;
+      }).join('');
+      if (rows) {
+        predictionsEl.innerHTML += `
+          <div style="margin-top:0.75rem;border-top:1px solid #dee2e6;padding-top:0.75rem">
+            <div style="font-size:0.75rem;color:#6c757d;margin-bottom:0.4rem">Top contributing factors</div>
+            ${rows}
+          </div>`;
+      }
+    }
+
+    function escHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+  </script>
+</body>
+</html>

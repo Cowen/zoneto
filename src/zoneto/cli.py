@@ -87,13 +87,60 @@ def aic(
         float,
         typer.Option(help="Seconds to sleep between AIC requests."),
     ] = 1.0,
+    full: Annotated[
+        bool,
+        typer.Option(
+            "--full/--no-full",
+            help="Fetch full application records from ArcGIS (replaces CKAN).",
+        ),
+    ] = False,
 ) -> None:
-    """Fetch AIC decision dates via ArcGIS REST API (fast, structured data)."""
+    """Scrape AIC portal for OZ/SA decision milestone dates.
+
+    With --full: also fetches complete application records from ArcGIS,
+    writing to data/aic_applications/. This provides a live replacement
+    for the retired CKAN dev_applications dataset.
+    """
     logging.basicConfig(format="%(message)s", level=logging.INFO)
-    console.print("[bold]Fetching AIC decision dates (ArcGIS)...[/bold]")
+    console.print("[bold]Scraping AIC portal...[/bold]")
     try:
-        count = fetch_aic_decisions_arcgis(DATA_DIR)
-        console.print(f"  [green]✓[/green] {count:,} applications fetched")
+        n = fetch_aic_decisions_arcgis(DATA_DIR)
+        console.print(f"[green]✓[/green] AIC decisions: {n} new rows")
+
+        if full:
+            from zoneto.sources.aic import fetch_aic_applications  # noqa: PLC0415
+
+            console.print("[bold]Fetching full AIC application records...[/bold]")
+            n_full = fetch_aic_applications(DATA_DIR)
+            console.print(f"[green]✓[/green] AIC applications: {n_full} rows written")
+    except Exception as exc:
+        console.print(f"  [red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def olt(
+    delay: Annotated[
+        float,
+        typer.Option(
+            help=(
+                "Delay between OLT page requests (seconds). "
+                "Respect the government site."
+            )
+        ),
+    ] = 2.0,
+) -> None:
+    """Scrape Ontario Land Tribunal decisions for Toronto applications.
+
+    Writes data/reference/olt_decisions.parquet. Use 'zoneto enrich --fetch-olt'
+    to join OLT decisions to dev_applications after scraping.
+    """
+    from zoneto.sources.olt import fetch_olt_decisions  # noqa: PLC0415
+
+    console.print("[bold]Scraping OLT decisions...[/bold]")
+    try:
+        n = fetch_olt_decisions(DATA_DIR, delay=delay)
+        console.print(f"[green]✓[/green] OLT decisions: {n} records written")
     except Exception as exc:
         console.print(f"  [red]✗ {exc}[/red]")
         raise typer.Exit(code=1)
@@ -115,6 +162,16 @@ def enrich(
             help="Scrape AIC portal for decision dates before enriching.",
         ),
     ] = True,
+    fetch_olt: Annotated[
+        bool,
+        typer.Option(
+            "--fetch-olt/--no-fetch-olt",
+            help=(
+                "Match OLT decisions to dev_applications "
+                "(requires prior 'zoneto olt' run)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Enrich raw Parquet with spatial features and outcome labels."""
     if fetch_ref:
@@ -143,6 +200,23 @@ def enrich(
         except Exception as exc:
             console.print(f"  [red]✗ {exc}[/red]")
 
+    if fetch_olt:
+        import polars as pl  # noqa: PLC0415
+
+        from zoneto.analytics.enrich import match_olt_to_dev  # noqa: PLC0415
+
+        enriched_dev_path = DATA_DIR / "enriched" / "dev_applications.parquet"
+        if enriched_dev_path.exists():
+            dev_df = pl.read_parquet(enriched_dev_path)
+            dev_df = match_olt_to_dev(dev_df, DATA_DIR)
+            dev_df.write_parquet(enriched_dev_path)
+            console.print("[green]✓[/green] OLT decisions matched to dev_applications")
+        else:
+            console.print(
+                "[yellow]⚠[/yellow] enriched dev_applications not found — "
+                "run enrich first"
+            )
+
 
 @app.command()
 def train(
@@ -162,6 +236,9 @@ def train(
         table.add_column("N rows", justify="right")
         table.add_column("Primary metric", justify="right")
         table.add_column("Secondary metric", justify="right")
+        table.add_column("Status", justify="center")
+
+        _TRACKING_ONLY = {"coa_days_to_approval"}
 
         for name, count in counts.items():
             metric = metrics[name]
@@ -179,7 +256,15 @@ def train(
             else:
                 primary = f"R² {metric['r2_mean']:.3f}±{metric['r2_std']:.3f}"
                 secondary = f"MAE {metric['mae_mean']:.0f}d"
-            table.add_row(name, f"{count:,}", primary, secondary)
+
+            if name in _TRACKING_ONLY:
+                status = "[yellow]tracking only[/yellow]"
+            elif metric.get("production_ready"):
+                status = "[green]production[/green]"
+            else:
+                status = "[red]not ready[/red]"
+
+            table.add_row(name, f"{count:,}", primary, secondary, status)
 
         console.print(table)
         console.print(f"[green]✓[/green] Metrics saved to {model_dir / 'metrics.json'}")
@@ -308,3 +393,37 @@ def score(
     except Exception as exc:
         console.print(f"  [red]✗ {exc}[/red]")
         raise typer.Exit(code=1)
+
+
+@app.command()
+def serve(
+    port: Annotated[
+        int,
+        typer.Option(help="Port to listen on."),
+    ] = 8000,
+    host: Annotated[
+        str,
+        typer.Option(help="Host to bind to."),
+    ] = "0.0.0.0",
+    data_dir: Annotated[
+        Path,
+        typer.Option(help="Data directory."),
+    ] = DATA_DIR,
+    model_dir: Annotated[
+        Path,
+        typer.Option(help="Model directory."),
+    ] = Path("models"),
+    static_dir: Annotated[
+        Path,
+        typer.Option(help="Static files directory."),
+    ] = Path("static"),
+) -> None:
+    """Start the FastAPI serving layer."""
+    import uvicorn
+
+    from zoneto.api.app import create_app
+
+    application = create_app(
+        data_dir=data_dir, model_dir=model_dir, static_dir=static_dir
+    )
+    uvicorn.run(application, host=host, port=port)

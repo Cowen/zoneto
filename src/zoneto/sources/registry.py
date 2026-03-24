@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from zoneto.models import CKANConfig
+from zoneto.sources.aic_source import AICSource
 from zoneto.sources.base import Source
 from zoneto.sources.ckan import CKANSource
 
@@ -34,4 +35,5 @@ SOURCES: dict[str, Source] = {
             year_column="date_submitted",
         )
     ),
+    "aic_applications": AICSource(),
 }
