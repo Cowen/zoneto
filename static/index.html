@@ -83,6 +83,13 @@
     .empty { text-align: center; color: #6c757d; padding: 2rem; }
 
     #score-section { display: none; }
+    #scenarios-section { display: none; }
+
+    .badge-best { background: #d1e7dd; color: #0a3622; }
+    .risk-low  { color: #198754; font-weight: 600; }
+    .risk-mid  { color: #856404; font-weight: 600; }
+    .risk-high { color: #dc3545; font-weight: 600; }
+    .scenario-loading { color: #6c757d; font-style: italic; font-size: 0.85rem; padding: 1rem; }
   </style>
 </head>
 <body>
@@ -126,6 +133,15 @@
     </div>
   </div>
 
+  <div class="card" id="scenarios-section">
+    <h2 style="font-size:1rem;font-weight:700;margin-bottom:0.75rem">What could I build here?</h2>
+    <p style="font-size:0.8rem;color:#6c757d;margin-bottom:1rem">
+      Site context borrowed from the nearest comparable application.
+      Appeal risk proxies approval difficulty — lower is smoother.
+    </p>
+    <div id="scenarios-body"></div>
+  </div>
+
   <div class="card" id="results-card" style="display:none">
     <div id="results"></div>
   </div>
@@ -137,6 +153,8 @@
     const resultsEl = document.getElementById('results');
     const scoreSection = document.getElementById('score-section');
     const predictionsEl = document.getElementById('predictions');
+    const scenariosSection = document.getElementById('scenarios-section');
+    const scenariosBody = document.getElementById('scenarios-body');
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -144,6 +162,7 @@
       btn.disabled = true;
       resultsCard.style.display = 'none';
       scoreSection.style.display = 'none';
+      scenariosSection.style.display = 'none';
 
       try {
         const address = document.getElementById('address').value.trim();
@@ -188,6 +207,11 @@
         // Score if application type provided
         if (type) {
           await fetchScore({ application_type: type, ward_number: null, lat, lon });
+        }
+
+        // "What could I build here?" panel — score hypothetical scenarios
+        if (data.applications.length > 0) {
+          await fetchScenarios(data.applications[0]);
         }
       } catch (err) {
         statusEl.textContent = 'Error: ' + err.message;
@@ -303,6 +327,135 @@
 
     function escHtml(str) {
       return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // --- "What could I build here?" ---
+
+    const SCENARIOS = [
+      { label: 'Low-rise OZ',  application_type: 'OZ', proposed_storeys: 6,  proposed_units: 30,  has_parent_application: 0, is_combined_application: 0 },
+      { label: 'Mid-rise OZ',  application_type: 'OZ', proposed_storeys: 15, proposed_units: 100, has_parent_application: 0, is_combined_application: 0 },
+      { label: 'High-rise OZ', application_type: 'OZ', proposed_storeys: 35, proposed_units: 300, has_parent_application: 0, is_combined_application: 0 },
+      { label: 'OZ + OPA',     application_type: 'OZ', proposed_storeys: 20, proposed_units: 150, has_parent_application: 0, is_combined_application: 1 },
+      { label: 'Site Plan (SA)', application_type: 'SA', proposed_storeys: 6, proposed_units: 30, has_parent_application: 1, is_combined_application: 0 },
+    ];
+
+    async function fetchScenarios(nearestComp) {
+      scenariosBody.innerHTML = '<p class="scenario-loading">Scoring hypothetical scenarios…</p>';
+      scenariosSection.style.display = 'block';
+
+      // Extract site context from nearest comp
+      const siteCtx = {
+        ward_number:           nearestComp.ward_number ?? null,
+        zoning_class:          nearestComp.zoning_class ?? null,
+        secondary_plan_name:   nearestComp.secondary_plan_name ?? null,
+        in_heritage_register:  nearestComp.in_heritage_register ?? null,
+        in_heritage_district:  nearestComp.in_heritage_district ?? null,
+        in_secondary_plan:     nearestComp.in_secondary_plan ?? null,
+        in_mtsa:               nearestComp.in_mtsa ?? null,
+        ward_pct_renters:      nearestComp.ward_pct_renters ?? null,
+        ward_median_income:    nearestComp.ward_median_income ?? null,
+        ward_pop_density:      nearestComp.ward_pop_density ?? null,
+        ward_pct_detached:     nearestComp.ward_pct_detached ?? null,
+        ward_appeal_rate_3y:   nearestComp.ward_appeal_rate_3y ?? null,
+        year_submitted:        new Date().getFullYear(),
+        has_community_meeting: 0,
+      };
+
+      const results = await Promise.all(
+        SCENARIOS.map(async (s) => {
+          const features = { ...siteCtx, ...s };
+          delete features.label;
+          try {
+            const res = await fetch('/score', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ source: 'dev_applications', features }),
+            });
+            if (!res.ok) return { scenario: s, predictions: null };
+            const data = await res.json();
+            return { scenario: s, predictions: data.predictions, ready: data.production_ready_models };
+          } catch (_) {
+            return { scenario: s, predictions: null };
+          }
+        })
+      );
+
+      renderScenarios(results, nearestComp);
+    }
+
+    function renderScenarios(results, nearestComp) {
+      // Check if any models produced results
+      const anyPredictions = results.some(r => r.predictions && Object.keys(r.predictions).length > 0);
+      if (!anyPredictions) {
+        scenariosSection.style.display = 'none';
+        return;
+      }
+
+      // Find lowest appeal risk for "Best Fit" badge
+      const appealRisks = results.map(r => r.predictions?.prob_dev_appealed ?? Infinity);
+      const minRisk = Math.min(...appealRisks);
+
+      const hasTimeline = results.some(r => r.predictions?.pred_dev_days_p50 != null);
+
+      const contextNote = nearestComp.ward_number
+        ? `Ward ${nearestComp.ward_number}${nearestComp.zoning_class ? ', zone ' + nearestComp.zoning_class : ''}`
+        : 'nearest comparable application';
+
+      const rows = results.map((r, i) => {
+        const s = r.scenario;
+        const p = r.predictions;
+        if (!p) {
+          return `<tr>
+            <td>${escHtml(s.label)}</td>
+            <td>${s.application_type}</td><td>${s.proposed_storeys}</td><td>${s.proposed_units}</td>
+            <td colspan="${hasTimeline ? 3 : 2}" style="color:#adb5bd">unavailable</td>
+          </tr>`;
+        }
+
+        const risk = p.prob_dev_appealed;
+        const isBest = risk != null && risk === minRisk;
+        const riskStr = risk != null ? (risk * 100).toFixed(0) + '%' : '—';
+        const riskClass = risk == null ? '' : risk < 0.2 ? 'risk-low' : risk < 0.35 ? 'risk-mid' : 'risk-high';
+
+        let timelineCell = '';
+        if (hasTimeline) {
+          const p25 = p.pred_dev_days_p25;
+          const p50 = p.pred_dev_days_p50;
+          const p75 = p.pred_dev_days_p75;
+          if (p50 != null) {
+            const lo = p25 != null ? Math.round(p25 / 30) : null;
+            const mid = Math.round(p50 / 30);
+            const hi = p75 != null ? Math.round(p75 / 30) : null;
+            const range = (lo != null && hi != null) ? `${lo}–${hi} mo` : `${mid} mo`;
+            timelineCell = `<td>${range}</td>`;
+          } else {
+            timelineCell = '<td>—</td>';
+          }
+        }
+
+        const bestBadge = isBest ? ' <span class="badge badge-best">Best Fit</span>' : '';
+
+        return `<tr>
+          <td>${escHtml(s.label)}${bestBadge}</td>
+          <td>${s.application_type}</td>
+          <td>${s.proposed_storeys}</td>
+          <td>${s.proposed_units}</td>
+          <td class="${riskClass}">${riskStr}</td>
+          ${hasTimeline ? timelineCell : ''}
+        </tr>`;
+      }).join('');
+
+      const timelineHeader = hasTimeline ? '<th>Timeline (p25–p75)</th>' : '';
+
+      scenariosBody.innerHTML = `
+        <p style="font-size:0.78rem;color:#adb5bd;margin-bottom:0.5rem">Context: ${escHtml(contextNote)}</p>
+        <table>
+          <thead><tr>
+            <th>Scenario</th><th>Type</th><th>Storeys</th><th>Units</th>
+            <th>Appeal Risk</th>${timelineHeader}
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
     }
   </script>
 </body>

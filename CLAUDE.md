@@ -1,7 +1,7 @@
 # Zoneto -- Toronto Building Data Pipeline
 
-<!-- Freshness: 2026-03-24 -->
-<!-- Last reviewed against: product-strategy-pivot branch (address search feature) -->
+<!-- Freshness: 2026-03-26 -->
+<!-- Last reviewed against: main (comps spatial context fields) -->
 
 ## Purpose
 
@@ -95,7 +95,7 @@ Dockerfile           Production container (Python 3.13-slim, uvicorn)
 - `POST /score` — predictions from production-ready models only
 - `POST /score?explain=true` — includes top-5 SHAP contributions per model
 
-Static frontend: `static/index.html` served at `/`. Uses address search (via `/geocode`) instead of raw lat/lon inputs.
+Static frontend: `static/index.html` served at `/`. Uses address search (via `/geocode`) instead of raw lat/lon inputs. Includes a "What could I build here?" panel that scores 5 hypothetical development scenarios using the nearest comp's spatial context fields.
 
 Data flows:
 - Ingest: CLI -> registry -> source.fetch() -> storage.write_source() -> data/<name>/year=YYYY/*.parquet
@@ -358,7 +358,8 @@ Scrapes Ontario Land Tribunal decisions for Toronto:
 - Supports spatial filtering with bounding box approximation (lat/lon + radius_m)
 - Deduplicates by `folderrsn` via `QUALIFY ROW_NUMBER() OVER (PARTITION BY folderrsn)`, keeping the most recent row per application
 - Returns applications sorted by proximity (when lat/lon provided) or recency (year_submitted DESC)
-- Returns list of dicts with: folderrsn, application_type, ward_number, zoning_class, status, year_submitted, lat, lon, dev_approved, dev_appealed, dev_days_to_decision, proposed_storeys, proposed_units, description, street_address, application_url, dist_sq
+- Returns list of dicts with: folderrsn, application_type, ward_number, zoning_class, status, year_submitted, lat, lon, dev_approved, dev_appealed, dev_days_to_decision, proposed_storeys, proposed_units, description, street_address, application_url, dist_sq, plus spatial/demographic context fields (see below)
+- **Optional columns** (`_OPTIONAL_COLS`): columns that may be absent in older enriched parquet files are handled via a null-safe pattern -- each column is introspected with `DESCRIBE` and either selected from the parquet or replaced with a typed NULL. Current optional columns: application_url, in_heritage_register, in_heritage_district, in_secondary_plan, secondary_plan_name, in_mtsa, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, ward_appeal_rate_3y, has_community_meeting
 
 ### App Factory (`api/app.py`)
 

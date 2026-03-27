@@ -37,6 +37,18 @@ class CompApplication(BaseModel):
     street_address: str | None = None
     application_url: str | None = None
     dist_sq: float | None = None
+    # Spatial and demographic context (used for hypothetical scoring)
+    in_heritage_register: int | None = None
+    in_heritage_district: int | None = None
+    in_secondary_plan: int | None = None
+    secondary_plan_name: str | None = None
+    in_mtsa: int | None = None
+    ward_pct_renters: float | None = None
+    ward_median_income: float | None = None
+    ward_pop_density: float | None = None
+    ward_pct_detached: float | None = None
+    ward_appeal_rate_3y: float | None = None
+    has_community_meeting: int | None = None
 
 
 class CompsResponse(BaseModel):
