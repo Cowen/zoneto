@@ -356,8 +356,9 @@ Scrapes Ontario Land Tribunal decisions for Toronto:
 
 - `query_comps(enriched_path, *, application_type, ward_number, lat, lon, radius_m, years, limit)` -- queries comparable development applications from enriched Parquet via DuckDB
 - Supports spatial filtering with bounding box approximation (lat/lon + radius_m)
+- Deduplicates by `folderrsn` via `QUALIFY ROW_NUMBER() OVER (PARTITION BY folderrsn)`, keeping the most recent row per application
 - Returns applications sorted by proximity (when lat/lon provided) or recency (year_submitted DESC)
-- Returns list of dicts with: folderrsn, application_type, ward_number, zoning_class, status, year_submitted, lat, lon, dev_approved, dev_appealed, dev_days_to_decision, proposed_storeys, proposed_units, description, street_address, dist_sq
+- Returns list of dicts with: folderrsn, application_type, ward_number, zoning_class, status, year_submitted, lat, lon, dev_approved, dev_appealed, dev_days_to_decision, proposed_storeys, proposed_units, description, street_address, application_url, dist_sq
 
 ### App Factory (`api/app.py`)
 

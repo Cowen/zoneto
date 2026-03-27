@@ -35,6 +35,7 @@ class CompApplication(BaseModel):
     proposed_units: int | None = None
     description: str | None = None
     street_address: str | None = None
+    application_url: str | None = None
     dist_sq: float | None = None
 
 

@@ -98,15 +98,31 @@ def query_comps(
             description,
             COALESCE(CAST(street_num AS VARCHAR), '') || ' ' ||
                 COALESCE(street_name, '')             AS street_address,
+            TRY_CAST(application_url AS VARCHAR)      AS application_url,
             {distance_expr}                           AS dist_sq
         FROM read_parquet('{enriched_path}')
         WHERE {where_clause}
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY folderrsn ORDER BY year_submitted DESC NULLS LAST
+        ) = 1
         ORDER BY {order_by}
         LIMIT {limit}
     """
 
     con = duckdb.connect()
     try:
+        cols = (
+            con.execute(
+                f"DESCRIBE SELECT * FROM read_parquet('{enriched_path}') LIMIT 0"
+            )
+            .pl()["column_name"]
+            .to_list()
+        )
+        url_expr = "application_url" if "application_url" in cols else "NULL"
+        sql = sql.replace(
+            "TRY_CAST(application_url AS VARCHAR)      AS application_url",
+            f"CAST({url_expr} AS VARCHAR)              AS application_url",
+        )
         result = con.execute(sql, params).pl()
         records: list[dict[str, Any]] = result.to_dicts()
         # drop internal dist_sq column when no spatial filter used

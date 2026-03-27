@@ -102,10 +102,6 @@
           </select>
         </div>
         <div>
-          <label for="ward">Ward (auto-filled)</label>
-          <input type="text" id="ward" name="ward" placeholder="e.g. 10" />
-        </div>
-        <div>
           <label for="address">Address</label>
           <input type="text" id="address" name="address" placeholder="e.g. 441 King St W, Toronto" />
         </div>
@@ -152,7 +148,6 @@
       try {
         const address = document.getElementById('address').value.trim();
         const type = document.getElementById('type').value;
-        const wardEl = document.getElementById('ward');
         const radius = document.getElementById('radius').value;
         const years = document.getElementById('years').value;
 
@@ -174,8 +169,7 @@
 
         // Fetch comparable applications
         const params = new URLSearchParams();
-        if (type)                params.set('type', type);
-        if (wardEl.value.trim()) params.set('ward', wardEl.value.trim());
+        if (type) params.set('type', type);
         params.set('lat', lat);
         params.set('lon', lon);
         if (radius) params.set('radius_m', radius);
@@ -191,14 +185,9 @@
         renderResults(data);
         statusEl.textContent = `${geo.display_name} — ${data.total} comparable application${data.total !== 1 ? 's' : ''} found`;
 
-        // Auto-fill ward from first comparable result (only if user left ward blank)
-        if (!wardEl.value.trim() && data.applications[0]?.ward_number) {
-          wardEl.value = data.applications[0].ward_number;
-        }
-
         // Score if application type provided
         if (type) {
-          await fetchScore({ application_type: type, ward_number: wardEl.value || null, lat, lon });
+          await fetchScore({ application_type: type, ward_number: null, lat, lon });
         }
       } catch (err) {
         statusEl.textContent = 'Error: ' + err.message;
@@ -220,7 +209,7 @@
         const storeys = app.proposed_storeys ?? '—';
         const units = app.proposed_units ?? '—';
         return `<tr>
-          <td>${escHtml(app.folderrsn ?? '')}</td>
+          <td>${app.application_url ? `<a href="${escHtml(app.application_url)}" target="_blank" rel="noopener noreferrer">${escHtml(app.folderrsn ?? '')}</a>` : escHtml(app.folderrsn ?? '')}</td>
           <td>${escHtml(app.application_type ?? '')}</td>
           <td>${escHtml(app.ward_number ?? '')}</td>
           <td>${escHtml(app.zoning_class ?? '')}</td>
