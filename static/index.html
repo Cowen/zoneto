@@ -90,6 +90,66 @@
     .risk-mid  { color: #856404; font-weight: 600; }
     .risk-high { color: #dc3545; font-weight: 600; }
     .scenario-loading { color: #6c757d; font-style: italic; font-size: 0.85rem; padding: 1rem; }
+
+    /* Site context flags */
+    .site-context {
+      display: flex; flex-wrap: wrap; gap: 0.5rem;
+      margin-bottom: 1rem; padding-bottom: 0.75rem;
+      border-bottom: 1px solid #e9ecef;
+    }
+    .ctx-flag {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      padding: 0.25rem 0.6rem; border-radius: 4px;
+      font-size: 0.75rem; font-weight: 600;
+    }
+    .ctx-flag-on  { background: #e8f4f8; color: #0c5460; border: 1px solid #bee5eb; }
+    .ctx-flag-off { background: #f8f9fa; color: #adb5bd; border: 1px solid #e9ecef; }
+    .ctx-flag-warn { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+
+    /* Base rate summary */
+    .base-rate {
+      display: flex; gap: 1.5rem; flex-wrap: wrap;
+      padding: 0.75rem 1rem; margin-bottom: 1rem;
+      background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;
+      font-size: 0.82rem;
+    }
+    .base-rate-item { display: flex; flex-direction: column; }
+    .base-rate-value { font-weight: 700; font-size: 0.95rem; color: #212529; }
+    .base-rate-label { font-size: 0.7rem; color: #6c757d; text-transform: uppercase; letter-spacing: 0.04em; }
+
+    /* Custom scenario form */
+    .custom-scorer {
+      display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;
+      margin-top: 0.75rem; padding-top: 0.75rem;
+      border-top: 1px solid #e9ecef;
+    }
+    .custom-scorer label { font-size: 0.7rem; margin-bottom: 0.15rem; }
+    .custom-scorer input, .custom-scorer select {
+      padding: 0.35rem 0.5rem; font-size: 0.82rem; width: auto; min-width: 80px;
+    }
+    .custom-scorer button {
+      background: #495057; color: #fff; border: none; border-radius: 4px;
+      padding: 0.4rem 1rem; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+      white-space: nowrap;
+    }
+    .custom-scorer button:hover { background: #343a40; }
+    .custom-scorer button:disabled { background: #adb5bd; cursor: not-allowed; }
+
+    /* SHAP mini-explanation */
+    .shap-inline {
+      margin-top: 0.5rem; padding: 0.6rem 0.75rem;
+      background: #f8f9fa; border-radius: 5px; border: 1px solid #e9ecef;
+      font-size: 0.78rem;
+    }
+    .shap-inline-title { font-size: 0.7rem; color: #6c757d; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.35rem; }
+    .shap-factor { display: inline-block; margin-right: 0.75rem; margin-bottom: 0.2rem; }
+
+    /* Model footnote */
+    .model-footnote {
+      font-size: 0.72rem; color: #adb5bd; margin-top: 0.75rem;
+      padding-top: 0.5rem; border-top: 1px solid #f1f3f5;
+      line-height: 1.4;
+    }
   </style>
 </head>
 <body>
@@ -136,10 +196,14 @@
   <div class="card" id="scenarios-section">
     <h2 style="font-size:1rem;font-weight:700;margin-bottom:0.75rem">What could I build here?</h2>
     <p style="font-size:0.8rem;color:#6c757d;margin-bottom:1rem">
-      Site context borrowed from the nearest comparable application.
-      Appeal risk proxies approval difficulty — lower is smoother.
+      Scenarios calibrated to nearby applications. Site context from the nearest comp.
     </p>
+    <div id="site-context"></div>
+    <div id="base-rate"></div>
     <div id="scenarios-body"></div>
+    <div id="shap-best"></div>
+    <div id="custom-scorer-container"></div>
+    <div id="model-footnote"></div>
   </div>
 
   <div class="card" id="results-card" style="display:none">
@@ -155,6 +219,11 @@
     const predictionsEl = document.getElementById('predictions');
     const scenariosSection = document.getElementById('scenarios-section');
     const scenariosBody = document.getElementById('scenarios-body');
+    const siteContextEl = document.getElementById('site-context');
+    const baseRateEl = document.getElementById('base-rate');
+    const shapBestEl = document.getElementById('shap-best');
+    const customScorerEl = document.getElementById('custom-scorer-container');
+    const modelFootnoteEl = document.getElementById('model-footnote');
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -211,7 +280,7 @@
 
         // "What could I build here?" panel — score hypothetical scenarios
         if (data.applications.length > 0) {
-          await fetchScenarios(data.applications[0]);
+          await fetchScenarios(data.applications, lat, lon);
         }
       } catch (err) {
         statusEl.textContent = 'Error: ' + err.message;
@@ -331,7 +400,7 @@
 
     // --- "What could I build here?" ---
 
-    const SCENARIOS = [
+    const FALLBACK_SCENARIOS = [
       { label: 'Low-rise OZ',  application_type: 'OZ', proposed_storeys: 6,  proposed_units: 30,  has_parent_application: 0, is_combined_application: 0 },
       { label: 'Mid-rise OZ',  application_type: 'OZ', proposed_storeys: 15, proposed_units: 100, has_parent_application: 0, is_combined_application: 0 },
       { label: 'High-rise OZ', application_type: 'OZ', proposed_storeys: 35, proposed_units: 300, has_parent_application: 0, is_combined_application: 0 },
@@ -339,12 +408,61 @@
       { label: 'Site Plan (SA)', application_type: 'SA', proposed_storeys: 6, proposed_units: 30, has_parent_application: 1, is_combined_application: 0 },
     ];
 
-    async function fetchScenarios(nearestComp) {
-      scenariosBody.innerHTML = '<p class="scenario-loading">Scoring hypothetical scenarios…</p>';
-      scenariosSection.style.display = 'block';
+    // Saved between calls so the custom scorer can reuse it
+    let _lastSiteCtx = null;
 
-      // Extract site context from nearest comp
-      const siteCtx = {
+    function percentile(sorted, p) {
+      const i = (p / 100) * (sorted.length - 1);
+      const lo = Math.floor(i), hi = Math.ceil(i);
+      return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+    }
+
+    function buildScenariosFromComps(applications) {
+      const withStoreys = applications.filter(a => a.proposed_storeys != null && a.proposed_storeys > 0);
+      const withUnits   = applications.filter(a => a.proposed_units != null && a.proposed_units > 0);
+
+      if (withStoreys.length < 5 || withUnits.length < 5) return FALLBACK_SCENARIOS;
+
+      const sortedS = withStoreys.map(a => a.proposed_storeys).sort((a, b) => a - b);
+      const sortedU = withUnits.map(a => a.proposed_units).sort((a, b) => a - b);
+
+      const s25 = Math.round(percentile(sortedS, 25));
+      const s50 = Math.round(percentile(sortedS, 50));
+      const s75 = Math.round(percentile(sortedS, 75));
+      const u25 = Math.round(percentile(sortedU, 25));
+      const u50 = Math.round(percentile(sortedU, 50));
+      const u75 = Math.round(percentile(sortedU, 75));
+
+      // Determine dominant application type from comps
+      const typeCounts = {};
+      applications.forEach(a => { if (a.application_type) typeCounts[a.application_type] = (typeCounts[a.application_type] || 0) + 1; });
+      const dominantType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'OZ';
+
+      const scenarios = [
+        { label: 'Conservative', application_type: dominantType, proposed_storeys: s25, proposed_units: u25, has_parent_application: 0, is_combined_application: 0 },
+        { label: 'Typical',      application_type: dominantType, proposed_storeys: s50, proposed_units: u50, has_parent_application: 0, is_combined_application: 0 },
+        { label: 'Ambitious',    application_type: dominantType, proposed_storeys: s75, proposed_units: u75, has_parent_application: 0, is_combined_application: 0 },
+      ];
+
+      // Add an OZ+OPA combined scenario if dominant type is OZ
+      if (dominantType === 'OZ') {
+        scenarios.push({ label: 'OZ + OPA', application_type: 'OZ', proposed_storeys: s75, proposed_units: u75, has_parent_application: 0, is_combined_application: 1 });
+      }
+
+      // Add an SA scenario if there are SA comps
+      if (typeCounts['SA'] && typeCounts['SA'] >= 2) {
+        const saStoreys = withStoreys.filter(a => a.application_type === 'SA');
+        const saMedian = saStoreys.length >= 2 ? Math.round(percentile(saStoreys.map(a => a.proposed_storeys).sort((a, b) => a - b), 50)) : s25;
+        const saUnits = withUnits.filter(a => a.application_type === 'SA');
+        const saUnitMedian = saUnits.length >= 2 ? Math.round(percentile(saUnits.map(a => a.proposed_units).sort((a, b) => a - b), 50)) : u25;
+        scenarios.push({ label: 'Site Plan (SA)', application_type: 'SA', proposed_storeys: saMedian, proposed_units: saUnitMedian, has_parent_application: 1, is_combined_application: 0 });
+      }
+
+      return scenarios;
+    }
+
+    function extractSiteCtx(nearestComp) {
+      return {
         ward_number:           nearestComp.ward_number ?? null,
         zoning_class:          nearestComp.zoning_class ?? null,
         secondary_plan_name:   nearestComp.secondary_plan_name ?? null,
@@ -360,61 +478,329 @@
         year_submitted:        new Date().getFullYear(),
         has_community_meeting: 0,
       };
+    }
+
+    function renderSiteContext(ctx) {
+      const flag = (label, value, warnIfOn) => {
+        const on = value === 1 || value === true;
+        const cls = on ? (warnIfOn ? 'ctx-flag-warn' : 'ctx-flag-on') : 'ctx-flag-off';
+        const icon = on ? 'Yes' : 'No';
+        return `<span class="ctx-flag ${cls}">${escHtml(label)}: ${icon}</span>`;
+      };
+
+      let html = '';
+      // Zoning and limits
+      if (ctx.ward_number || ctx.zoning_class) {
+        let zoneLabel = '';
+        if (ctx.ward_number) zoneLabel += `Ward ${escHtml(String(ctx.ward_number))}`;
+        if (ctx.zoning_class) zoneLabel += (zoneLabel ? ' / ' : '') + escHtml(ctx.zoning_class);
+        html += `<span class="ctx-flag ctx-flag-on">${zoneLabel}</span>`;
+      }
+      if (ctx.zoning_max_units != null) {
+        html += `<span class="ctx-flag ctx-flag-on">Zoning permits: ${ctx.zoning_max_units} units</span>`;
+      }
+      if (ctx.zoning_max_density != null) {
+        html += `<span class="ctx-flag ctx-flag-on">Max density: ${ctx.zoning_max_density} FSI</span>`;
+      }
+      // Regulatory flags
+      html += flag('Heritage Register', ctx.in_heritage_register, true);
+      html += flag('Heritage District', ctx.in_heritage_district, true);
+      html += flag('MTSA Zone', ctx.in_mtsa, false);
+      html += flag('Secondary Plan', ctx.in_secondary_plan, false);
+      if (ctx.secondary_plan_name) {
+        html += `<span class="ctx-flag ctx-flag-on">${escHtml(ctx.secondary_plan_name)}</span>`;
+      }
+      if (ctx.ward_appeal_rate_3y != null) {
+        const rate = (ctx.ward_appeal_rate_3y * 100).toFixed(0);
+        const cls = ctx.ward_appeal_rate_3y > 0.20 ? 'ctx-flag-warn' : 'ctx-flag-on';
+        html += `<span class="ctx-flag ${cls}">Ward appeal rate (3yr): ${rate}%</span>`;
+      }
+      siteContextEl.innerHTML = html ? `<div class="site-context">${html}</div>` : '';
+    }
+
+    function renderBaseRate(applications) {
+      const withAppealLabel = applications.filter(a => a.dev_appealed != null);
+      const appealed = withAppealLabel.filter(a => a.dev_appealed === 1);
+      const withTimeline = applications.filter(a => a.dev_days_to_decision != null && a.dev_days_to_decision > 0);
+
+      if (withAppealLabel.length === 0 && withTimeline.length === 0) {
+        baseRateEl.innerHTML = '';
+        return;
+      }
+
+      let html = '<div class="base-rate">';
+      html += `<div class="base-rate-item"><span class="base-rate-value">${applications.length}</span><span class="base-rate-label">Nearby comps</span></div>`;
+
+      if (withAppealLabel.length > 0) {
+        const pct = (appealed.length / withAppealLabel.length * 100).toFixed(0);
+        html += `<div class="base-rate-item"><span class="base-rate-value">${appealed.length} of ${withAppealLabel.length} (${pct}%)</span><span class="base-rate-label">Actually appealed</span></div>`;
+      }
+
+      if (withTimeline.length > 0) {
+        const sorted = withTimeline.map(a => a.dev_days_to_decision).sort((a, b) => a - b);
+        const median = Math.round(percentile(sorted, 50) / 30);
+        html += `<div class="base-rate-item"><span class="base-rate-value">${median} months</span><span class="base-rate-label">Median time to decision</span></div>`;
+      }
+
+      const withStoreys = applications.filter(a => a.proposed_storeys != null && a.proposed_storeys > 0);
+      if (withStoreys.length > 0) {
+        const sorted = withStoreys.map(a => a.proposed_storeys).sort((a, b) => a - b);
+        const median = Math.round(percentile(sorted, 50));
+        html += `<div class="base-rate-item"><span class="base-rate-value">${median} storeys</span><span class="base-rate-label">Typical project</span></div>`;
+      }
+
+      html += '</div>';
+      baseRateEl.innerHTML = html;
+    }
+
+    async function scoreOneScenario(features) {
+      try {
+        const res = await fetch('/score', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: 'dev_applications', features }),
+        });
+        if (!res.ok) return { predictions: null };
+        return await res.json();
+      } catch (_) {
+        return { predictions: null };
+      }
+    }
+
+    async function fetchScenarios(applications, lat, lon) {
+      scenariosBody.innerHTML = '<p class="scenario-loading">Scoring hypothetical scenarios…</p>';
+      scenariosSection.style.display = 'block';
+      shapBestEl.innerHTML = '';
+      customScorerEl.innerHTML = '';
+      modelFootnoteEl.innerHTML = '';
+
+      const nearestComp = applications[0];
+
+      // Look up actual spatial context at the searched address
+      // Falls back to nearest comp if the endpoint fails
+      let spatialCtx = {};
+      try {
+        const ctxRes = await fetch(`/site-context?lat=${lat}&lon=${lon}`);
+        if (ctxRes.ok) spatialCtx = await ctxRes.json();
+      } catch (_) { /* fall back to comp */ }
+
+      // Merge: real spatial flags from /site-context, demographics from nearest comp
+      const siteCtx = {
+        // Spatial flags — prefer actual lookup, fall back to comp
+        zoning_class:          spatialCtx.zoning_class ?? nearestComp.zoning_class ?? null,
+        secondary_plan_name:   spatialCtx.secondary_plan_name ?? nearestComp.secondary_plan_name ?? null,
+        in_heritage_register:  spatialCtx.in_heritage_register ?? nearestComp.in_heritage_register ?? null,
+        in_heritage_district:  spatialCtx.in_heritage_district ?? nearestComp.in_heritage_district ?? null,
+        in_secondary_plan:     spatialCtx.in_secondary_plan ?? nearestComp.in_secondary_plan ?? null,
+        in_mtsa:               spatialCtx.in_mtsa ?? nearestComp.in_mtsa ?? null,
+        // Zoning limits (display only — not model features)
+        zoning_max_units:      spatialCtx.zoning_max_units ?? null,
+        zoning_max_density:    spatialCtx.zoning_max_density ?? null,
+        // Ward demographics — only available from comps (census data joined by ward)
+        ward_number:           nearestComp.ward_number ?? null,
+        ward_pct_renters:      nearestComp.ward_pct_renters ?? null,
+        ward_median_income:    nearestComp.ward_median_income ?? null,
+        ward_pop_density:      nearestComp.ward_pop_density ?? null,
+        ward_pct_detached:     nearestComp.ward_pct_detached ?? null,
+        ward_appeal_rate_3y:   nearestComp.ward_appeal_rate_3y ?? null,
+        year_submitted:        new Date().getFullYear(),
+        has_community_meeting: 0,
+      };
+      _lastSiteCtx = siteCtx;
+
+      // Render site context and base rate
+      renderSiteContext(siteCtx);
+      renderBaseRate(applications);
+
+      // Build scenarios from comps data
+      const scenarios = buildScenariosFromComps(applications);
 
       const results = await Promise.all(
-        SCENARIOS.map(async (s) => {
+        scenarios.map(async (s) => {
           const features = { ...siteCtx, ...s };
           delete features.label;
-          try {
-            const res = await fetch('/score', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ source: 'dev_applications', features }),
-            });
-            if (!res.ok) return { scenario: s, predictions: null };
-            const data = await res.json();
-            return { scenario: s, predictions: data.predictions, ready: data.production_ready_models };
-          } catch (_) {
-            return { scenario: s, predictions: null };
-          }
+          const data = await scoreOneScenario(features);
+          return { scenario: s, predictions: data.predictions, ready: data.production_ready_models };
         })
       );
 
       renderScenarios(results, nearestComp);
+
+      // Fetch SHAP explanation for the best-fit (lowest appeal risk) scenario
+      const bestIdx = results.reduce((best, r, i) => {
+        const risk = r.predictions?.prob_dev_appealed ?? Infinity;
+        return risk < (results[best]?.predictions?.prob_dev_appealed ?? Infinity) ? i : best;
+      }, 0);
+      if (results[bestIdx]?.predictions?.prob_dev_appealed != null) {
+        fetchBestShap(scenarios[bestIdx], siteCtx);
+      }
+
+      // Render custom scorer and model footnote
+      renderCustomScorer();
+      renderModelFootnote();
+    }
+
+    async function fetchBestShap(scenario, siteCtx) {
+      try {
+        const features = { ...siteCtx, ...scenario };
+        delete features.label;
+        const res = await fetch('/score?explain=true', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: 'dev_applications', features }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.explanations) return;
+
+        const allContribs = Object.values(data.explanations).flat();
+        if (allContribs.length === 0) return;
+
+        // Show top 5 factors
+        const top = allContribs.sort((a, b) => Math.abs(b.shap_value) - Math.abs(a.shap_value)).slice(0, 5);
+        const factors = top.map(c => {
+          const color = c.direction === 'increases_risk' ? '#dc3545' : '#198754';
+          const arrow = c.direction === 'increases_risk' ? '\u2191' : '\u2193';
+          const label = c.feature.replace(/__/g, ': ').replace(/_/g, ' ');
+          return `<span class="shap-factor" style="color:${color}">${arrow} ${escHtml(label)}</span>`;
+        }).join('');
+
+        shapBestEl.innerHTML = `<div class="shap-inline">
+          <div class="shap-inline-title">Why "${escHtml(scenario.label)}" has lowest risk</div>
+          ${factors}
+        </div>`;
+      } catch (_) {
+        // SHAP is optional
+      }
+    }
+
+    function renderCustomScorer() {
+      customScorerEl.innerHTML = `
+        <div class="custom-scorer">
+          <div>
+            <label for="custom-type">Type</label>
+            <select id="custom-type">
+              <option value="OZ">OZ</option>
+              <option value="SA">SA</option>
+            </select>
+          </div>
+          <div>
+            <label for="custom-storeys">Storeys</label>
+            <input type="number" id="custom-storeys" min="1" max="99" value="12" style="width:70px" />
+          </div>
+          <div>
+            <label for="custom-units">Units</label>
+            <input type="number" id="custom-units" min="1" max="9999" value="60" style="width:80px" />
+          </div>
+          <button type="button" id="custom-score-btn">Score my proposal</button>
+          <div id="custom-result" style="font-size:0.82rem;display:flex;align-items:center;gap:0.5rem"></div>
+        </div>`;
+
+      document.getElementById('custom-score-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('custom-score-btn');
+        const resultEl = document.getElementById('custom-result');
+        if (!_lastSiteCtx) return;
+
+        btn.disabled = true;
+        resultEl.textContent = 'Scoring…';
+
+        const features = {
+          ..._lastSiteCtx,
+          application_type: document.getElementById('custom-type').value,
+          proposed_storeys: parseInt(document.getElementById('custom-storeys').value) || 12,
+          proposed_units:   parseInt(document.getElementById('custom-units').value) || 60,
+          has_parent_application: document.getElementById('custom-type').value === 'SA' ? 1 : 0,
+          is_combined_application: 0,
+        };
+
+        const data = await scoreOneScenario(features);
+        btn.disabled = false;
+
+        if (!data.predictions || Object.keys(data.predictions).length === 0) {
+          resultEl.innerHTML = '<span style="color:#adb5bd">No predictions available</span>';
+          return;
+        }
+
+        const p = data.predictions;
+        let html = '';
+        // Show the zoning being used for this score
+        const zone = _lastSiteCtx?.zoning_class;
+        if (zone) {
+          html += `<span class="ctx-flag ctx-flag-on" style="font-size:0.72rem">Zone: ${escHtml(zone)}</span>`;
+        }
+        // Show excess vs zoning
+        const maxUnits = _lastSiteCtx?.zoning_max_units;
+        const proposedUnits = parseInt(document.getElementById('custom-units').value) || 0;
+        if (maxUnits != null && proposedUnits > maxUnits) {
+          const mult = (proposedUnits / maxUnits).toFixed(1);
+          html += `<span class="ctx-flag ctx-flag-warn" style="font-size:0.72rem">${mult}x zoning limit</span>`;
+        }
+        if (p.prob_dev_appealed != null) {
+          const risk = (p.prob_dev_appealed * 100).toFixed(0);
+          const cls = p.prob_dev_appealed < 0.2 ? 'risk-low' : p.prob_dev_appealed < 0.35 ? 'risk-mid' : 'risk-high';
+          html += `<span class="${cls}">Appeal risk: ${risk}%</span>`;
+        }
+        if (p.pred_dev_days_p25 != null && p.pred_dev_days_p75 != null) {
+          const lo = Math.round(p.pred_dev_days_p25 / 30);
+          const hi = Math.round(p.pred_dev_days_p75 / 30);
+          html += `<span style="color:#495057">Timeline: ${lo}\u2013${hi} mo</span>`;
+        }
+        resultEl.innerHTML = html || '<span style="color:#adb5bd">\u2014</span>';
+      });
+    }
+
+    function renderModelFootnote() {
+      modelFootnoteEl.innerHTML = `<div class="model-footnote">
+        Appeal model AUC ~0.68, timeline model C-index ~0.74.
+        The model does not capture how much a proposal exceeds the zoning limit —
+        a 12-storey building in a low-rise zone may show lower risk than reality.
+        Compare predictions against the nearby track record above.
+      </div>`;
     }
 
     function renderScenarios(results, nearestComp) {
-      // Check if any models produced results
       const anyPredictions = results.some(r => r.predictions && Object.keys(r.predictions).length > 0);
       if (!anyPredictions) {
         scenariosSection.style.display = 'none';
         return;
       }
 
-      // Find lowest appeal risk for "Best Fit" badge
       const appealRisks = results.map(r => r.predictions?.prob_dev_appealed ?? Infinity);
       const minRisk = Math.min(...appealRisks);
 
       const hasTimeline = results.some(r => r.predictions?.pred_dev_days_p50 != null);
+      const maxUnits = _lastSiteCtx?.zoning_max_units;
+      const hasExcess = maxUnits != null;
 
-      const contextNote = nearestComp.ward_number
-        ? `Ward ${nearestComp.ward_number}${nearestComp.zoning_class ? ', zone ' + nearestComp.zoning_class : ''}`
-        : 'nearest comparable application';
-
-      const rows = results.map((r, i) => {
+      const rows = results.map((r) => {
         const s = r.scenario;
         const p = r.predictions;
+
+        // Compute zoning excess
+        let excessCell = '';
+        if (hasExcess) {
+          const ratio = s.proposed_units / maxUnits;
+          if (ratio > 1) {
+            const mult = ratio.toFixed(1);
+            const cls = ratio > 5 ? 'risk-high' : ratio > 2 ? 'risk-mid' : 'risk-low';
+            excessCell = `<td class="${cls}">${mult}x</td>`;
+          } else {
+            excessCell = `<td style="color:#198754">within</td>`;
+          }
+        }
+
         if (!p) {
           return `<tr>
             <td>${escHtml(s.label)}</td>
             <td>${s.application_type}</td><td>${s.proposed_storeys}</td><td>${s.proposed_units}</td>
-            <td colspan="${hasTimeline ? 3 : 2}" style="color:#adb5bd">unavailable</td>
+            ${excessCell}
+            <td colspan="${hasTimeline ? 2 : 1}" style="color:#adb5bd">unavailable</td>
           </tr>`;
         }
 
         const risk = p.prob_dev_appealed;
         const isBest = risk != null && risk === minRisk;
-        const riskStr = risk != null ? (risk * 100).toFixed(0) + '%' : '—';
+        const riskStr = risk != null ? (risk * 100).toFixed(0) + '%' : '\u2014';
         const riskClass = risk == null ? '' : risk < 0.2 ? 'risk-low' : risk < 0.35 ? 'risk-mid' : 'risk-high';
 
         let timelineCell = '';
@@ -426,10 +812,10 @@
             const lo = p25 != null ? Math.round(p25 / 30) : null;
             const mid = Math.round(p50 / 30);
             const hi = p75 != null ? Math.round(p75 / 30) : null;
-            const range = (lo != null && hi != null) ? `${lo}–${hi} mo` : `${mid} mo`;
+            const range = (lo != null && hi != null) ? `${lo}\u2013${hi} mo` : `${mid} mo`;
             timelineCell = `<td>${range}</td>`;
           } else {
-            timelineCell = '<td>—</td>';
+            timelineCell = '<td>\u2014</td>';
           }
         }
 
@@ -440,18 +826,20 @@
           <td>${s.application_type}</td>
           <td>${s.proposed_storeys}</td>
           <td>${s.proposed_units}</td>
+          ${excessCell}
           <td class="${riskClass}">${riskStr}</td>
           ${hasTimeline ? timelineCell : ''}
         </tr>`;
       }).join('');
 
-      const timelineHeader = hasTimeline ? '<th>Timeline (p25–p75)</th>' : '';
+      const timelineHeader = hasTimeline ? '<th>Timeline (p25\u2013p75)</th>' : '';
+      const excessHeader = hasExcess ? `<th>vs Zoning</th>` : '';
 
       scenariosBody.innerHTML = `
-        <p style="font-size:0.78rem;color:#adb5bd;margin-bottom:0.5rem">Context: ${escHtml(contextNote)}</p>
         <table>
           <thead><tr>
             <th>Scenario</th><th>Type</th><th>Storeys</th><th>Units</th>
+            ${excessHeader}
             <th>Appeal Risk</th>${timelineHeader}
           </tr></thead>
           <tbody>${rows}</tbody>

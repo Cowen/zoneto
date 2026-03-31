@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from zoneto.analytics.explain import explain_one
 from zoneto.analytics.score import score_one
 from zoneto.api.comps import query_comps
+from zoneto.api.site_context import lookup_site_context
 
 router = APIRouter()
 
@@ -73,6 +74,17 @@ class GeocodeResult(BaseModel):
     display_name: str
 
 
+class SiteContextResult(BaseModel):
+    zoning_class: str | None = None
+    zoning_max_units: int | None = None
+    zoning_max_density: float | None = None
+    in_heritage_register: int = 0
+    in_heritage_district: int = 0
+    secondary_plan_name: str | None = None
+    in_secondary_plan: int = 0
+    in_mtsa: int = 0
+
+
 # --- endpoints ---
 
 
@@ -106,6 +118,15 @@ def geocode(address: str) -> GeocodeResult:
         lon=float(first["lon"]),
         display_name=first["display_name"],
     )
+
+
+@router.get("/site-context", response_model=SiteContextResult)
+def site_context(request: Request, lat: float, lon: float) -> SiteContextResult:
+    """Look up zoning, heritage, MTSA, and secondary plan at a point."""
+    data_dir: Path = getattr(request.app.state, "data_dir", Path("data"))
+    ref_dir = data_dir / "reference"
+    result = lookup_site_context(lat, lon, ref_dir)
+    return SiteContextResult(**result)
 
 
 @router.get("/ready")
