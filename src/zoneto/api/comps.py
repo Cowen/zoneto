@@ -73,6 +73,31 @@ _OPTIONAL_COLS: list[tuple[str, str, str]] = [
         "CAST(has_community_meeting AS INTEGER) AS has_community_meeting",
         "CAST(NULL AS INTEGER) AS has_community_meeting",
     ),
+    (
+        "zoning_max_units",
+        "CAST(zoning_max_units AS INTEGER) AS zoning_max_units",
+        "CAST(NULL AS INTEGER) AS zoning_max_units",
+    ),
+    (
+        "zoning_max_density",
+        "zoning_max_density",
+        "CAST(NULL AS DOUBLE) AS zoning_max_density",
+    ),
+    (
+        "unit_excess_ratio",
+        "unit_excess_ratio",
+        "CAST(NULL AS DOUBLE) AS unit_excess_ratio",
+    ),
+    (
+        "zoning_max_storeys",
+        "CAST(zoning_max_storeys AS INTEGER) AS zoning_max_storeys",
+        "CAST(NULL AS INTEGER) AS zoning_max_storeys",
+    ),
+    (
+        "storey_excess_ratio",
+        "storey_excess_ratio",
+        "CAST(NULL AS DOUBLE) AS storey_excess_ratio",
+    ),
 ]
 
 

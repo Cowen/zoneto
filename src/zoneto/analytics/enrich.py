@@ -45,6 +45,12 @@ _SECONDARY_PLANS_URL = (
     "/resource/08099a8c-a598-4ca3-8395-e4159cc1ec1a"
     "/download/secondary-plans-data-2017-4326.geojson"
 )
+_ZONING_HEIGHT_URL = (
+    "https://ckan0.cf.opendata.inter.prod-toronto.ca"
+    "/dataset/34927e44-fc11-4336-a8aa-a0dfb27658b7"
+    "/resource/eec27e60-7c2d-4c46-8fa1-b64f441bcc39"
+    "/download/zoning-height-overlay-4326.geojson"
+)
 _MTSA_URL = (
     "https://ckan0.cf.opendata.inter.prod-toronto.ca"
     "/dataset/f7128f82-810d-4677-8166-8892f51969d3"
@@ -328,6 +334,11 @@ def fetch_reference(data_dir: Path = Path("data")) -> None:
     if not zoning_geojson.exists():
         _download(_ZONING_URL, zoning_geojson)
 
+    # Zoning height overlay GeoJSON (max storeys/height per area, WGS84)
+    zoning_height = ref / "zoning_height.geojson"
+    if not zoning_height.exists():
+        _download(_ZONING_HEIGHT_URL, zoning_height)
+
     # Heritage register (ZIP → extract)
     hr_dir = ref / "heritage_register"
     if not hr_dir.exists():
@@ -504,7 +515,9 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
         zoning_join AS (
             SELECT DISTINCT ON (p._rid)
                 p._rid,
-                z.ZN_ZONE AS zoning_class
+                z.ZN_ZONE AS zoning_class,
+                z.UNITS AS zoning_max_units,
+                z.DENSITY AS zoning_max_density
             FROM pts p
             LEFT JOIN ST_Read('{zoning_geojson_path}') z
                 ON ST_Within(p.geom, z.geom)
@@ -540,6 +553,8 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
         SELECT
             a.*,
             z.zoning_class AS zoning_class,
+            z.zoning_max_units AS zoning_max_units,
+            z.zoning_max_density AS zoning_max_density,
             COALESCE(h.in_heritage_register, 0)
                 AS in_heritage_register,
             COALESCE(d.in_heritage_district, 0)
@@ -556,11 +571,83 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
 
     con.close()
 
+    # Cast zoning limit columns to expected types (DuckDB may return bigint/double)
+    result = result.with_columns(
+        pl.col("zoning_max_units").cast(pl.Int32, strict=False),
+        pl.col("zoning_max_density").cast(pl.Float64, strict=False),
+    )
+
+    # Add zoning max storeys from height overlay
+    height_geojson = ref / "zoning_height.geojson"
+    result = _add_height_feature(result, height_geojson)
+
     # Add MTSA feature using the downloaded boundary shapefile
     mtsa_shp = ref / "mtsa.shp"
     result = _add_mtsa_feature(result, mtsa_shp)
 
     return result
+
+
+def _add_height_feature(
+    df: pl.DataFrame, height_path: Path
+) -> pl.DataFrame:
+    """Add zoning_max_storeys (Int32) via DuckDB spatial join against height overlay.
+
+    Per the by-law data dictionary, HT_STORIES <= 0 means "no limit" — treated
+    as null. Rows with null lat/lon or outside height overlay get null.
+    """
+    if (
+        not height_path.exists()
+        or "lat" not in df.columns
+        or "lon" not in df.columns
+    ):
+        return df.with_columns(
+            pl.lit(None, dtype=pl.Int32).alias("zoning_max_storeys")
+        )
+
+    valid_mask = df["lat"].is_not_null() & df["lon"].is_not_null()
+    valid_df = df.filter(valid_mask)
+
+    if len(valid_df) == 0:
+        return df.with_columns(
+            pl.lit(None, dtype=pl.Int32).alias("zoning_max_storeys")
+        )
+
+    escaped = str(height_path).replace("'", "''")
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.register("apps", valid_df.to_arrow())
+
+    result = con.execute(f"""
+        SELECT DISTINCT ON (apps._rid)
+            apps._rid,
+            CASE WHEN ht.HT_STORIES > 0
+                 THEN ht.HT_STORIES ELSE NULL END
+                 AS zoning_max_storeys
+        FROM apps
+        LEFT JOIN ST_Read('{escaped}') ht
+            ON ST_Within(ST_Point(apps.lon, apps.lat), ht.geom)
+    """).pl()
+
+    con.close()
+
+    rid_to_ht: dict[int, int | None] = dict(
+        zip(
+            result["_rid"].to_list(),
+            result["zoning_max_storeys"]
+            .cast(pl.Int32, strict=False)
+            .to_list(),
+        )
+    )
+    all_rids = (
+        df["_rid"].to_list() if "_rid" in df.columns else list(range(len(df)))
+    )
+    ht_series = pl.Series(
+        "zoning_max_storeys",
+        [rid_to_ht.get(rid) for rid in all_rids],
+        dtype=pl.Int32,
+    )
+    return df.with_columns(ht_series)
 
 
 def _add_mtsa_feature(df: pl.DataFrame, mtsa_path: Path) -> pl.DataFrame:
@@ -979,6 +1066,35 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
             pl.lit(None, dtype=pl.Int32).alias("proposed_storeys"),
             pl.lit(None, dtype=pl.Int32).alias("proposed_units"),
         )
+
+    # unit_excess_ratio: proposed_units / zoning_max_units.
+    # Values > 1.0 mean the proposal exceeds zoning — strong appeal signal.
+    df = df.with_columns(
+        pl.when(
+            pl.col("proposed_units").is_not_null()
+            & pl.col("zoning_max_units").is_not_null()
+            & (pl.col("zoning_max_units") > 0)
+        )
+        .then(pl.col("proposed_units") / pl.col("zoning_max_units"))
+        .otherwise(None)
+        .cast(pl.Float64)
+        .alias("unit_excess_ratio")
+    )
+
+    # storey_excess_ratio: proposed_storeys / zoning_max_storeys.
+    # Per by-law readme, HT_STORIES <= 0 means "no limit" (already nulled
+    # in _add_height_feature). Better coverage than unit_excess_ratio.
+    df = df.with_columns(
+        pl.when(
+            pl.col("proposed_storeys").is_not_null()
+            & pl.col("zoning_max_storeys").is_not_null()
+            & (pl.col("zoning_max_storeys") > 0)
+        )
+        .then(pl.col("proposed_storeys") / pl.col("zoning_max_storeys"))
+        .otherwise(None)
+        .cast(pl.Float64)
+        .alias("storey_excess_ratio")
+    )
 
     # is_combined_application: OZ with OPA in description field (case-insensitive)
     if "description" in df.columns:

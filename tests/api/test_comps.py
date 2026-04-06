@@ -49,6 +49,19 @@ def enriched_parquet(tmp_path: Path) -> Path:
             ),
             "proposed_storeys": pl.Series([10, 20, None, 5, 8], dtype=pl.Int32),
             "proposed_units": pl.Series([100, 200, None, 50, 80], dtype=pl.Int32),
+            "zoning_max_units": pl.Series([50, 100, None, 100, 50], dtype=pl.Int32),
+            "zoning_max_density": pl.Series(
+                [3.5, 2.0, None, 1.5, 3.5], dtype=pl.Float64
+            ),
+            "unit_excess_ratio": pl.Series(
+                [2.0, 2.0, None, 0.5, 1.6], dtype=pl.Float64
+            ),
+            "zoning_max_storeys": pl.Series(
+                [10, 5, None, 20, 10], dtype=pl.Int32
+            ),
+            "storey_excess_ratio": pl.Series(
+                [1.0, 4.0, None, 0.25, 0.8], dtype=pl.Float64
+            ),
             "description": ["OZ application"] * 5,
             "street_num": ["100", "200", "300", "400", "500"],
             "street_name": ["King St", "Queen St", "Bloor St", "Yonge St", "Bay St"],

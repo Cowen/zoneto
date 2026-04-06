@@ -21,6 +21,8 @@ DEV_NUM_COLS: list[str] = [
     "is_combined_application",
     "proposed_storeys",
     "proposed_units",
+    "unit_excess_ratio",
+    "storey_excess_ratio",
     "ward_appeal_rate_3y",
     "in_mtsa",
     *[f"desc_svd_{i}" for i in range(20)],

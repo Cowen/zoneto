@@ -51,6 +51,9 @@ def _fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
         pl.lit(0, dtype=pl.Int8).alias("in_heritage_register"),
         pl.lit(0, dtype=pl.Int8).alias("in_heritage_district"),
         pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
+        pl.lit(None, dtype=pl.Int32).alias("zoning_max_units"),
+        pl.lit(None, dtype=pl.Float64).alias("zoning_max_density"),
+        pl.lit(None, dtype=pl.Int32).alias("zoning_max_storeys"),
     )
 
 
@@ -559,7 +562,12 @@ def test_enrich_coa_deduplicates_on_reference_file(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _setup_spatial_ref(ref: Path, zoning_zone: str = "CR3") -> None:
+def _setup_spatial_ref(
+    ref: Path,
+    zoning_zone: str = "CR3",
+    zoning_units: int | None = 200,
+    zoning_density: float | None = 3.5,
+) -> None:
     """Create minimal reference files for _spatial_join_dev integration tests.
 
     Zoning polygon covers Toronto WGS84 (-80,-79) × (43,44).
@@ -576,7 +584,11 @@ def _setup_spatial_ref(ref: Path, zoning_zone: str = "CR3") -> None:
         "features": [
             {
                 "type": "Feature",
-                "properties": {"ZN_ZONE": zoning_zone},
+                "properties": {
+                    "ZN_ZONE": zoning_zone,
+                    "UNITS": zoning_units,
+                    "DENSITY": zoning_density,
+                },
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [
@@ -1056,6 +1068,123 @@ def test_enrich_dev_extracts_units(
     assert df.filter(pl.col("folderrsn") == "D5")["proposed_units"][0] == 320
     # null description → null
     assert df.filter(pl.col("folderrsn") == "D6")["proposed_units"][0] is None
+
+
+# ---------------------------------------------------------------------------
+# enrich_dev — unit_excess_ratio (proposed_units / zoning_max_units)
+# ---------------------------------------------------------------------------
+
+
+def _fake_spatial_join_with_zoning_limits(
+    df: pl.DataFrame, data_dir: Path
+) -> pl.DataFrame:
+    """Spatial join stub that provides varying zoning limits per row."""
+    n = len(df)
+    # Row order matches _make_dev_parquet_descriptions: D1..D6
+    # D1: units=100, storeys=10 (both valid)
+    # D2: units=100, storeys=3  (both valid)
+    # D3: units=null, storeys=null
+    # D4: units=-1, storeys=-1  (by-law sentinel for "no limit")
+    # D5: units=0, storeys=0
+    # D6: units=null, storeys=null
+    max_units = [100, 100, None, -1, 0, None]
+    max_storeys = [10, 3, None, -1, 0, None]
+    max_units_padded = (max_units + [None] * n)[:n]
+    max_storeys_padded = (max_storeys + [None] * n)[:n]
+    return df.with_columns(
+        pl.lit(None, dtype=pl.Utf8).alias("zoning_class"),
+        pl.lit(None, dtype=pl.Utf8).alias("secondary_plan_name"),
+        pl.lit(0, dtype=pl.Int8).alias("in_heritage_register"),
+        pl.lit(0, dtype=pl.Int8).alias("in_heritage_district"),
+        pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
+        pl.Series("zoning_max_units", max_units_padded, dtype=pl.Int32),
+        pl.lit(None, dtype=pl.Float64).alias("zoning_max_density"),
+        pl.Series(
+            "zoning_max_storeys", max_storeys_padded, dtype=pl.Int32
+        ),
+    )
+
+
+def test_enrich_dev_unit_excess_ratio(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """unit_excess_ratio = proposed_units / zoning_max_units, null-safe."""
+    monkeypatch.setattr(
+        "zoneto.analytics.enrich._spatial_join_dev",
+        _fake_spatial_join_with_zoning_limits,
+    )
+    _make_dev_parquet_descriptions(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+
+    # D1: proposed_units=551, zoning_max_units=100 → ratio=5.51
+    d1 = df.filter(pl.col("folderrsn") == "D1")["unit_excess_ratio"][0]
+    assert d1 == pytest.approx(5.51)
+    # D2: proposed_units=186, zoning_max_units=100 → ratio=1.86
+    d2 = df.filter(pl.col("folderrsn") == "D2")["unit_excess_ratio"][0]
+    assert d2 == pytest.approx(1.86)
+    # D3: proposed_units=null → ratio=null
+    assert (
+        df.filter(pl.col("folderrsn") == "D3")["unit_excess_ratio"][0]
+        is None
+    )
+    # D4: zoning_max_units=-1 (no limit sentinel) → ratio=null
+    assert (
+        df.filter(pl.col("folderrsn") == "D4")["unit_excess_ratio"][0]
+        is None
+    )
+    # D5: zoning_max_units=0 → ratio=null (avoid div-by-zero)
+    assert (
+        df.filter(pl.col("folderrsn") == "D5")["unit_excess_ratio"][0]
+        is None
+    )
+    # D6: null description → proposed_units=null → ratio=null
+    assert (
+        df.filter(pl.col("folderrsn") == "D6")["unit_excess_ratio"][0]
+        is None
+    )
+
+
+def test_enrich_dev_storey_excess_ratio(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """storey_excess_ratio = proposed_storeys / zoning_max_storeys."""
+    monkeypatch.setattr(
+        "zoneto.analytics.enrich._spatial_join_dev",
+        _fake_spatial_join_with_zoning_limits,
+    )
+    _make_dev_parquet_descriptions(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+
+    # D1: proposed_storeys=12, zoning_max_storeys=10 → 1.2
+    d1 = df.filter(pl.col("folderrsn") == "D1")["storey_excess_ratio"][0]
+    assert d1 == pytest.approx(1.2)
+    # D2: proposed_storeys=28, zoning_max_storeys=3 → 9.333
+    d2 = df.filter(pl.col("folderrsn") == "D2")["storey_excess_ratio"][0]
+    assert d2 == pytest.approx(28.0 / 3.0)
+    # D3: proposed_storeys=3, zoning_max_storeys=null → null
+    assert (
+        df.filter(pl.col("folderrsn") == "D3")["storey_excess_ratio"][0]
+        is None
+    )
+    # D4: zoning_max_storeys=-1 (no limit sentinel) → null
+    assert (
+        df.filter(pl.col("folderrsn") == "D4")["storey_excess_ratio"][0]
+        is None
+    )
+    # D5: zoning_max_storeys=0 → null
+    assert (
+        df.filter(pl.col("folderrsn") == "D5")["storey_excess_ratio"][0]
+        is None
+    )
+    # D6: null description → proposed_storeys=null → null
+    assert (
+        df.filter(pl.col("folderrsn") == "D6")["storey_excess_ratio"][0]
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------

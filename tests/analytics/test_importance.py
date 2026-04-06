@@ -136,6 +136,8 @@ def enriched_dir(tmp_path: Path) -> Path:
             "is_combined_application": [0, 0] * 5,
             "proposed_storeys": [12, None] * 5,
             "proposed_units": [200, None] * 5,
+            "unit_excess_ratio": [2.0, None] * 5,
+            "storey_excess_ratio": [1.2, None] * 5,
             "ward_appeal_rate_3y": [0.15, None] * 5,
             "in_mtsa": [1, 0] * 5,
             **{

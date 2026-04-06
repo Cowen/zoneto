@@ -186,7 +186,7 @@ providing a live alternative to the retired CKAN dev_applications dataset.
 Canonical feature column lists for machine learning models:
 
 - `DEV_CAT_COLS` -- categorical features for development applications (application_type, ward_number, zoning_class, secondary_plan_name)
-- `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, has_parent_application, is_combined_application, proposed_storeys, proposed_units, ward_appeal_rate_3y, in_mtsa, desc_svd_0..desc_svd_19)
+- `DEV_NUM_COLS` -- numeric features for development applications (year_submitted, in_heritage_register, in_heritage_district, in_secondary_plan, has_community_meeting, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, has_parent_application, is_combined_application, proposed_storeys, proposed_units, unit_excess_ratio, storey_excess_ratio, ward_appeal_rate_3y, in_mtsa, desc_svd_0..desc_svd_19)
 - `COA_CAT_COLS` -- categorical features for COA (application_type, sub_type, ward_number, zoning_designation, planning_district, work_type)
 - `COA_NUM_COLS` -- numeric features for COA (year_submitted)
 - `PERMIT_CAT_COLS` -- categorical features for permits (permit_type, structure_type, ward_grid)
@@ -197,7 +197,11 @@ Canonical feature column lists for machine learning models:
 Downloads reference datasets from CKAN and enriches raw source parquet:
 
 **Reference datasets** (cached in `data/reference/`):
-- Zoning (GeoJSON, full-city WGS84 — `zoning.geojson`) -- for spatial point-in-polygon join via DuckDB ST_Read
+- Zoning (GeoJSON, full-city WGS84 — `zoning.geojson`) -- for spatial point-in-polygon join via DuckDB ST_Read.
+  Fields: ZN_ZONE (zone code), UNITS (max dwelling units, -1=no limit), DENSITY (max FSI, -1=no limit).
+  Data dictionary: `docs/zoning_readme.txt`
+- Zoning height overlay (GeoJSON, WGS84 — `zoning_height.geojson`) -- max permitted storeys/height per area.
+  Fields: HT_STORIES (max storeys, -1=no limit). Separate overlay from zoning area — fewer polygons, ~15% coverage
 - Heritage register (ZIP → SHP with WGS84 points) -- flag properties in register
 - Heritage districts (ZIP → SHP) -- flag properties in district
 - Secondary plans (GeoJSON) -- flag properties in plan area
@@ -229,6 +233,16 @@ Downloads reference datasets from CKAN and enriches raw source parquet:
   New feature: `is_combined_application` (Int8, 1 if OZ with OPA in description).
   New features: `proposed_storeys` (Int32|null, regex-extracted from description),
   `proposed_units` (Int32|null, regex-extracted from description).
+  New spatial features from zoning GeoJSON: `zoning_max_units` (Int32|null, max
+  allowable units from by-law UNITS field), `zoning_max_density` (Float64|null,
+  max FAR from by-law DENSITY field).
+  New derived feature: `unit_excess_ratio` (Float64|null, proposed_units / zoning_max_units;
+  values > 1.0 indicate proposals exceeding zoning limits — a strong appeal signal).
+  Per by-law data dictionary, -1 means "no limit" for UNITS/DENSITY/HT_STORIES — treated as null.
+  New spatial feature from height overlay: `zoning_max_storeys` (Int32|null, max permitted storeys
+  from HT_STORIES field; -1 treated as null).
+  New derived feature: `storey_excess_ratio` (Float64|null, proposed_storeys / zoning_max_storeys;
+  ~7% coverage vs 0.6% for unit_excess_ratio, as proposed_storeys is more commonly specified).
   New feature: `ward_appeal_rate_3y` (Float64|null, rolling 3-year appeal rate for
   the same ward using only OZ/SA data from years strictly before the application's
   year_submitted; null when no prior data exists). Temporal leakage-safe.
@@ -359,7 +373,7 @@ Scrapes Ontario Land Tribunal decisions for Toronto:
 - Deduplicates by `folderrsn` via `QUALIFY ROW_NUMBER() OVER (PARTITION BY folderrsn)`, keeping the most recent row per application
 - Returns applications sorted by proximity (when lat/lon provided) or recency (year_submitted DESC)
 - Returns list of dicts with: folderrsn, application_type, ward_number, zoning_class, status, year_submitted, lat, lon, dev_approved, dev_appealed, dev_days_to_decision, proposed_storeys, proposed_units, description, street_address, application_url, dist_sq, plus spatial/demographic context fields (see below)
-- **Optional columns** (`_OPTIONAL_COLS`): columns that may be absent in older enriched parquet files are handled via a null-safe pattern -- each column is introspected with `DESCRIBE` and either selected from the parquet or replaced with a typed NULL. Current optional columns: application_url, in_heritage_register, in_heritage_district, in_secondary_plan, secondary_plan_name, in_mtsa, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, ward_appeal_rate_3y, has_community_meeting
+- **Optional columns** (`_OPTIONAL_COLS`): columns that may be absent in older enriched parquet files are handled via a null-safe pattern -- each column is introspected with `DESCRIBE` and either selected from the parquet or replaced with a typed NULL. Current optional columns: application_url, in_heritage_register, in_heritage_district, in_secondary_plan, secondary_plan_name, in_mtsa, ward_pct_renters, ward_median_income, ward_pop_density, ward_pct_detached, ward_appeal_rate_3y, has_community_meeting, zoning_max_units, zoning_max_density, unit_excess_ratio, zoning_max_storeys, storey_excess_ratio
 
 ### App Factory (`api/app.py`)
 

@@ -70,6 +70,9 @@ def test_enrich_dev_uses_aic_over_ckan_for_matching_folderrsn(
             pl.lit(0, dtype=pl.Int8).alias("in_heritage_district"),
             pl.lit(None, dtype=pl.Utf8).alias("secondary_plan_name"),
             pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
+            pl.lit(None, dtype=pl.Int32).alias("zoning_max_units"),
+            pl.lit(None, dtype=pl.Float64).alias("zoning_max_density"),
+            pl.lit(None, dtype=pl.Int32).alias("zoning_max_storeys"),
         ),
     )
     monkeypatch.setattr(
@@ -105,6 +108,9 @@ def test_enrich_dev_without_aic_falls_back_to_ckan(
             pl.lit(0, dtype=pl.Int8).alias("in_heritage_district"),
             pl.lit(None, dtype=pl.Utf8).alias("secondary_plan_name"),
             pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
+            pl.lit(None, dtype=pl.Int32).alias("zoning_max_units"),
+            pl.lit(None, dtype=pl.Float64).alias("zoning_max_density"),
+            pl.lit(None, dtype=pl.Int32).alias("zoning_max_storeys"),
         ),
     )
     monkeypatch.setattr(
