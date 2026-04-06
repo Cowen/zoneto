@@ -1,0 +1,179 @@
+Authority: Item CC2.1, adopted as amended, by City of
+Toronto Council on December 14 and 15, 2022; Planning
+and Housing Committee Item PH10.12, adopted as
+amended, by City of Toronto Council on March 20 and 21,
+2024; and Section 169-5.2B of City of Toronto Municipal
+Code Chapter 169, Officials, City
+City Council voted in favour of this by-law on March 21,
+2024
+Written approval of this by-law was given by Mayoral
+Decision 9-2024 dated March 22, 2024
+
+
+                                      CITY OF TORONTO
+
+                                       BY-LAW 256-2024
+
+To amend City of Toronto By-law 156-2023, being a by-law to amend Zoning By-law
+569-2013, as amended, to permit multi-tenant houses.
+
+Whereas Council of the City of Toronto has the authority pursuant to Section 34 of the Planning
+Act, R.S.O. 1990, c. P.13, as amended, to pass this By-law; and
+
+Whereas pursuant to § 169-5.2(B) of the City of Toronto Municipal Code, the City Solicitor has
+authority to correct technical errors in by-laws; and
+
+Whereas on February 8, 2023 the Council of the City of Toronto enacted By-law 156-2023 to
+permit multi-tenant houses in the City of Toronto; and
+
+Whereas By-law 156-2023 amended Zoning By-law 569-2013, as amended, by replacing Section
+150.25 Rooming House with a new Section 150.25 Multi-tenant Houses; and
+
+Whereas By-law 156-2023 amended Zoning By-law 569-2013, as amended, by controlling the
+maximum number of dwelling rooms in a building containing a multi-tenant house using shaded
+areas on Diagrams, and by deleting Section 995.40 Rooming House Overlay Map; and
+
+Whereas By-law 156-2023 amended Zoning By-law 569-2013, as amended, by amending Table
+200.5.10.1(1) Parking Space Rates; and
+
+Whereas Section 22 of By-law 156-2023, relating to the relationship of dwelling units, dwelling
+rooms and building types, contained certain technical errors and therefore did not implement
+Council's intent; and
+
+Whereas Section 22 and 23b of By-law 156-2023, relating to mapping of dwelling room
+permissions, does not facilitate the identification of the applicable permissions for individual
+properties, and therefore did not implement Council's intent; and
+
+Whereas Section 23a of By-law 156-2023, relating to parking spaces for a multi-tenant house,
+contained certain technical errors and therefore did not implement Council's intent; and
+
+Whereas certain technical amendments must be made to Sections 22 and 23 of By-law 156-2023
+to address the matters identified above; and
+                                               2
+                               City of Toronto By-law 256-2024
+
+Whereas the Council of the City of Toronto has determined pursuant to Section 34(17) of the
+Planning Act R.S.O. 1990, c. P.13, as amended, that no further public notice is required;
+The Council of the City of Toronto enacts:
+
+1.     The words highlighted in bold type in this By-law have the meaning provided in Zoning
+       By-law 569-2013, as amended, Chapter 800 Definitions.
+
+2.     City of Toronto Zoning By-law 156-2023 is amended by amending Regulation
+       150.25.20.1(1) in Section 22 to replace the words "include a dwelling unit" with the
+       words "include dwelling units", replace the words "and dwelling units," with the words
+       ", excluding rooms in a dwelling unit,", and to insert the words "and (C)" following the
+       words "150.25.20.1(3)(B)", "150.25.20.1(4)(B)" and "150.25.20.1(5)(B)", so that
+       Regulation 150.25.20.1(1) reads:
+
+       "(1) A multi-tenant house may include dwelling units, provided that the total number of
+       dwelling rooms, excluding rooms in a dwelling unit, does not exceed the applicable
+       number set out in regulations 150.25.20.1(3)(B) and (C), 150.25.20.1(4)(B) and (C), and
+       150.25.20.1(5)(B) and (C)."
+
+3.     City of Toronto Zoning By-law 156-2023 is amended by amending Regulations
+       150.25.20.1(3)(A)(ii), 150.25.20.1(4)(A)(ii) and 150.25.20.1(5)(A)(ii) in Section 22 to
+       insert the words "in which dwelling units are" into each Regulation, so that they read:
+
+       "(ii) a building type in which dwelling units are permitted in the applicable zone."
+
+4.     City of Toronto Zoning By-law 156-2023 is amended by amending Regulation
+       150.25.20.1(3)(C) in Section 22 to replace the words "the shaded areas shown on
+       Diagram 1 of By-law 156-2023" with the words "a "12 Dwelling Room Special Area"
+       area on the Multi-tenant House Overlay Map", so that Regulation 150.25.20.1(3)(C)
+       reads:
+
+       "(C) despite (B) above, in an R zone within a "12 Dwelling Room Special Area" area on
+       the Multi-tenant House Overlay Map, the maximum number of dwelling rooms
+       permitted in a building containing a multi-tenant house is 12."
+
+5.     City of Toronto Zoning By-law 156-2023 is amended by amending Regulations
+       150.25.20.1(4)(B) and 150.25.20.1(5)(B) in Section 22 to replace the words "the shaded
+       areas shown on Diagram 3 of By-law 156-2023" with the words "a '6 Dwelling Room
+       Special Area' area on the Multi-tenant House Overlay Map", in each Regulation, so that
+       they read:
+
+       "(B) within a '6 Dwelling Room Special Area' area on the Multi-tenant House Overlay
+       Map, the maximum number of dwelling rooms permitted in a building containing a
+       multi-tenant house is 6."
+
+6.     City of Toronto Zoning By-law 156-2023 is amended by amending Section 23a to
+       replace the words "use 'Motel'" with the words "Land Use Category 'Secondary Suite'",
+       to insert the words "Resident Requirement for a Dwelling Room in a" in the first column
+                                              3
+                              City of Toronto By-law 256-2024
+
+     in the table, and to delete the three columns labelled "100 percent" in the table, so that
+     Section 23a reads:
+
+     "23a. Zoning By-law 569-2013, as amended, is further amended by adding the following
+     to the Parking Table in Regulation 200.5.10.1(1), after the Land Use Category
+     "Secondary Suite":
+
+      Resident          Parking spaces must be provided:
+      Requirement
+      for a             (A) in Policy Area 1 (PA1), Policy Area 2 (PA2), Policy Area
+      Dwelling              3 (PA3) and Policy Area 4 (PA4) at a minimum rate of 0
+      Room in a             for each dwelling room;
+      Multi-tenant
+      House             (B) in the shaded area on Diagram 2 of By-law 156-2023, but
+                            not included in (A) above, at a minimum rate of 0 for
+                            each dwelling room; and
+
+                        (C) in all other areas of the City at a minimum rate of 0.34 for
+                            each dwelling room.
+
+7.   City of Toronto Zoning By-law 156-2023 is amended by deleting Section 23b and
+     replacing it with the following new Section 23b:
+
+     "23b. Zoning By-law 569-2013, as amended, is further amended by deleting Section
+     995.40 Rooming House Overlay Map and adding a new Section 995.41 Multi-tenant
+     House Overlay Map, showing the following information:
+
+     (A)    The areas shown on Diagram 1 of By-law 156-2023 where a maximum of 12
+            dwelling rooms are permitted in an R zone despite the maximum of 6 dwelling
+            rooms permitted by Regulation 150.25.20.1(3)(B), to be labelled "12 Dwelling
+            Room Special Area";
+
+     (B)    The areas shown on Diagram 3 of By-law 156-2023 where a maximum of 6
+            dwelling rooms are permitted despite the maximum of 12 or 25 dwelling rooms
+            permitted by Regulations 150.25.20.1(4)(C) and 150.25.20.1(5)(C), to be labelled
+            "6 Dwelling Room Special Area";
+
+     (C)    Except where otherwise indicated in (A) and (B) above, the maximum number of
+            dwelling rooms permitted within a zone as described by Regulations
+            150.25.20.1(3)(B) & (D), to be labelled "6 Dwelling Room Area (R, RD, RS, RT,
+            RM)" and to be updated to reflect changes to the zone label on the Zoning By-law
+            Map in Section 990.10;
+
+     (D)    Except where otherwise indicated in (B) above, the maximum number of
+            dwelling rooms permitted within a zone as described by Regulation
+            150.25.20.1(4)(C), to be labelled "12 Dwelling Room Area (RA, RAC, RM)" and
+            to be updated to reflect changes to the zone label on the Zoning By-law Map in
+            Section 990.10; and
+                                               4
+                               City of Toronto By-law 256-2024
+
+       (E)     Except where otherwise indicated in (B) above, the maximum number of
+               dwelling rooms permitted within a zone as described by Regulation
+               150.25.20.1(5)(C), to be labelled "25 Dwelling Room Area (CR, CRE)" and to be
+               updated to reflect changes to the zone label on the Zoning By-law Map in Section
+               990.10;
+
+8.     City of Toronto Zoning By-law 156-2023 is amended by adding a new Section 23c that
+       reads:
+
+       "23c. Zoning By-law 569-2013, as amended, is further amended by replacing Regulation
+       1.20.4(2)(D), so that it reads:
+
+       "(D)    Multi-tenant House Overlay Map, found in Section 995.41.""
+
+Enacted and passed on March 22, 2024.
+
+
+
+Frances Nunziata,                                                        John D. Elvidge,
+             Speaker                                                                City Clerk
+
+(Seal of the City)
+
