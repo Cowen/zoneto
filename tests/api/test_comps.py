@@ -56,9 +56,7 @@ def enriched_parquet(tmp_path: Path) -> Path:
             "unit_excess_ratio": pl.Series(
                 [2.0, 2.0, None, 0.5, 1.6], dtype=pl.Float64
             ),
-            "zoning_max_storeys": pl.Series(
-                [10, 5, None, 20, 10], dtype=pl.Int32
-            ),
+            "zoning_max_storeys": pl.Series([10, 5, None, 20, 10], dtype=pl.Int32),
             "storey_excess_ratio": pl.Series(
                 [1.0, 4.0, None, 0.25, 0.8], dtype=pl.Float64
             ),

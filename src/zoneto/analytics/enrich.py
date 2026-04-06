@@ -588,30 +588,20 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     return result
 
 
-def _add_height_feature(
-    df: pl.DataFrame, height_path: Path
-) -> pl.DataFrame:
+def _add_height_feature(df: pl.DataFrame, height_path: Path) -> pl.DataFrame:
     """Add zoning_max_storeys (Int32) via DuckDB spatial join against height overlay.
 
     Per the by-law data dictionary, HT_STORIES <= 0 means "no limit" — treated
     as null. Rows with null lat/lon or outside height overlay get null.
     """
-    if (
-        not height_path.exists()
-        or "lat" not in df.columns
-        or "lon" not in df.columns
-    ):
-        return df.with_columns(
-            pl.lit(None, dtype=pl.Int32).alias("zoning_max_storeys")
-        )
+    if not height_path.exists() or "lat" not in df.columns or "lon" not in df.columns:
+        return df.with_columns(pl.lit(None, dtype=pl.Int32).alias("zoning_max_storeys"))
 
     valid_mask = df["lat"].is_not_null() & df["lon"].is_not_null()
     valid_df = df.filter(valid_mask)
 
     if len(valid_df) == 0:
-        return df.with_columns(
-            pl.lit(None, dtype=pl.Int32).alias("zoning_max_storeys")
-        )
+        return df.with_columns(pl.lit(None, dtype=pl.Int32).alias("zoning_max_storeys"))
 
     escaped = str(height_path).replace("'", "''")
     con = duckdb.connect()
@@ -634,14 +624,10 @@ def _add_height_feature(
     rid_to_ht: dict[int, int | None] = dict(
         zip(
             result["_rid"].to_list(),
-            result["zoning_max_storeys"]
-            .cast(pl.Int32, strict=False)
-            .to_list(),
+            result["zoning_max_storeys"].cast(pl.Int32, strict=False).to_list(),
         )
     )
-    all_rids = (
-        df["_rid"].to_list() if "_rid" in df.columns else list(range(len(df)))
-    )
+    all_rids = df["_rid"].to_list() if "_rid" in df.columns else list(range(len(df)))
     ht_series = pl.Series(
         "zoning_max_storeys",
         [rid_to_ht.get(rid) for rid in all_rids],

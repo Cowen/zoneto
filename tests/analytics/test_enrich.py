@@ -1099,9 +1099,7 @@ def _fake_spatial_join_with_zoning_limits(
         pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
         pl.Series("zoning_max_units", max_units_padded, dtype=pl.Int32),
         pl.lit(None, dtype=pl.Float64).alias("zoning_max_density"),
-        pl.Series(
-            "zoning_max_storeys", max_storeys_padded, dtype=pl.Int32
-        ),
+        pl.Series("zoning_max_storeys", max_storeys_padded, dtype=pl.Int32),
     )
 
 
@@ -1125,25 +1123,13 @@ def test_enrich_dev_unit_excess_ratio(
     d2 = df.filter(pl.col("folderrsn") == "D2")["unit_excess_ratio"][0]
     assert d2 == pytest.approx(1.86)
     # D3: proposed_units=null → ratio=null
-    assert (
-        df.filter(pl.col("folderrsn") == "D3")["unit_excess_ratio"][0]
-        is None
-    )
+    assert df.filter(pl.col("folderrsn") == "D3")["unit_excess_ratio"][0] is None
     # D4: zoning_max_units=-1 (no limit sentinel) → ratio=null
-    assert (
-        df.filter(pl.col("folderrsn") == "D4")["unit_excess_ratio"][0]
-        is None
-    )
+    assert df.filter(pl.col("folderrsn") == "D4")["unit_excess_ratio"][0] is None
     # D5: zoning_max_units=0 → ratio=null (avoid div-by-zero)
-    assert (
-        df.filter(pl.col("folderrsn") == "D5")["unit_excess_ratio"][0]
-        is None
-    )
+    assert df.filter(pl.col("folderrsn") == "D5")["unit_excess_ratio"][0] is None
     # D6: null description → proposed_units=null → ratio=null
-    assert (
-        df.filter(pl.col("folderrsn") == "D6")["unit_excess_ratio"][0]
-        is None
-    )
+    assert df.filter(pl.col("folderrsn") == "D6")["unit_excess_ratio"][0] is None
 
 
 def test_enrich_dev_storey_excess_ratio(
@@ -1166,25 +1152,13 @@ def test_enrich_dev_storey_excess_ratio(
     d2 = df.filter(pl.col("folderrsn") == "D2")["storey_excess_ratio"][0]
     assert d2 == pytest.approx(28.0 / 3.0)
     # D3: proposed_storeys=3, zoning_max_storeys=null → null
-    assert (
-        df.filter(pl.col("folderrsn") == "D3")["storey_excess_ratio"][0]
-        is None
-    )
+    assert df.filter(pl.col("folderrsn") == "D3")["storey_excess_ratio"][0] is None
     # D4: zoning_max_storeys=-1 (no limit sentinel) → null
-    assert (
-        df.filter(pl.col("folderrsn") == "D4")["storey_excess_ratio"][0]
-        is None
-    )
+    assert df.filter(pl.col("folderrsn") == "D4")["storey_excess_ratio"][0] is None
     # D5: zoning_max_storeys=0 → null
-    assert (
-        df.filter(pl.col("folderrsn") == "D5")["storey_excess_ratio"][0]
-        is None
-    )
+    assert df.filter(pl.col("folderrsn") == "D5")["storey_excess_ratio"][0] is None
     # D6: null description → proposed_storeys=null → null
-    assert (
-        df.filter(pl.col("folderrsn") == "D6")["storey_excess_ratio"][0]
-        is None
-    )
+    assert df.filter(pl.col("folderrsn") == "D6")["storey_excess_ratio"][0] is None
 
 
 # ---------------------------------------------------------------------------
