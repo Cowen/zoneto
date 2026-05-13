@@ -174,7 +174,19 @@
       padding-top: 0.5rem; border-top: 1px solid #f1f3f5;
       line-height: 1.4;
     }
+    /* Map */
+    #map { height: 300px; border-radius: 4px; z-index: 0; }
+    .map-legend {
+      display: flex; gap: 1rem; flex-wrap: wrap;
+      margin-top: 0.5rem; font-size: 0.72rem; color: #6c757d;
+    }
+    .map-legend-item { display: flex; align-items: center; gap: 0.35rem; }
+    .map-legend-dot {
+      width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    }
   </style>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
   <h1>Zoneto</h1>
@@ -223,6 +235,13 @@
       Scenarios calibrated to nearby applications. Site context from the nearest comp.
     </p>
     <div id="site-context"></div>
+    <div id="map" style="margin-bottom:0.5rem"></div>
+    <div class="map-legend" id="map-legend" style="display:none;margin-bottom:1rem">
+      <div class="map-legend-item"><div class="map-legend-dot" style="background:#0d6efd"></div>Searched address</div>
+      <div class="map-legend-item"><div class="map-legend-dot" style="background:#198754"></div>Approved</div>
+      <div class="map-legend-item"><div class="map-legend-dot" style="background:#856404;opacity:0.8"></div>Appealed</div>
+      <div class="map-legend-item"><div class="map-legend-dot" style="background:#0c5460"></div>Other / active</div>
+    </div>
     <div id="base-rate"></div>
     <div id="scenarios-body"></div>
     <div id="shap-best"></div>
@@ -248,6 +267,65 @@
     const shapBestEl = document.getElementById('shap-best');
     const customScorerEl = document.getElementById('custom-scorer-container');
     const modelFootnoteEl = document.getElementById('model-footnote');
+    const mapLegendEl = document.getElementById('map-legend');
+    let _map = null;
+    let _mapLayers = [];
+
+    function initMap(lat, lon, radiusM, applications) {
+      mapLegendEl.style.display = 'flex';
+      if (!_map) {
+        _map = L.map('map').setView([lat, lon], 14);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 20,
+        }).addTo(_map);
+      } else {
+        _map.setView([lat, lon], 14);
+      }
+      _map.invalidateSize();
+
+      _mapLayers.forEach(l => _map.removeLayer(l));
+      _mapLayers = [];
+
+      // Radius circle
+      const circle = L.circle([lat, lon], {
+        radius: radiusM, color: '#0d6efd', weight: 1.5,
+        fillColor: '#0d6efd', fillOpacity: 0.05,
+      }).addTo(_map);
+      _mapLayers.push(circle);
+
+      // Searched address pin — custom SVG, no stock Leaflet icon
+      const searchIcon = L.divIcon({
+        html: `<svg width="22" height="30" viewBox="0 0 22 30" xmlns="http://www.w3.org/2000/svg">
+          <path d="M11 0C4.925 0 0 4.925 0 11c0 8.25 11 19 11 19s11-10.75 11-19C22 4.925 17.075 0 11 0z" fill="#0d6efd"/>
+          <circle cx="11" cy="11" r="4.5" fill="#fff"/>
+        </svg>`,
+        iconSize: [22, 30], iconAnchor: [11, 30], popupAnchor: [0, -32],
+        className: '',
+      });
+      const pin = L.marker([lat, lon], { icon: searchIcon }).addTo(_map);
+      pin.bindPopup('<strong>Searched address</strong>');
+      _mapLayers.push(pin);
+
+      // Comp markers
+      applications.forEach(app => {
+        if (app.lat == null || app.lon == null) return;
+        const color = app.dev_appealed === 1 ? '#856404'
+                    : app.dev_approved  === 1 ? '#198754'
+                    : '#0c5460';
+        const dot = L.circleMarker([app.lat, app.lon], {
+          radius: 6, color: '#fff', fillColor: color, fillOpacity: 0.85, weight: 1.5,
+        }).addTo(_map);
+        const addr = app.street_address?.trim() || '';
+        dot.bindPopup(
+          `<strong>${escHtml(app.folderrsn ?? '')}</strong><br>` +
+          `${escHtml(app.application_type ?? '')} · ${escHtml(String(app.year_submitted ?? ''))}<br>` +
+          (addr ? escHtml(addr) : '')
+        );
+        _mapLayers.push(dot);
+      });
+    }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -297,6 +375,7 @@
 
         const data = await res.json();
         renderResults(data);
+        initMap(lat, lon, Number(radius), data.applications);
         statusEl.textContent = `${geo.display_name} — ${data.total} comparable application${data.total !== 1 ? 's' : ''} found`;
 
         // Score if application type provided
@@ -304,10 +383,8 @@
           await fetchScore({ application_type: type, ward_number: null, lat, lon });
         }
 
-        // "What could I build here?" panel — score hypothetical scenarios
-        if (data.applications.length > 0) {
-          await fetchScenarios(data.applications, lat, lon);
-        }
+        // "What could I build here?" panel — always show site context + scenarios
+        await fetchScenarios(data.applications, lat, lon);
       } catch (err) {
         statusEl.textContent = 'Error: ' + err.message;
       } finally {
@@ -671,11 +748,12 @@
     async function fetchScenarios(applications, lat, lon) {
       scenariosBody.innerHTML = '<p class="scenario-loading">Scoring hypothetical scenarios…</p>';
       scenariosSection.style.display = 'block';
+      if (_map) _map.invalidateSize();
       shapBestEl.innerHTML = '';
       customScorerEl.innerHTML = '';
       modelFootnoteEl.innerHTML = '';
 
-      const nearestComp = applications[0];
+      const nearestComp = applications[0] ?? {};
 
       // Look up actual spatial context at the searched address
       // Falls back to nearest comp if the endpoint fails
