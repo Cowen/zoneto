@@ -234,7 +234,9 @@
       scenariosSection.style.display = 'none';
 
       try {
-        const address = document.getElementById('address').value.trim();
+        const rawAddress = document.getElementById('address').value.trim();
+        const torontoRe = /\b(toronto|north york|east york|scarborough|etobicoke|york)\b/i;
+        const address = torontoRe.test(rawAddress) ? rawAddress : `${rawAddress}, Toronto, Ontario`;
         const type = document.getElementById('type').value;
         const radius = document.getElementById('radius').value;
         const years = document.getElementById('years').value;
