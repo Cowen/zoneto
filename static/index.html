@@ -101,10 +101,34 @@
       display: inline-flex; align-items: center; gap: 0.3rem;
       padding: 0.25rem 0.6rem; border-radius: 4px;
       font-size: 0.75rem; font-weight: 600;
+      position: relative;
     }
     .ctx-flag-on  { background: #e8f4f8; color: #0c5460; border: 1px solid #bee5eb; }
     .ctx-flag-off { background: #f8f9fa; color: #adb5bd; border: 1px solid #e9ecef; }
     .ctx-flag-warn { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+    .ctx-flag[data-tooltip]:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%; transform: translateX(-50%);
+      background: #212529; color: #fff;
+      font-size: 0.72rem; font-weight: 400;
+      padding: 0.4rem 0.6rem; border-radius: 4px;
+      white-space: normal; width: 220px; text-align: left;
+      z-index: 100; pointer-events: none;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    }
+    .ctx-flag[data-tooltip]:hover::before {
+      content: '';
+      position: absolute;
+      bottom: calc(100% + 2px);
+      left: 50%; transform: translateX(-50%);
+      border: 4px solid transparent;
+      border-top-color: #212529;
+      z-index: 100;
+    }
+    .ctx-flag a { color: inherit; text-decoration: none; }
+    .ctx-flag a:hover { text-decoration: underline; }
 
     /* Base rate summary */
     .base-rate {
@@ -482,40 +506,115 @@
       };
     }
 
+    const ZONING_PREFIX_DESC = {
+      CRE: 'Commercial Residential Employment — allows commercial, residential, and employment uses in the same area.',
+      CR:  'Commercial Residential — mixed commercial and residential uses permitted.',
+      C:   'Commercial — primarily retail, service, and office uses.',
+      RD:  'Residential Detached — primarily single detached dwellings.',
+      RS:  'Residential Semi-Detached — semi-detached and detached dwellings.',
+      RM:  'Residential Multiple — multiple dwellings including apartments.',
+      RT:  'Residential Townhouse — townhouse and stacked dwelling formats.',
+      R:   'Residential — general residential zone.',
+      EH:  'Employment Heavy Industrial — heavy industrial and manufacturing uses.',
+      EL:  'Employment Light Industrial — light industrial and employment uses.',
+      EO:  'Employment Office — office and business park uses.',
+      E:   'Employment Industrial — employment and industrial uses.',
+      ON:  'Open Space Natural — protected natural heritage lands.',
+      OR:  'Open Space Recreation — active parks and recreation areas.',
+      O:   'Open Space — parks and open recreational uses.',
+      EU:  'Utility and Transportation — infrastructure and transit facilities.',
+      UT:  'Utility and Transportation — infrastructure and transit facilities.',
+      I:   'Institutional — schools, hospitals, places of worship, and civic uses.',
+      NA:  'Natural Areas — protected natural heritage areas.',
+      G:   'Greenbelt — protected greenbelt land, no urban development.',
+    };
+
+    function zoningDesc(code) {
+      if (!code) return null;
+      for (const [prefix, desc] of Object.entries(ZONING_PREFIX_DESC)) {
+        if (code.toUpperCase().startsWith(prefix)) return desc;
+      }
+      return null;
+    }
+
     function renderSiteContext(ctx) {
-      const flag = (label, value, warnIfOn) => {
+      const flag = (label, value, warnIfOn, { tooltip, href } = {}) => {
         const on = value === 1 || value === true;
         const cls = on ? (warnIfOn ? 'ctx-flag-warn' : 'ctx-flag-on') : 'ctx-flag-off';
         const icon = on ? 'Yes' : 'No';
-        return `<span class="ctx-flag ${cls}">${escHtml(label)}: ${icon}</span>`;
+        const tipAttr = tooltip ? ` data-tooltip="${escHtml(tooltip)}"` : '';
+        const inner = href
+          ? `<a href="${escHtml(href)}" target="_blank" rel="noopener">${escHtml(label)}: ${icon}</a>`
+          : `${escHtml(label)}: ${icon}`;
+        return `<span class="ctx-flag ${cls}"${tipAttr}>${inner}</span>`;
       };
 
       let html = '';
-      // Zoning and limits
+
+      // Ward + zoning badge
       if (ctx.ward_number || ctx.zoning_class) {
-        let zoneLabel = '';
-        if (ctx.ward_number) zoneLabel += `Ward ${escHtml(String(ctx.ward_number))}`;
-        if (ctx.zoning_class) zoneLabel += (zoneLabel ? ' / ' : '') + escHtml(ctx.zoning_class);
-        html += `<span class="ctx-flag ctx-flag-on">${zoneLabel}</span>`;
+        const wardNum = ctx.ward_number ? String(ctx.ward_number) : null;
+        const zDesc = zoningDesc(ctx.zoning_class);
+        let tipParts = [];
+        if (wardNum) tipParts.push(`Ward ${wardNum} — Toronto City Council electoral ward.`);
+        if (zDesc) tipParts.push(zDesc);
+        tipParts.push('Full zoning parameters in By-law 569-2013.');
+        const tip = tipParts.join(' ');
+
+        let inner = '';
+        if (wardNum) {
+          const wardHref = `https://www.toronto.ca/city-government/council/members-of-council/councillor-ward-${wardNum}/`;
+          inner += `<a href="${escHtml(wardHref)}" target="_blank" rel="noopener">Ward ${escHtml(wardNum)}</a>`;
+        }
+        if (ctx.zoning_class) {
+          const zoningHref = 'https://www.toronto.ca/city-government/planning-development/zoning-by-law-preliminary-zoning-reviews/zoning-by-law-569-2013-2/';
+          if (inner) inner += ' / ';
+          inner += `<a href="${escHtml(zoningHref)}" target="_blank" rel="noopener">${escHtml(ctx.zoning_class)}</a>`;
+        }
+        html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}">${inner}</span>`;
       }
+
       if (ctx.zoning_max_units != null) {
-        html += `<span class="ctx-flag ctx-flag-on">Zoning permits: ${ctx.zoning_max_units} units</span>`;
+        html += `<span class="ctx-flag ctx-flag-on" data-tooltip="Maximum dwelling units permitted under the as-of-right zoning. Proposals exceeding this require a rezoning or minor variance.">Zoning permits: ${ctx.zoning_max_units} units</span>`;
       }
       if (ctx.zoning_max_density != null) {
-        html += `<span class="ctx-flag ctx-flag-on">Max density: ${ctx.zoning_max_density} FSI</span>`;
+        html += `<span class="ctx-flag ctx-flag-on" data-tooltip="Maximum floor space index (FSI) — total floor area relative to lot area. Exceeding this requires a rezoning or official plan amendment.">Max density: ${ctx.zoning_max_density} FSI</span>`;
       }
+
       // Regulatory flags
-      html += flag('Heritage Register', ctx.in_heritage_register, true);
-      html += flag('Heritage District', ctx.in_heritage_district, true);
-      html += flag('MTSA Zone', ctx.in_mtsa, false);
-      html += flag('Secondary Plan', ctx.in_secondary_plan, false);
+      html += flag('Heritage Register', ctx.in_heritage_register, true, {
+        tooltip: ctx.in_heritage_register
+          ? "Listed on Toronto's Heritage Register. Requires a Heritage Impact Assessment for demolition or significant alterations. Does not prohibit development but adds regulatory review."
+          : "Not listed on Toronto's Heritage Register.",
+        href: 'https://www.toronto.ca/city-government/planning-development/heritage-preservation/heritage-register/',
+      });
+      html += flag('Heritage District', ctx.in_heritage_district, true, {
+        tooltip: ctx.in_heritage_district
+          ? "Falls within a Heritage Conservation District. All alterations must conform to district guidelines and receive Heritage Preservation Services review."
+          : "Not within a Heritage Conservation District.",
+        href: 'https://www.toronto.ca/city-government/planning-development/heritage-preservation/heritage-conservation-districts-planning-studies/',
+      });
+      html += flag('MTSA Zone', ctx.in_mtsa, false, {
+        tooltip: ctx.in_mtsa
+          ? "Major Transit Station Area — city and provincial policy supports increased density near rapid transit stations. Provincially mandated minimum densities apply."
+          : "Not in a Major Transit Station Area.",
+        href: 'https://www.toronto.ca/city-government/planning-development/planning-studies-initiatives/zoning-for-major-transit-station-areas/',
+      });
+      html += flag('Secondary Plan', ctx.in_secondary_plan, false, {
+        tooltip: ctx.in_secondary_plan
+          ? "Covered by a Secondary Plan that sets detailed land-use policies for this area. Applications must conform to the plan's policies in addition to the Official Plan."
+          : "Not covered by a Secondary Plan.",
+        href: 'https://www.toronto.ca/city-government/planning-development/official-plan-guidelines/official-plan/chapter-6-secondary-plans/',
+      });
       if (ctx.secondary_plan_name) {
-        html += `<span class="ctx-flag ctx-flag-on">${escHtml(ctx.secondary_plan_name)}</span>`;
+        const spHref = 'https://www.toronto.ca/city-government/planning-development/official-plan-guidelines/official-plan/chapter-6-secondary-plans/';
+        html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml('The specific Secondary Plan governing this area. Click to browse all Toronto Secondary Plans.')}"><a href="${escHtml(spHref)}" target="_blank" rel="noopener">${escHtml(ctx.secondary_plan_name)}</a></span>`;
       }
       if (ctx.ward_appeal_rate_3y != null) {
         const rate = (ctx.ward_appeal_rate_3y * 100).toFixed(0);
         const cls = ctx.ward_appeal_rate_3y > 0.20 ? 'ctx-flag-warn' : 'ctx-flag-on';
-        html += `<span class="ctx-flag ${cls}">Ward appeal rate (3yr): ${rate}%</span>`;
+        const tip = "Share of OZ and SA applications in this ward appealed to the Ontario Land Tribunal in the three years before this application was filed. Excludes future data to avoid leakage.";
+        html += `<span class="ctx-flag ${cls}" data-tooltip="${escHtml(tip)}">Ward appeal rate (3yr): ${rate}%</span>`;
       }
       siteContextEl.innerHTML = html ? `<div class="site-context">${html}</div>` : '';
     }
