@@ -668,6 +668,47 @@
       return null;
     }
 
+    const _BYLAW_BASE = 'https://www.toronto.ca/zoning/bylaw_amendments/';
+    // Longest prefix first so RAC beats RA, IPW beats I, etc.
+    const ZONING_BYLAW_URLS = {
+      RAC: 'ZBL_NewProvision_Chapter15_20.htm',
+      RA:  'ZBL_NewProvision_Chapter15_10.htm',
+      RD:  'ZBL_NewProvision_Chapter10_20.htm',
+      RS:  'ZBL_NewProvision_Chapter10_40.htm',
+      RT:  'ZBL_NewProvision_Chapter10_60.htm',
+      RM:  'ZBL_NewProvision_Chapter10_80.htm',
+      R:   'ZBL_NewProvision_Chapter10_10.htm',
+      CRE: 'ZBL_NewProvision_Chapter50_10.htm',
+      CR:  'ZBL_NewProvision_Chapter40.htm',
+      C:   'ZBL_NewProvision_Chapter30.htm',
+      EH:  'ZBL_NewProvision_Chapter60_30.htm',
+      EL:  'ZBL_NewProvision_Chapter60_10.htm',
+      EO:  'ZBL_NewProvision_Chapter60_40.htm',
+      E:   'ZBL_NewProvision_Chapter60_20.htm',
+      IPW: 'ZBL_NewProvision_Chapter80_50.htm',
+      IH:  'ZBL_NewProvision_Chapter80_20.htm',
+      IE:  'ZBL_NewProvision_Chapter80_30.htm',
+      IS:  'ZBL_NewProvision_Chapter80_40.htm',
+      I:   'ZBL_NewProvision_Chapter80_10.htm',
+      OG:  'ZBL_NewProvision_Chapter90_40.htm',
+      OM:  'ZBL_NewProvision_Chapter90_50.htm',
+      OC:  'ZBL_NewProvision_Chapter90_70.htm',
+      ON:  'ZBL_NewProvision_Chapter90_20.htm',
+      OR:  'ZBL_NewProvision_Chapter90_30.htm',
+      O:   'ZBL_NewProvision_Chapter90_10.htm',
+      EU:  'ZBL_NewProvision_Chapter100_10.htm',
+      UT:  'ZBL_NewProvision_Chapter100_10.htm',
+    };
+
+    function zoningBylawUrl(code) {
+      if (!code) return _BYLAW_BASE + 'ZBL_NewProvision_Chapter1.htm';
+      const uc = code.toUpperCase();
+      for (const [prefix, page] of Object.entries(ZONING_BYLAW_URLS)) {
+        if (uc.startsWith(prefix)) return _BYLAW_BASE + page;
+      }
+      return _BYLAW_BASE + 'ZBL_NewProvision_Chapter1.htm';
+    }
+
     function renderSiteContext(ctx) {
       const flag = (label, value, warnIfOn, { tooltip, href } = {}) => {
         const on = value === 1 || value === true;
@@ -689,7 +730,7 @@
         let tipParts = [];
         if (wardNum) tipParts.push(`Ward ${wardNum} — Toronto City Council electoral ward.`);
         if (zDesc) tipParts.push(zDesc);
-        tipParts.push('Full zoning parameters in By-law 569-2013.');
+        tipParts.push('Click to read By-law 569-2013 regulations for this zone type.');
         const tip = tipParts.join(' ');
 
         let inner = '';
@@ -698,9 +739,8 @@
           inner += `<a href="${escHtml(wardHref)}" target="_blank" rel="noopener">Ward ${escHtml(wardNum)}</a>`;
         }
         if (ctx.zoning_class) {
-          const zoningHref = 'https://www.toronto.ca/city-government/planning-development/zoning-by-law-preliminary-zoning-reviews/zoning-by-law-569-2013-2/';
           if (inner) inner += ' / ';
-          inner += `<a href="${escHtml(zoningHref)}" target="_blank" rel="noopener">${escHtml(ctx.zoning_class)}</a>`;
+          inner += `<a href="${escHtml(zoningBylawUrl(ctx.zoning_class))}" target="_blank" rel="noopener">${escHtml(ctx.zoning_class)}</a>`;
         }
         html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}">${inner}</span>`;
       }
