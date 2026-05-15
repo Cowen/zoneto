@@ -62,6 +62,10 @@
     td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #f1f3f5; vertical-align: top; }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: #f8f9fa; }
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable:hover { color: #343a40; background: #f1f3f5; }
+    th.sort-active { color: #0d6efd; }
+    th .sort-arrow { font-size: 0.65rem; margin-left: 0.2rem; }
 
     .badge {
       display: inline-block; padding: 0.2rem 0.5rem;
@@ -392,41 +396,91 @@
       }
     });
 
+    const RESULT_COLS = [
+      { key: 'folderrsn',             label: 'Folder RSN', type: 'str' },
+      { key: 'application_type',      label: 'Type',       type: 'str' },
+      { key: 'ward_number',           label: 'Ward',       type: 'num' },
+      { key: 'zoning_class',          label: 'Zone',       type: 'str' },
+      { key: 'year_submitted',        label: 'Year',       type: 'num' },
+      { key: 'status',                label: 'Status',     type: 'str' },
+      { key: 'dev_days_to_decision',  label: 'Timeline',   type: 'num' },
+      { key: 'proposed_storeys',      label: 'Storeys',    type: 'num' },
+      { key: 'proposed_units',        label: 'Units',      type: 'num' },
+      { key: 'street_address',        label: 'Address',    type: 'str' },
+    ];
+    let _lastApplications = [];
+    let _sortCol = null;
+    let _sortDir = 'asc';
+
     function renderResults(data) {
       if (!data.applications.length) {
         resultsEl.innerHTML = '<p class="empty">No comparable applications found. Try broadening your search.</p>';
         resultsCard.style.display = 'block';
         return;
       }
+      _lastApplications = data.applications;
+      _sortCol = null;
+      _sortDir = 'asc';
+      buildResultsTable();
+    }
 
-      const rows = data.applications.map(app => {
-        const statusBadge = formatStatus(app.status);
+    function buildResultsTable() {
+      const apps = [..._lastApplications];
+      if (_sortCol != null) {
+        const col = RESULT_COLS[_sortCol];
+        apps.sort((a, b) => {
+          const av = a[col.key] ?? null;
+          const bv = b[col.key] ?? null;
+          if (av === null && bv === null) return 0;
+          if (av === null) return 1;
+          if (bv === null) return -1;
+          const cmp = col.type === 'num' ? (av - bv) : String(av).localeCompare(String(bv));
+          return _sortDir === 'asc' ? cmp : -cmp;
+        });
+      }
+
+      const headers = RESULT_COLS.map((col, i) => {
+        const active = _sortCol === i;
+        const arrow = active
+          ? `<span class="sort-arrow">${_sortDir === 'asc' ? '▲' : '▼'}</span>`
+          : `<span class="sort-arrow" style="opacity:0.25">▲</span>`;
+        return `<th class="sortable${active ? ' sort-active' : ''}" data-col="${i}">${col.label}${arrow}</th>`;
+      }).join('');
+
+      const rows = apps.map(app => {
         const timeline = app.dev_days_to_decision ? `${Math.round(app.dev_days_to_decision / 30)} mo` : '—';
-        const storeys = app.proposed_storeys ?? '—';
-        const units = app.proposed_units ?? '—';
         return `<tr>
           <td>${app.application_url ? `<a href="${escHtml(app.application_url)}" target="_blank" rel="noopener noreferrer">${escHtml(app.folderrsn ?? '')}</a>` : escHtml(app.folderrsn ?? '')}</td>
           <td>${escHtml(app.application_type ?? '')}</td>
           <td>${escHtml(app.ward_number ?? '')}</td>
           <td>${escHtml(app.zoning_class ?? '')}</td>
           <td>${escHtml(app.year_submitted?.toString() ?? '')}</td>
-          <td>${statusBadge}</td>
+          <td>${formatStatus(app.status)}</td>
           <td>${timeline}</td>
-          <td>${storeys}</td>
-          <td>${units}</td>
+          <td>${app.proposed_storeys ?? '—'}</td>
+          <td>${app.proposed_units ?? '—'}</td>
           <td>${escHtml(app.street_address?.trim() ?? '')}</td>
         </tr>`;
       }).join('');
 
-      resultsEl.innerHTML = `
-        <table>
-          <thead><tr>
-            <th>Folder RSN</th><th>Type</th><th>Ward</th><th>Zone</th>
-            <th>Year</th><th>Status</th><th>Timeline</th>
-            <th>Storeys</th><th>Units</th><th>Address</th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table>`;
+      resultsEl.innerHTML = `<table>
+        <thead><tr>${headers}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+
+      resultsEl.querySelectorAll('th.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+          const col = Number(th.dataset.col);
+          if (_sortCol === col) {
+            _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
+          } else {
+            _sortCol = col;
+            _sortDir = 'asc';
+          }
+          buildResultsTable();
+        });
+      });
+
       resultsCard.style.display = 'block';
     }
 
