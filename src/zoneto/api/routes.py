@@ -50,6 +50,7 @@ class CompApplication(BaseModel):
     ward_pct_detached: float | None = None
     ward_appeal_rate_3y: float | None = None
     has_community_meeting: int | None = None
+    proposed_use_category: str | None = None
 
 
 class CompsResponse(BaseModel):
@@ -78,6 +79,17 @@ class SiteContextResult(BaseModel):
     zoning_class: str | None = None
     zoning_max_units: int | None = None
     zoning_max_density: float | None = None
+    permitted_use_category: str | None = None
+    zoning_min_frontage_m: float | None = None
+    zoning_min_lot_area_sqm: float | None = None
+    zoning_max_coverage_pct: float | None = None
+    zoning_min_sqm_per_unit: float | None = None
+    zoning_holding: int = 0
+    zoning_exception: int = 0
+    zoning_exception_no: str | None = None
+    zoning_pct_res: float | None = None
+    zoning_pct_comm: float | None = None
+    zoning_pct_emp: float | None = None
     in_heritage_register: int = 0
     in_heritage_district: int = 0
     secondary_plan_name: str | None = None

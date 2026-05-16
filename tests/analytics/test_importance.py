@@ -122,6 +122,7 @@ def enriched_dir(tmp_path: Path) -> Path:
             "ward_number": ["Ward 1", "Ward 2"] * 5,
             "zoning_class": ["RS", None] * 5,
             "secondary_plan_name": [None, "Midtown"] * 5,
+            "proposed_use_category": ["residential", "mixed_use"] * 5,
             "postal_fsa": ["M5V", "M4K"] * 5,
             "year_submitted": [2021, 2022] * 5,
             "in_heritage_register": [0, 1] * 5,

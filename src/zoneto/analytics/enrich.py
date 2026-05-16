@@ -16,6 +16,8 @@ from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline as SklearnPipeline
 
+from zoneto.analytics.use_classifier import classify_use
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -1095,6 +1097,20 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         )
     else:
         df = df.with_columns(pl.lit(0, dtype=pl.Int8).alias("is_combined_application"))
+
+    # proposed_use_category: keyword-based bucket inferred from description.
+    # Display field for the UI — not consumed by any model. See use_classifier.
+    if "description" in df.columns:
+        descs = df["description"].to_list()
+        df = df.with_columns(
+            pl.Series(
+                "proposed_use_category",
+                [classify_use(d) for d in descs],
+                dtype=pl.Utf8,
+            )
+        )
+    else:
+        df = df.with_columns(pl.lit(None, dtype=pl.Utf8).alias("proposed_use_category"))
 
     # --- NLP features: TF-IDF + SVD on description column ---
     # NOTE: TF-IDF vocabulary is fit on the full corpus (all applications).

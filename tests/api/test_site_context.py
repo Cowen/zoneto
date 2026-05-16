@@ -156,6 +156,187 @@ def test_lookup_outside_all_polygons(ref_dir: Path) -> None:
     assert result["in_heritage_register"] == 0
     assert result["in_heritage_district"] == 0
     assert result["in_mtsa"] == 0
+    # New zoning fields default to None / 0 outside any polygon
+    assert result["permitted_use_category"] is None
+    assert result["zoning_min_frontage_m"] is None
+    assert result["zoning_min_lot_area_sqm"] is None
+    assert result["zoning_max_coverage_pct"] is None
+    assert result["zoning_min_sqm_per_unit"] is None
+    assert result["zoning_holding"] == 0
+    assert result["zoning_exception"] == 0
+    assert result["zoning_exception_no"] is None
+    assert result["zoning_pct_res"] is None
+    assert result["zoning_pct_comm"] is None
+    assert result["zoning_pct_emp"] is None
+
+
+def _write_zoning_geojson(ref: Path, properties: dict) -> None:
+    """Overwrite ref/zoning.geojson with a single polygon carrying given properties.
+
+    The polygon covers (-79.39,-79.37) × (43.64,43.66), which contains (43.65, -79.38).
+    """
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": properties,
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [-79.39, 43.64],
+                            [-79.37, 43.64],
+                            [-79.37, 43.66],
+                            [-79.39, 43.66],
+                            [-79.39, 43.64],
+                        ]
+                    ],
+                },
+            }
+        ],
+    }
+    (ref / "zoning.geojson").write_text(json.dumps(geojson))
+
+
+def test_lookup_returns_permitted_use_category_residential(ref_dir: Path) -> None:
+    """GEN_ZONE=0 → 'Residential' category."""
+    _write_zoning_geojson(
+        ref_dir,
+        {"ZN_ZONE": "R", "UNITS": -1, "DENSITY": -1, "GEN_ZONE": 0},
+    )
+    result = lookup_site_context(43.65, -79.38, ref_dir)
+    assert result["permitted_use_category"] == "Residential"
+
+
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        (0, "Residential"),
+        (1, "Open Space"),
+        (2, "Utility / Transportation"),
+        (4, "Employment Industrial"),
+        (5, "Institutional"),
+        (6, "Commercial Residential Employment (mixed)"),
+        (101, "Residential Apartment"),
+        (201, "Commercial"),
+        (202, "Commercial Residential (mixed)"),
+    ],
+)
+def test_lookup_maps_all_gen_zone_codes(
+    ref_dir: Path, code: int, expected: str
+) -> None:
+    _write_zoning_geojson(
+        ref_dir, {"ZN_ZONE": "Z", "UNITS": -1, "DENSITY": -1, "GEN_ZONE": code}
+    )
+    result = lookup_site_context(43.65, -79.38, ref_dir)
+    assert result["permitted_use_category"] == expected
+
+
+def test_lookup_returns_physical_constraints(ref_dir: Path) -> None:
+    """FRONTAGE / ZN_AREA / COVERAGE / AREA_UNITS surfaced when > 0."""
+    _write_zoning_geojson(
+        ref_dir,
+        {
+            "ZN_ZONE": "R",
+            "UNITS": -1,
+            "DENSITY": -1,
+            "GEN_ZONE": 0,
+            "FRONTAGE": 7.5,
+            "ZN_AREA": 220.0,
+            "COVERAGE": 35.0,
+            "AREA_UNITS": 200.0,
+        },
+    )
+    result = lookup_site_context(43.65, -79.38, ref_dir)
+    assert result["zoning_min_frontage_m"] == 7.5
+    assert result["zoning_min_lot_area_sqm"] == 220.0
+    assert result["zoning_max_coverage_pct"] == 35.0
+    assert result["zoning_min_sqm_per_unit"] == 200.0
+
+
+@pytest.mark.parametrize("sentinel", [-1, 0])
+def test_lookup_physical_constraint_sentinels_become_none(
+    ref_dir: Path, sentinel: float
+) -> None:
+    """-1 ('no limit') and 0 (unset) become None for optional minimums."""
+    _write_zoning_geojson(
+        ref_dir,
+        {
+            "ZN_ZONE": "R",
+            "UNITS": -1,
+            "DENSITY": -1,
+            "GEN_ZONE": 0,
+            "FRONTAGE": sentinel,
+            "ZN_AREA": sentinel,
+            "COVERAGE": sentinel,
+            "AREA_UNITS": sentinel,
+        },
+    )
+    result = lookup_site_context(43.65, -79.38, ref_dir)
+    assert result["zoning_min_frontage_m"] is None
+    assert result["zoning_min_lot_area_sqm"] is None
+    assert result["zoning_max_coverage_pct"] is None
+    assert result["zoning_min_sqm_per_unit"] is None
+
+
+def test_lookup_holding_and_exception_flags(ref_dir: Path) -> None:
+    """ZN_HOLDING='Y' → 1; ZN_EXCPTN='Y' with EXCPTN_NO → returned."""
+    _write_zoning_geojson(
+        ref_dir,
+        {
+            "ZN_ZONE": "R",
+            "UNITS": -1,
+            "DENSITY": -1,
+            "GEN_ZONE": 0,
+            "ZN_HOLDING": "Y",
+            "ZN_EXCPTN": "Y",
+            "EXCPTN_NO": "42",
+        },
+    )
+    result = lookup_site_context(43.65, -79.38, ref_dir)
+    assert result["zoning_holding"] == 1
+    assert result["zoning_exception"] == 1
+    assert result["zoning_exception_no"] == "42"
+
+
+def test_lookup_holding_and_exception_off(ref_dir: Path) -> None:
+    """ZN_HOLDING='N' and ZN_EXCPTN='N' → 0; exception_no None."""
+    _write_zoning_geojson(
+        ref_dir,
+        {
+            "ZN_ZONE": "R",
+            "UNITS": -1,
+            "DENSITY": -1,
+            "GEN_ZONE": 0,
+            "ZN_HOLDING": "N",
+            "ZN_EXCPTN": "N",
+        },
+    )
+    result = lookup_site_context(43.65, -79.38, ref_dir)
+    assert result["zoning_holding"] == 0
+    assert result["zoning_exception"] == 0
+    assert result["zoning_exception_no"] is None
+
+
+def test_lookup_mixed_use_fsi_splits(ref_dir: Path) -> None:
+    """Mixed-use FSI splits surfaced when set; non-positive becomes None."""
+    _write_zoning_geojson(
+        ref_dir,
+        {
+            "ZN_ZONE": "CR",
+            "UNITS": -1,
+            "DENSITY": 4.0,
+            "GEN_ZONE": 202,
+            "PRCNT_RES": 2.5,
+            "PRCNT_COMM": 1.5,
+            "PRCNT_EMMP": -1,
+        },
+    )
+    result = lookup_site_context(43.65, -79.38, ref_dir)
+    assert result["zoning_pct_res"] == 2.5
+    assert result["zoning_pct_comm"] == 1.5
+    assert result["zoning_pct_emp"] is None  # -1 sentinel
 
 
 def test_lookup_missing_reference_files(tmp_path: Path) -> None:
@@ -166,6 +347,9 @@ def test_lookup_missing_reference_files(tmp_path: Path) -> None:
     # Should return defaults, not crash
     assert result["zoning_class"] is None
     assert result["in_heritage_register"] == 0
+    assert result["permitted_use_category"] is None
+    assert result["zoning_holding"] == 0
+    assert result["zoning_exception"] == 0
 
 
 # --- endpoint tests ---
@@ -192,3 +376,26 @@ def test_site_context_outside_city(client_with_ref: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["zoning_class"] is None
+
+
+def test_site_context_endpoint_exposes_new_zoning_keys(
+    client_with_ref: TestClient,
+) -> None:
+    """All new zoning fields are present in the endpoint response (Pydantic)."""
+    response = client_with_ref.get("/site-context?lat=43.65&lon=-79.38")
+    assert response.status_code == 200
+    body = response.json()
+    for key in (
+        "permitted_use_category",
+        "zoning_min_frontage_m",
+        "zoning_min_lot_area_sqm",
+        "zoning_max_coverage_pct",
+        "zoning_min_sqm_per_unit",
+        "zoning_holding",
+        "zoning_exception",
+        "zoning_exception_no",
+        "zoning_pct_res",
+        "zoning_pct_comm",
+        "zoning_pct_emp",
+    ):
+        assert key in body, f"Missing key {key} in /site-context response"

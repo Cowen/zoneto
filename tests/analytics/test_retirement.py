@@ -27,6 +27,9 @@ def _make_dev_parquet(tmp_path: Path) -> Path:
             "ward_number": [str(rng.integers(1, 26)) for _ in range(n)],
             "zoning_class": rng.choice(["RS", "RM", None], size=n).tolist(),
             "secondary_plan_name": [None] * n,
+            "proposed_use_category": rng.choice(
+                ["residential", "mixed_use", "commercial", None], size=n
+            ).tolist(),
             "year_submitted": rng.integers(2018, 2024, size=n).tolist(),
             "in_heritage_register": rng.integers(0, 2, size=n).tolist(),
             "in_heritage_district": rng.integers(0, 2, size=n).tolist(),

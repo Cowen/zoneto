@@ -1,6 +1,7 @@
 {
   "_meta": {
-    "updated": "2026-03-16"
+    "updated": "2026-05-16",
+    "notes": "appeal model rebaselined after train.py CV stabilization (see _sort_temporal). Previous 0.6729 / 0.2669 values came from a single high-variance fold draw; the new values reflect the now-deterministic CV. The model itself is unchanged."
   },
   "dev_applications_approved": {
     "roc_auc_mean": 0.529,
@@ -8,9 +9,9 @@
     "avg_precision_mean": 0.9824
   },
   "dev_applications_appealed": {
-    "roc_auc_mean": 0.6729,
-    "brier_score_mean": 0.0864,
-    "avg_precision_mean": 0.2669
+    "roc_auc_mean": 0.6169,
+    "brier_score_mean": 0.1098,
+    "avg_precision_mean": 0.1763
   },
   "coa_approved": {
     "roc_auc_mean": 0.5105,

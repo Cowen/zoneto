@@ -53,6 +53,43 @@ def _fill_missing_cols(
     return df
 
 
+# Natural primary keys per enriched dataset, used as a tie-breaker after the
+# year-based sort so TimeSeriesSplit folds are identical across enrich runs
+# (parquet row order is non-deterministic).
+_STABLE_ID_CANDIDATES: tuple[str, ...] = (
+    "folderrsn",
+    "reference_file",
+    "permit_number",
+    "id",
+)
+
+
+def _sort_temporal(df: pl.DataFrame, year_col: str) -> pl.DataFrame:
+    """Stable temporal sort: by year_col then a deterministic secondary key.
+
+    Polars stable sort preserves the input row order within a year. The parquet
+    row order coming out of enrich is itself non-deterministic, so a single
+    sort on year_col leaves within-year ordering different across runs. That
+    makes TimeSeriesSplit's index-based fold cuts hit different rows each run
+    and the CV metric swings by ±0.04 AUC on identical code.
+
+    Resolution: sort first by year_col, then by the first natural ID column
+    available (folderrsn / reference_file / permit_number / id). When none of
+    those exist (small synthetic test fixtures), fall back to a content hash so
+    the sort still has a deterministic secondary key.
+    """
+    secondary = next((c for c in _STABLE_ID_CANDIDATES if c in df.columns), None)
+    if secondary is not None:
+        return df.sort([year_col, secondary])
+    # Fixture-only fallback — hash the input row content. Deterministic across
+    # processes per polars docs; cheap on small synthetic data.
+    return (
+        df.with_columns(df.hash_rows().alias("__row_hash"))
+        .sort([year_col, "__row_hash"])
+        .drop("__row_hash")
+    )
+
+
 def _build_survival_pipeline(
     cat_cols: list[str],
     num_cols: list[str],
@@ -240,7 +277,7 @@ def evaluate_survival(
     df = _fill_missing_cols(df, cat_cols, num_cols)
 
     if year_col is not None and year_col in df.columns:
-        df = df.sort(year_col)
+        df = _sort_temporal(df, year_col)
 
     effective_cv = min(cv, len(df) - 1)
     cv_obj: TimeSeriesSplit | KFold = (
@@ -311,7 +348,7 @@ def evaluate_source(
     # Cap cv at n_samples - 1 to avoid splits > samples errors on small datasets
     effective_cv = min(cv, len(df) - 1)
     if year_col is not None and year_col in df.columns:
-        df = df.sort(year_col)
+        df = _sort_temporal(df, year_col)
         cv_obj: KFold | StratifiedKFold | TimeSeriesSplit = TimeSeriesSplit(
             n_splits=effective_cv
         )

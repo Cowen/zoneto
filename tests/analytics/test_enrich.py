@@ -1071,6 +1071,41 @@ def test_enrich_dev_extracts_units(
 
 
 # ---------------------------------------------------------------------------
+# enrich_dev — proposed_use_category (keyword classifier over description)
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_dev_proposed_use_category(
+    tmp_path: Path,
+    stub_spatial_join: None,
+) -> None:
+    """proposed_use_category column derived from description via classify_use."""
+    _make_dev_parquet_descriptions(tmp_path)
+    enrich_dev(data_dir=tmp_path)
+    df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+
+    assert "proposed_use_category" in df.columns
+
+    # D1: "Proposed 12 storey mixed-use building with 551 units" → mixed_use
+    assert (
+        df.filter(pl.col("folderrsn") == "D1")["proposed_use_category"][0]
+        == "mixed_use"
+    )
+    # D2: "28-storey residential tower, 186 dwelling units" → residential
+    assert (
+        df.filter(pl.col("folderrsn") == "D2")["proposed_use_category"][0]
+        == "residential"
+    )
+    # D4: "Rezoning to permit commercial use" → commercial
+    assert (
+        df.filter(pl.col("folderrsn") == "D4")["proposed_use_category"][0]
+        == "commercial"
+    )
+    # D6: null description → null
+    assert df.filter(pl.col("folderrsn") == "D6")["proposed_use_category"][0] is None
+
+
+# ---------------------------------------------------------------------------
 # enrich_dev — unit_excess_ratio (proposed_units / zoning_max_units)
 # ---------------------------------------------------------------------------
 

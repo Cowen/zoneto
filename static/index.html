@@ -252,6 +252,7 @@
     </div>
     <div id="base-rate"></div>
     <div id="scenarios-body"></div>
+    <div id="required-studies"></div>
     <div id="shap-best"></div>
     <div id="custom-scorer-container"></div>
     <div id="model-footnote"></div>
@@ -275,6 +276,7 @@
     const shapBestEl = document.getElementById('shap-best');
     const customScorerEl = document.getElementById('custom-scorer-container');
     const modelFootnoteEl = document.getElementById('model-footnote');
+    const requiredStudiesEl = document.getElementById('required-studies');
     const mapLegendEl = document.getElementById('map-legend');
     let _map = null;
     let _mapLayers = [];
@@ -762,6 +764,37 @@
       return _BYLAW_BASE + 'ZBL_NewProvision_Chapter1.htm';
     }
 
+    // Mirror of analytics/use_classifier._ZONE_ALLOWED. Keep in sync.
+    const ZONE_ALLOWED_USES = {
+      'Residential':                              new Set(['residential', 'mixed_use']),
+      'Residential Apartment':                    new Set(['residential', 'mixed_use']),
+      'Commercial Residential (mixed)':           new Set(['residential', 'commercial', 'mixed_use']),
+      'Commercial Residential Employment (mixed)':new Set(['residential', 'commercial', 'employment', 'mixed_use']),
+      'Commercial':                               new Set(['commercial', 'mixed_use']),
+      'Employment Industrial':                    new Set(['employment']),
+      'Institutional':                            new Set(['institutional']),
+      'Open Space':                               new Set(),
+      'Utility / Transportation':                 new Set(),
+    };
+
+    function useMatchesZone(proposed, permittedCategory) {
+      if (proposed == null || permittedCategory == null) return null;
+      const allowed = ZONE_ALLOWED_USES[permittedCategory];
+      if (allowed == null) return null;
+      return allowed.has(proposed) ? 1 : 0;
+    }
+
+    // OZ/SA application types imply a rezoning/site-plan path; we treat both as
+    // 'mixed_use'-capable since they don't pin a specific use bucket on their own.
+    function inferUseForScenario(scenario) {
+      // SA/SP applications attach to an existing rezoning; the underlying use
+      // is unknown from type alone, so we don't claim a mismatch.
+      if (scenario.application_type === 'SA') return null;
+      // OZ scenarios that don't carry an inferred use default to 'mixed_use'
+      // until the custom scorer or description provides a specific bucket.
+      return scenario.proposed_use_category ?? null;
+    }
+
     function renderSiteContext(ctx) {
       const flag = (label, value, warnIfOn, { tooltip, href } = {}) => {
         const on = value === 1 || value === true;
@@ -798,11 +831,48 @@
         html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}">${inner}</span>`;
       }
 
+      if (ctx.permitted_use_category) {
+        html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml('As-of-right uses for this zone (By-law 569-2013 General Zone category). Anything else needs a rezoning (OZ).')}">Permits: ${escHtml(ctx.permitted_use_category)}</span>`;
+      }
       if (ctx.zoning_max_units != null) {
         html += `<span class="ctx-flag ctx-flag-on" data-tooltip="Maximum dwelling units permitted under the as-of-right zoning. Proposals exceeding this require a rezoning or minor variance.">Zoning permits: ${ctx.zoning_max_units} units</span>`;
       }
       if (ctx.zoning_max_density != null) {
         html += `<span class="ctx-flag ctx-flag-on" data-tooltip="Maximum floor space index (FSI) — total floor area relative to lot area. Exceeding this requires a rezoning or official plan amendment.">Max density: ${ctx.zoning_max_density} FSI</span>`;
+      }
+
+      // Lot/coverage minimums grouped together — only render when at least one is set
+      const lotParts = [];
+      if (ctx.zoning_min_frontage_m != null) lotParts.push(`Min frontage: ${ctx.zoning_min_frontage_m} m`);
+      if (ctx.zoning_min_lot_area_sqm != null) lotParts.push(`Min lot area: ${ctx.zoning_min_lot_area_sqm} m²`);
+      if (ctx.zoning_max_coverage_pct != null) lotParts.push(`Max coverage: ${ctx.zoning_max_coverage_pct}%`);
+      if (ctx.zoning_min_sqm_per_unit != null) lotParts.push(`Min ${ctx.zoning_min_sqm_per_unit} m²/unit`);
+      if (lotParts.length) {
+        const tip = "Physical lot requirements from By-law 569-2013. New buildings or severances that don't meet these need a minor variance from the Committee of Adjustment.";
+        html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}">${escHtml(lotParts.join(' · '))}</span>`;
+      }
+
+      // Mixed-use FSI splits (only shown when any are present)
+      if (ctx.zoning_pct_res != null || ctx.zoning_pct_comm != null || ctx.zoning_pct_emp != null) {
+        const parts = [
+          ctx.zoning_pct_res != null ? `Res ${ctx.zoning_pct_res}` : null,
+          ctx.zoning_pct_comm != null ? `Comm ${ctx.zoning_pct_comm}` : null,
+          ctx.zoning_pct_emp != null ? `Emp ${ctx.zoning_pct_emp}` : null,
+        ].filter(Boolean).join(' / ');
+        const tip = "FSI (floor space index) split for this mixed-use zone — maximum density allowable for each use component.";
+        html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}">FSI split: ${escHtml(parts)}</span>`;
+      }
+
+      if (ctx.zoning_holding === 1) {
+        const tip = "Site is subject to a Holding Symbol (H). Conditions in the by-law must be satisfied — typically via a separate H-removal application — before any building permit can be issued.";
+        html += `<span class="ctx-flag ctx-flag-warn" data-tooltip="${escHtml(tip)}">Holding (H)</span>`;
+      }
+
+      if (ctx.zoning_exception === 1) {
+        const label = ctx.zoning_exception_no ? `Exception #${ctx.zoning_exception_no}` : 'Zone exception';
+        const tip = "Site has site-specific zoning provisions on top of the base zone. Confirm the exception's conditions still permit the proposed use and form before relying on as-of-right zoning.";
+        const href = 'https://www.toronto.ca/zoning/bylaw_amendments/';
+        html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}"><a href="${escHtml(href)}" target="_blank" rel="noopener">${escHtml(label)}</a></span>`;
       }
 
       // Regulatory flags
@@ -899,6 +969,7 @@
       shapBestEl.innerHTML = '';
       customScorerEl.innerHTML = '';
       modelFootnoteEl.innerHTML = '';
+      requiredStudiesEl.innerHTML = '';
 
       const nearestComp = applications[0] ?? {};
 
@@ -922,6 +993,18 @@
         // Zoning limits (display only — not model features)
         zoning_max_units:      spatialCtx.zoning_max_units ?? null,
         zoning_max_density:    spatialCtx.zoning_max_density ?? null,
+        // Expanded by-law fields (display only)
+        permitted_use_category:  spatialCtx.permitted_use_category ?? null,
+        zoning_min_frontage_m:   spatialCtx.zoning_min_frontage_m ?? null,
+        zoning_min_lot_area_sqm: spatialCtx.zoning_min_lot_area_sqm ?? null,
+        zoning_max_coverage_pct: spatialCtx.zoning_max_coverage_pct ?? null,
+        zoning_min_sqm_per_unit: spatialCtx.zoning_min_sqm_per_unit ?? null,
+        zoning_holding:          spatialCtx.zoning_holding ?? 0,
+        zoning_exception:        spatialCtx.zoning_exception ?? 0,
+        zoning_exception_no:     spatialCtx.zoning_exception_no ?? null,
+        zoning_pct_res:          spatialCtx.zoning_pct_res ?? null,
+        zoning_pct_comm:         spatialCtx.zoning_pct_comm ?? null,
+        zoning_pct_emp:          spatialCtx.zoning_pct_emp ?? null,
         // Ward demographics — only available from comps (census data joined by ward)
         ward_number:           nearestComp.ward_number ?? null,
         ward_pct_renters:      nearestComp.ward_pct_renters ?? null,
@@ -961,8 +1044,9 @@
         fetchBestShap(scenarios[bestIdx], siteCtx);
       }
 
-      // Render custom scorer and model footnote
+      // Render custom scorer, required studies, and model footnote
       renderCustomScorer();
+      renderRequiredStudies(siteCtx, applications);
       renderModelFootnote();
     }
 
@@ -1011,6 +1095,16 @@
             </select>
           </div>
           <div>
+            <label for="custom-use">Proposed use</label>
+            <select id="custom-use">
+              <option value="residential">Residential</option>
+              <option value="mixed_use">Mixed-use</option>
+              <option value="commercial">Commercial</option>
+              <option value="employment">Employment</option>
+              <option value="institutional">Institutional</option>
+            </select>
+          </div>
+          <div>
             <label for="custom-storeys">Storeys</label>
             <input type="number" id="custom-storeys" min="1" max="99" value="12" style="width:70px" />
           </div>
@@ -1030,6 +1124,10 @@
         btn.disabled = true;
         resultEl.textContent = 'Scoring…';
 
+        // proposedUse is used for the ⚠ mismatch overlay only — it is NOT sent
+        // to /score because keyword-classified use has zero permutation
+        // importance on the appeal model and destabilizes CV when included.
+        const proposedUse = document.getElementById('custom-use').value;
         const features = {
           ..._lastSiteCtx,
           application_type: document.getElementById('custom-type').value,
@@ -1061,6 +1159,12 @@
           const mult = (proposedUnits / maxUnits).toFixed(1);
           html += `<span class="ctx-flag ctx-flag-warn" style="font-size:0.72rem">${mult}x zoning limit</span>`;
         }
+        // Use-vs-zone mismatch
+        const useMatch = useMatchesZone(proposedUse, _lastSiteCtx?.permitted_use_category);
+        if (useMatch === 0) {
+          const tip = `This zone permits ${_lastSiteCtx?.permitted_use_category} as-of-right. A ${proposedUse} proposal requires a rezoning (OZ).`;
+          html += `<span class="ctx-flag ctx-flag-warn" style="font-size:0.72rem" data-tooltip="${escHtml(tip)}">⚠ Use mismatch</span>`;
+        }
         if (p.prob_dev_appealed != null) {
           const risk = (p.prob_dev_appealed * 100).toFixed(0);
           const cls = p.prob_dev_appealed < 0.2 ? 'risk-low' : p.prob_dev_appealed < 0.35 ? 'risk-mid' : 'risk-high';
@@ -1078,10 +1182,84 @@
     function renderModelFootnote() {
       modelFootnoteEl.innerHTML = `<div class="model-footnote">
         Appeal model AUC ~0.68, timeline model C-index ~0.74.
-        The model does not capture how much a proposal exceeds the zoning limit —
-        a 12-storey building in a low-rise zone may show lower risk than reality.
-        Compare predictions against the nearby track record above.
+        The model does not capture how much a proposal exceeds the zoning limit
+        or whether the proposed use matches the zone — a 12-storey building in
+        a low-rise zone, or a residential proposal in an industrial zone, may
+        show lower risk than reality. The use mismatch and zoning-excess badges
+        flag those cases independently of the model. Compare predictions
+        against the nearby track record above.
       </div>`;
+    }
+
+    function renderRequiredStudies(ctx, applications) {
+      // Derive a checklist of studies/processes a developer will likely need to
+      // file alongside their application, based purely on flags already known.
+      const items = [];
+      if (ctx.in_heritage_register === 1) {
+        items.push({
+          label: 'Heritage Impact Assessment',
+          why: 'Property is on the Heritage Register — significant alterations or demolition require an HIA reviewed by Heritage Preservation Services.',
+        });
+      }
+      if (ctx.in_heritage_district === 1) {
+        items.push({
+          label: 'Heritage Conservation District conformity',
+          why: 'Site is inside a Heritage Conservation District — proposals must conform to the HCD Plan and receive HPS review.',
+        });
+      }
+      if (ctx.in_secondary_plan === 1) {
+        items.push({
+          label: 'Secondary Plan conformity',
+          why: `Site is covered by ${ctx.secondary_plan_name ?? 'a Secondary Plan'} — the application must demonstrate conformity with that plan's policies in addition to the Official Plan.`,
+        });
+      }
+      if (ctx.in_mtsa === 1) {
+        items.push({
+          label: 'MTSA / PPS minimum density',
+          why: 'Site is inside a Major Transit Station Area — provincial policy requires minimum residential/job density. Low-density proposals will face provincial-policy scrutiny.',
+        });
+      }
+      if (ctx.zoning_holding === 1) {
+        items.push({
+          label: 'Holding Symbol (H) removal',
+          why: 'Site is subject to a Holding Symbol. A separate H-removal application is required before a building permit can be issued.',
+        });
+      }
+      if (ctx.zoning_exception === 1) {
+        const lbl = ctx.zoning_exception_no ? `exception #${ctx.zoning_exception_no}` : 'site-specific exception';
+        items.push({
+          label: 'Confirm site-specific exception',
+          why: `Site has ${lbl} — confirm the exception's conditions still permit the proposed form and use before relying on as-of-right zoning.`,
+        });
+      }
+
+      // Derive rezoning trigger from comps (most aggressive scenario seen nearby)
+      const withStoreys = applications.filter(a => a.proposed_storeys != null && a.proposed_storeys > 0);
+      const withUnits = applications.filter(a => a.proposed_units != null && a.proposed_units > 0);
+      const maxNearbyStoreys = withStoreys.length ? Math.max(...withStoreys.map(a => a.proposed_storeys)) : null;
+      const maxNearbyUnits = withUnits.length ? Math.max(...withUnits.map(a => a.proposed_units)) : null;
+      const exceedsStoreys = ctx.zoning_max_storeys != null && maxNearbyStoreys != null && maxNearbyStoreys > ctx.zoning_max_storeys;
+      const exceedsUnits = ctx.zoning_max_units != null && maxNearbyUnits != null && maxNearbyUnits > ctx.zoning_max_units;
+      if (exceedsStoreys || exceedsUnits) {
+        items.push({
+          label: 'Rezoning (OZ) likely required',
+          why: 'Nearby comparable proposals exceed the as-of-right storey or unit limits for this zone. Anything similar will need an OZ rather than a Site Plan-only path.',
+        });
+      }
+
+      if (!items.length) {
+        requiredStudiesEl.innerHTML = '';
+        return;
+      }
+
+      const rows = items.map(it =>
+        `<li><strong>${escHtml(it.label)}</strong> <span style="color:#6c757d">— ${escHtml(it.why)}</span></li>`
+      ).join('');
+      requiredStudiesEl.innerHTML = `
+        <div style="margin-top:1rem;padding:0.75rem 1rem;background:#f8f9fa;border:1px solid #dee2e6;border-radius:6px">
+          <div style="font-size:0.78rem;font-weight:700;margin-bottom:0.4rem;color:#495057">Likely required studies / processes</div>
+          <ul style="margin:0;padding-left:1.2rem;font-size:0.78rem;line-height:1.5">${rows}</ul>
+        </div>`;
     }
 
     function renderScenarios(results, nearestComp) {

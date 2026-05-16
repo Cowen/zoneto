@@ -98,6 +98,11 @@ _OPTIONAL_COLS: list[tuple[str, str, str]] = [
         "storey_excess_ratio",
         "CAST(NULL AS DOUBLE) AS storey_excess_ratio",
     ),
+    (
+        "proposed_use_category",
+        "proposed_use_category",
+        "CAST(NULL AS VARCHAR) AS proposed_use_category",
+    ),
 ]
 
 

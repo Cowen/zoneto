@@ -7,6 +7,31 @@ from typing import Any
 
 import duckdb
 
+# By-law 569-2013 GEN_ZONE numeric codes → human-readable category.
+# Source: docs/zoning_readme.txt.
+_GEN_ZONE_LABEL: dict[int, str] = {
+    0: "Residential",
+    1: "Open Space",
+    2: "Utility / Transportation",
+    4: "Employment Industrial",
+    5: "Institutional",
+    6: "Commercial Residential Employment (mixed)",
+    101: "Residential Apartment",
+    201: "Commercial",
+    202: "Commercial Residential (mixed)",
+}
+
+
+def _positive_or_none(value: Any) -> float | None:
+    """Return value as float when > 0, else None. By-law sentinels (-1, 0) → None."""
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
 
 def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]:
     """Look up spatial context for a single lat/lon point against reference geodata.
@@ -25,6 +50,17 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
         "zoning_class": None,
         "zoning_max_units": None,
         "zoning_max_density": None,
+        "permitted_use_category": None,
+        "zoning_min_frontage_m": None,
+        "zoning_min_lot_area_sqm": None,
+        "zoning_max_coverage_pct": None,
+        "zoning_min_sqm_per_unit": None,
+        "zoning_holding": 0,
+        "zoning_exception": 0,
+        "zoning_exception_no": None,
+        "zoning_pct_res": None,
+        "zoning_pct_comm": None,
+        "zoning_pct_emp": None,
         "in_heritage_register": 0,
         "in_heritage_district": 0,
         "secondary_plan_name": None,
@@ -37,24 +73,80 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
 
     point_sql = f"ST_Point({lon}, {lat})"
 
-    # Zoning (class + permitted density/units from by-law)
+    # Zoning (class + permitted density/units + physical constraints from by-law)
     zoning_path = ref_dir / "zoning.geojson"
     if zoning_path.exists():
         escaped = str(zoning_path).replace("'", "''")
+        # ST_Read infers columns from the first feature in the GeoJSON; older
+        # or trimmed-down fixtures may omit some by-law fields. Introspect the
+        # schema and substitute NULL for any column that isn't present so the
+        # query still runs.
+        desc = con.execute(f"DESCRIBE SELECT * FROM ST_Read('{escaped}')").fetchall()
+        available = {str(r[0]).upper() for r in desc}
+        wanted = [
+            "ZN_ZONE",
+            "UNITS",
+            "DENSITY",
+            "GEN_ZONE",
+            "FRONTAGE",
+            "ZN_AREA",
+            "COVERAGE",
+            "AREA_UNITS",
+            "ZN_HOLDING",
+            "ZN_EXCPTN",
+            "EXCPTN_NO",
+            "PRCNT_RES",
+            "PRCNT_COMM",
+            "PRCNT_EMMP",
+        ]
+        cols_sql = ",\n                ".join(
+            f"z.{c}" if c in available else f"NULL AS {c}" for c in wanted
+        )
         rows = con.execute(f"""
-            SELECT z.ZN_ZONE, z.UNITS, z.DENSITY
+            SELECT
+                {cols_sql}
             FROM ST_Read('{escaped}') z
             WHERE ST_Within({point_sql}, z.geom)
             LIMIT 1
         """).fetchall()
         if rows:
-            result["zoning_class"] = rows[0][0]
-            units_val = rows[0][1]
-            density_val = rows[0][2]
-            if units_val is not None and units_val > 0:
+            row = rows[0]
+            result["zoning_class"] = row[0]
+            units_val = _positive_or_none(row[1])
+            if units_val is not None:
                 result["zoning_max_units"] = int(units_val)
-            if density_val is not None and density_val > 0:
-                result["zoning_max_density"] = float(density_val)
+            density_val = _positive_or_none(row[2])
+            if density_val is not None:
+                result["zoning_max_density"] = density_val
+
+            gen_zone_raw = row[3]
+            if gen_zone_raw is not None:
+                try:
+                    result["permitted_use_category"] = _GEN_ZONE_LABEL.get(
+                        int(gen_zone_raw)
+                    )
+                except (TypeError, ValueError):
+                    pass
+
+            result["zoning_min_frontage_m"] = _positive_or_none(row[4])
+            result["zoning_min_lot_area_sqm"] = _positive_or_none(row[5])
+            result["zoning_max_coverage_pct"] = _positive_or_none(row[6])
+            result["zoning_min_sqm_per_unit"] = _positive_or_none(row[7])
+
+            holding_raw = row[8]
+            if isinstance(holding_raw, str) and holding_raw.strip().upper() == "Y":
+                result["zoning_holding"] = 1
+
+            exception_raw = row[9]
+            if isinstance(exception_raw, str) and exception_raw.strip().upper() == "Y":
+                result["zoning_exception"] = 1
+                exception_no = row[10]
+                if exception_no is not None and str(exception_no).strip():
+                    result["zoning_exception_no"] = str(exception_no)
+
+            result["zoning_pct_res"] = _positive_or_none(row[11])
+            result["zoning_pct_comm"] = _positive_or_none(row[12])
+            result["zoning_pct_emp"] = _positive_or_none(row[13])
 
     # Heritage register (point data — use buffer intersection)
     hr_dir = ref_dir / "heritage_register"

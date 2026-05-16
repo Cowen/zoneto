@@ -239,6 +239,91 @@ def test_query_comps_spatial_features_null_when_absent(tmp_path: Path) -> None:
     assert r.get("has_community_meeting") is None
 
 
+def test_query_comps_includes_proposed_use_category(tmp_path: Path) -> None:
+    """proposed_use_category is returned when the column is present in parquet."""
+    from zoneto.api.comps import query_comps
+
+    enriched = _write_enriched(
+        tmp_path,
+        [
+            {
+                "folderrsn": "7777777",
+                "application_type": "OZ",
+                "ward_number": "10",
+                "zoning_class": "CR",
+                "status": "Closed",
+                "year_submitted": 2024,
+                "lat": 43.645,
+                "lon": -79.396,
+                "dev_approved": 1,
+                "dev_appealed": 0,
+                "dev_days_to_decision": 365,
+                "proposed_storeys": 20,
+                "proposed_units": 200,
+                "description": "Mixed-use tower",
+                "street_num": "441",
+                "street_name": "King St W",
+                "application_url": None,
+                "proposed_use_category": "mixed_use",
+            }
+        ],
+    )
+
+    results = query_comps(enriched)
+    assert len(results) == 1
+    assert results[0]["proposed_use_category"] == "mixed_use"
+
+
+def test_query_comps_proposed_use_category_null_when_absent(tmp_path: Path) -> None:
+    """proposed_use_category is None when the column is absent from parquet."""
+    from zoneto.api.comps import query_comps
+
+    df = pl.DataFrame(
+        {
+            "folderrsn": ["8888888"],
+            "application_type": ["OZ"],
+            "ward_number": ["5"],
+            "zoning_class": ["R"],
+            "status": ["Active"],
+            "year_submitted": [2024],
+            "lat": [43.7],
+            "lon": [-79.4],
+            "dev_approved": [None],
+            "dev_appealed": [None],
+            "dev_days_to_decision": [None],
+            "proposed_storeys": [None],
+            "proposed_units": [None],
+            "description": [""],
+            "street_num": ["1"],
+            "street_name": ["Queen St"],
+        },
+        schema={
+            "folderrsn": pl.String,
+            "application_type": pl.String,
+            "ward_number": pl.String,
+            "zoning_class": pl.String,
+            "status": pl.String,
+            "year_submitted": pl.Int32,
+            "lat": pl.Float64,
+            "lon": pl.Float64,
+            "dev_approved": pl.Int8,
+            "dev_appealed": pl.Int8,
+            "dev_days_to_decision": pl.Int32,
+            "proposed_storeys": pl.Int32,
+            "proposed_units": pl.Int32,
+            "description": pl.String,
+            "street_num": pl.String,
+            "street_name": pl.String,
+        },
+    )
+    path = tmp_path / "no_use_category.parquet"
+    df.write_parquet(path)
+
+    results = query_comps(path)
+    assert len(results) == 1
+    assert results[0].get("proposed_use_category") is None
+
+
 def test_query_comps_application_url_null_when_absent(tmp_path: Path) -> None:
     """application_url is None when not present in data."""
     from zoneto.api.comps import query_comps
