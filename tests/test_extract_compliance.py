@@ -664,9 +664,7 @@ class TestExtractHeightM:
 
 
 class TestComplianceHeightM:
-    def _site(
-        self, zoning_max_height_m: float | None = None
-    ) -> dict:
+    def _site(self, zoning_max_height_m: float | None = None) -> dict:
         return {
             "zoning_class": "RM",
             "zoning_max_units": None,
