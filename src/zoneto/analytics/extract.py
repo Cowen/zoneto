@@ -17,6 +17,7 @@ class ProjectFeatures:
     # one of: residential/commercial/mixed_use/employment/institutional/None
     proposed_use: str | None
     has_ground_floor_retail: bool
+    description: str | None = None
 
 
 _STOREY_RE = re.compile(r"(?i)(\d+)\s*-?\s*store?ys?")
@@ -71,4 +72,5 @@ def extract_project_features(description: str | None) -> ProjectFeatures:
         proposed_units=units,
         proposed_use=proposed_use,
         has_ground_floor_retail=has_retail,
+        description=description,
     )

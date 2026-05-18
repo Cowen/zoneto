@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -9,13 +10,36 @@ from typing import Any
 from zoneto.analytics.extract import ProjectFeatures
 from zoneto.analytics.use_classifier import use_matches_zone
 
+# By-law 569-2013 §60.20.20.10(1): uses explicitly excluded from all zones,
+# including Employment Industrial. These cannot be permitted through rezoning.
+_PROHIBITED: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\brefiner(y|ies)\b", re.I), "crude petroleum or coal refinery"),
+    (re.compile(r"\bpetroleum\b", re.I), "crude petroleum refinery"),
+    (re.compile(r"\bsmelter?\b|\bsmelting\b", re.I), "smelting of metallic ores"),
+    (re.compile(r"\bfoundr(y|ies)\b", re.I), "metal foundry"),
+    (re.compile(r"\bquarr(y|ies)\b", re.I), "quarry"),
+    (
+        re.compile(r"\b(coal|ore)\s+(mine|mining)\b|\bcoal\s+mine\b", re.I),
+        "coal mine",
+    ),
+    (re.compile(r"\babattoir\b", re.I), "abattoir"),
+    (re.compile(r"\bslaughterhouse\b", re.I), "slaughterhouse (abattoir)"),
+    (re.compile(r"\basphalt\s+plant\b", re.I), "asphalt plant"),
+    (re.compile(r"\bcement\s+plant\b", re.I), "cement plant"),
+    (re.compile(r"\brendering\s+plant\b", re.I), "rendering plant"),
+    (
+        re.compile(r"\bexplosives?\s+(manufactur|plant|facilit)\b", re.I),
+        "explosives manufacturing",
+    ),
+]
+
 
 class Severity(Enum):
     """How much the rule violation deviates from as-of-right permissions."""
 
-    INFORMATIONAL = "informational"        # not a violation, just context
-    NEEDS_VARIANCE = "needs_variance"      # minor variance (COA)
-    NEEDS_REZONING = "needs_rezoning"      # official plan amendment / rezoning (OZ)
+    INFORMATIONAL = "informational"  # not a violation, just context
+    NEEDS_VARIANCE = "needs_variance"  # minor variance (COA)
+    NEEDS_REZONING = "needs_rezoning"  # official plan amendment / rezoning (OZ)
 
 
 @dataclass
@@ -52,6 +76,7 @@ def check_compliance(
     """
     violations: list[Violation] = []
 
+    violations.extend(_check_prohibited_uses(extracted))
     violations.extend(_check_storeys(extracted, site))
     violations.extend(_check_units(extracted, site))
     violations.extend(_check_use(extracted, site))
@@ -62,9 +87,42 @@ def check_compliance(
     return violations
 
 
-def _check_storeys(
-    extracted: ProjectFeatures, site: dict[str, Any]
-) -> list[Violation]:
+def _check_prohibited_uses(extracted: ProjectFeatures) -> list[Violation]:
+    """Check description against By-law §60.20.20.10(1) absolutely prohibited uses.
+
+    These uses cannot be permitted in Toronto through rezoning — they are
+    explicitly excluded from all zones including Employment Industrial.
+    """
+    if not extracted.description:
+        return []
+    for pattern, label in _PROHIBITED:
+        if pattern.search(extracted.description):
+            return [
+                Violation(
+                    rule_id="prohibited_use",
+                    section_ref=(
+                        "By-law 569-2013 §60.20.20.10(1) "
+                        "— absolutely prohibited uses"
+                    ),
+                    observed=f"proposed use matches a prohibited type: {label}",
+                    allowed=(
+                        "this use is explicitly excluded from all zones in Toronto, "
+                        "including Employment Industrial — it cannot be permitted "
+                        "through rezoning or variance"
+                    ),
+                    severity=Severity.NEEDS_REZONING,
+                    suggested_remedy=(
+                        "This use is absolutely prohibited under By-law 569-2013 "
+                        f"§60.20.20.10(1) ({label}). No rezoning or variance can "
+                        "permit it. Consider an alternative use type or contact "
+                        "Toronto City Planning for guidance."
+                    ),
+                )
+            ]
+    return []
+
+
+def _check_storeys(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
     max_storeys = site.get("zoning_max_storeys")
     proposed = extracted.proposed_storeys
     if proposed is None or max_storeys is None:
@@ -101,9 +159,7 @@ def _check_storeys(
     ]
 
 
-def _check_units(
-    extracted: ProjectFeatures, site: dict[str, Any]
-) -> list[Violation]:
+def _check_units(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
     max_units = site.get("zoning_max_units")
     proposed = extracted.proposed_units
     if proposed is None or max_units is None:
@@ -114,9 +170,7 @@ def _check_units(
     return [
         Violation(
             rule_id="units_exceed_max",
-            section_ref=(
-                "By-law 569-2013 — zone-specific lot requirements (UNITS)"
-            ),
+            section_ref=("By-law 569-2013 — zone-specific lot requirements (UNITS)"),
             observed=f"{proposed} units proposed",
             allowed=f"max {max_units} units",
             severity=Severity.NEEDS_REZONING,
@@ -130,9 +184,7 @@ def _check_units(
     ]
 
 
-def _check_use(
-    extracted: ProjectFeatures, site: dict[str, Any]
-) -> list[Violation]:
+def _check_use(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
     proposed_use = extracted.proposed_use
     permitted_category = site.get("permitted_use_category")
     match = use_matches_zone(proposed_use, permitted_category)
@@ -189,8 +241,7 @@ def _check_heritage(site: dict[str, Any]) -> list[Violation]:
                 ),
                 observed="site is within a Heritage Conservation District",
                 allowed=(
-                    "alterations require Heritage Permit under district plan "
-                    "guidelines"
+                    "alterations require Heritage Permit under district plan guidelines"
                 ),
                 severity=Severity.INFORMATIONAL,
                 suggested_remedy=(

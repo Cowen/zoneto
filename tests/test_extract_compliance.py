@@ -8,6 +8,7 @@ from zoneto.analytics.compliance import (
     check_compliance,
 )
 from zoneto.analytics.extract import ProjectFeatures, extract_project_features
+from zoneto.analytics.use_classifier import classify_use
 
 # ---------------------------------------------------------------------------
 # extract_project_features
@@ -308,9 +309,7 @@ class TestComplianceContextualFlags:
         When: Checking compliance.
         Then: heritage_register informational violation returned."""
         extracted = ProjectFeatures(None, None, None, False)
-        violations = check_compliance(
-            extracted, self._site(in_heritage_register=1)
-        )
+        violations = check_compliance(extracted, self._site(in_heritage_register=1))
         rule_ids = [v.rule_id for v in violations]
         assert "heritage_register" in rule_ids
         hv = next(v for v in violations if v.rule_id == "heritage_register")
@@ -321,9 +320,7 @@ class TestComplianceContextualFlags:
         When: Checking compliance.
         Then: heritage_district informational violation returned."""
         extracted = ProjectFeatures(None, None, None, False)
-        violations = check_compliance(
-            extracted, self._site(in_heritage_district=1)
-        )
+        violations = check_compliance(extracted, self._site(in_heritage_district=1))
         rule_ids = [v.rule_id for v in violations]
         assert "heritage_district" in rule_ids
 
@@ -355,6 +352,13 @@ class TestComplianceContextualFlags:
         violations = check_compliance(extracted, self._site())
         assert violations == []
 
+    def test_description_preserved_in_features(self) -> None:
+        """Given: A description with meaningful content.
+        When: Extracting features.
+        Then: description field is stored on the result."""
+        result = extract_project_features("A 6-storey apartment with 40 units.")
+        assert result.description == "A 6-storey apartment with 40 units."
+
     def test_violation_dataclass_fields(self) -> None:
         """Given: A compliance check that produces a violation.
         When: Inspecting the Violation object.
@@ -385,3 +389,127 @@ class TestComplianceContextualFlags:
         assert isinstance(v.allowed, str)
         assert isinstance(v.severity, Severity)
         assert isinstance(v.suggested_remedy, str)
+
+
+# ---------------------------------------------------------------------------
+# use_classifier — heavy industrial / extractive keywords
+# ---------------------------------------------------------------------------
+
+
+class TestUseClassifierHeavyIndustrial:
+    def test_mine_classified_as_employment(self) -> None:
+        """Given: Description mentioning a coal mine.
+        When: Classifying use.
+        Then: Classified as employment."""
+        assert classify_use("A coal mine with underground extraction.") == "employment"
+
+    def test_refinery_classified_as_employment(self) -> None:
+        """Given: Description mentioning a refinery.
+        When: Classifying use.
+        Then: Classified as employment."""
+        assert classify_use("An oil refinery with processing units.") == "employment"
+
+    def test_abattoir_classified_as_employment(self) -> None:
+        """Given: Description mentioning an abattoir.
+        When: Classifying use.
+        Then: Classified as employment."""
+        assert classify_use("A meat processing abattoir.") == "employment"
+
+    def test_smelter_classified_as_employment(self) -> None:
+        """Given: Description mentioning a smelter.
+        When: Classifying use.
+        Then: Classified as employment."""
+        assert classify_use("A copper smelter and foundry.") == "employment"
+
+    def test_quarry_classified_as_employment(self) -> None:
+        """Given: Description mentioning a quarry.
+        When: Classifying use.
+        Then: Classified as employment."""
+        assert classify_use("A stone quarry and aggregate facility.") == "employment"
+
+
+# ---------------------------------------------------------------------------
+# check_compliance — absolutely prohibited uses (By-law §60.20.20.10(1))
+# ---------------------------------------------------------------------------
+
+
+class TestComplianceProhibitedUses:
+    def _employment_site(self, **kwargs: object) -> dict:
+        base: dict = {
+            "zoning_max_storeys": None,
+            "zoning_max_units": None,
+            "zoning_max_density": None,
+            "permitted_use_category": "Employment Industrial",
+            "in_heritage_register": 0,
+            "in_heritage_district": 0,
+            "in_mtsa": 0,
+            "zoning_holding": 0,
+        }
+        base.update(kwargs)
+        return base
+
+    def test_coal_mine_fires_prohibited_use(self) -> None:
+        """Given: A coal mine proposal on an employment-zoned site.
+        When: Checking compliance.
+        Then: prohibited_use violation returned even in an employment zone."""
+        features = extract_project_features(
+            "A coal mine with underground extraction shafts and processing facilities."
+        )
+        violations = check_compliance(features, self._employment_site())
+        rule_ids = [v.rule_id for v in violations]
+        assert "prohibited_use" in rule_ids
+        pv = next(v for v in violations if v.rule_id == "prohibited_use")
+        assert pv.severity == Severity.NEEDS_REZONING
+
+    def test_oil_refinery_fires_prohibited_use(self) -> None:
+        """Given: A crude petroleum oil refinery proposal.
+        When: Checking compliance.
+        Then: prohibited_use violation returned."""
+        features = extract_project_features(
+            "A crude petroleum oil refinery processing facility."
+        )
+        violations = check_compliance(features, self._employment_site())
+        rule_ids = [v.rule_id for v in violations]
+        assert "prohibited_use" in rule_ids
+
+    def test_smelter_fires_prohibited_use(self) -> None:
+        """Given: A metallic ore smelting facility.
+        When: Checking compliance.
+        Then: prohibited_use violation returned."""
+        features = extract_project_features(
+            "A copper smelter for metallic ore processing."
+        )
+        violations = check_compliance(features, self._employment_site())
+        rule_ids = [v.rule_id for v in violations]
+        assert "prohibited_use" in rule_ids
+
+    def test_abattoir_fires_prohibited_use(self) -> None:
+        """Given: An abattoir proposal on an employment site.
+        When: Checking compliance.
+        Then: prohibited_use violation returned."""
+        features = extract_project_features("A meat processing abattoir facility.")
+        violations = check_compliance(features, self._employment_site())
+        rule_ids = [v.rule_id for v in violations]
+        assert "prohibited_use" in rule_ids
+
+    def test_residential_not_prohibited(self) -> None:
+        """Given: Standard residential proposal in an employment zone.
+        When: Checking compliance.
+        Then: No prohibited_use violation (use mismatch is a separate rule)."""
+        features = extract_project_features(
+            "A 6-storey residential building with 40 units."
+        )
+        violations = check_compliance(features, self._employment_site())
+        rule_ids = [v.rule_id for v in violations]
+        assert "prohibited_use" not in rule_ids
+
+    def test_warehouse_not_prohibited(self) -> None:
+        """Given: Standard warehouse proposal in an employment zone.
+        When: Checking compliance.
+        Then: No prohibited_use violation (warehouse is a permitted employment use)."""
+        features = extract_project_features(
+            "A logistics warehouse distribution centre."
+        )
+        violations = check_compliance(features, self._employment_site())
+        rule_ids = [v.rule_id for v in violations]
+        assert "prohibited_use" not in rule_ids
