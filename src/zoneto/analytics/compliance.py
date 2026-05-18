@@ -78,6 +78,7 @@ def check_compliance(
 
     violations.extend(_check_prohibited_uses(extracted))
     violations.extend(_check_storeys(extracted, site))
+    violations.extend(_check_height_m(extracted, site))
     violations.extend(_check_units(extracted, site))
     violations.extend(_check_unit_limit_advisory(extracted, site))
     violations.extend(_check_use(extracted, site))
@@ -153,6 +154,44 @@ def _check_storeys(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Vio
             section_ref="By-law 569-2013 — zone-specific building height requirements",
             observed=f"{proposed} storeys proposed",
             allowed=f"max {max_storeys} storeys",
+            severity=severity,
+            suggested_remedy=remedy,
+        )
+    ]
+
+
+def _check_height_m(
+    extracted: ProjectFeatures, site: dict[str, Any]
+) -> list[Violation]:
+    max_height = site.get("zoning_max_height_m")
+    proposed = extracted.proposed_height_m
+    if proposed is None or max_height is None:
+        return []
+    if proposed <= max_height:
+        return []
+
+    excess_pct = (proposed - max_height) / max_height
+    if excess_pct <= 0.10:
+        severity = Severity.NEEDS_VARIANCE
+        remedy = (
+            f"Reduce to {max_height}m to be as-of-right, or apply to the "
+            "Committee of Adjustment for a minor variance (up to 10% deviation "
+            "is typically considered minor)."
+        )
+    else:
+        severity = Severity.NEEDS_REZONING
+        remedy = (
+            f"Reduce to {max_height}m to be as-of-right, or file an Official "
+            "Plan Amendment / Rezoning (OZ) application to increase the permitted "
+            "height. Comparable OZ approvals nearby can inform feasibility."
+        )
+
+    return [
+        Violation(
+            rule_id="height_exceeds_max",
+            section_ref="By-law 569-2013 — zone-specific height overlay (HT_HEIGHT)",
+            observed=f"{proposed}m proposed",
+            allowed=f"max {max_height}m",
             severity=severity,
             suggested_remedy=remedy,
         )

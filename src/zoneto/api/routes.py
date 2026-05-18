@@ -83,6 +83,8 @@ class SiteContextResult(BaseModel):
     zoning_class: str | None = None
     zoning_max_units: int | None = None
     zoning_max_density: float | None = None
+    zoning_max_storeys: int | None = None
+    zoning_max_height_m: float | None = None
     permitted_use_category: str | None = None
     zoning_min_frontage_m: float | None = None
     zoning_min_lot_area_sqm: float | None = None

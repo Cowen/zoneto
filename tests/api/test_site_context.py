@@ -378,6 +378,86 @@ def test_site_context_outside_city(client_with_ref: TestClient) -> None:
     assert body["zoning_class"] is None
 
 
+def test_lookup_outside_all_polygons_includes_height_defaults(
+    ref_dir: Path,
+) -> None:
+    """Point outside all polygons returns None for height overlay fields."""
+    result = lookup_site_context(44.0, -80.0, ref_dir)
+    assert result["zoning_max_storeys"] is None
+    assert result["zoning_max_height_m"] is None
+
+
+def _write_height_geojson(ref: Path, properties: dict) -> None:
+    """Write ref/zoning_height.geojson with a single polygon carrying given properties.
+
+    The polygon covers (-79.39,-79.37) × (43.64,43.66), containing (43.65, -79.38).
+    """
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": properties,
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [-79.39, 43.64],
+                            [-79.37, 43.64],
+                            [-79.37, 43.66],
+                            [-79.39, 43.66],
+                            [-79.39, 43.64],
+                        ]
+                    ],
+                },
+            }
+        ],
+    }
+    (ref / "zoning_height.geojson").write_text(json.dumps(geojson))
+
+
+def test_lookup_returns_height_overlay_storeys(ref_dir: Path) -> None:
+    """Given: zoning_height.geojson has HT_STORIES=6.
+    When: Lookup at a point inside the polygon.
+    Then: zoning_max_storeys=6 is returned."""
+    _write_height_geojson(ref_dir, {"HT_STORIES": 6, "HT_HEIGHT": 18.5})
+    result = lookup_site_context(43.65, -79.38, ref_dir)
+    assert result["zoning_max_storeys"] == 6
+
+
+def test_lookup_returns_height_overlay_height_m(ref_dir: Path) -> None:
+    """Given: zoning_height.geojson has HT_HEIGHT=18.5.
+    When: Lookup at a point inside the polygon.
+    Then: zoning_max_height_m=18.5 is returned."""
+    _write_height_geojson(ref_dir, {"HT_STORIES": 6, "HT_HEIGHT": 18.5})
+    result = lookup_site_context(43.65, -79.38, ref_dir)
+    assert result["zoning_max_height_m"] == pytest.approx(18.5)
+
+
+@pytest.mark.parametrize("sentinel", [-1, 0])
+def test_lookup_height_overlay_sentinel_becomes_none(
+    ref_dir: Path, sentinel: float
+) -> None:
+    """Given: HT_STORIES and HT_HEIGHT are -1 or 0 (by-law 'no limit' sentinels).
+    When: Lookup.
+    Then: Both fields are None."""
+    _write_height_geojson(ref_dir, {"HT_STORIES": sentinel, "HT_HEIGHT": sentinel})
+    result = lookup_site_context(43.65, -79.38, ref_dir)
+    assert result["zoning_max_storeys"] is None
+    assert result["zoning_max_height_m"] is None
+
+
+def test_lookup_no_height_overlay_returns_none_defaults(tmp_path: Path) -> None:
+    """Given: No zoning_height.geojson in ref_dir.
+    When: Lookup.
+    Then: zoning_max_storeys and zoning_max_height_m default to None without error."""
+    ref = tmp_path / "reference"
+    ref.mkdir()
+    result = lookup_site_context(43.65, -79.38, ref)
+    assert result["zoning_max_storeys"] is None
+    assert result["zoning_max_height_m"] is None
+
+
 def test_site_context_endpoint_exposes_new_zoning_keys(
     client_with_ref: TestClient,
 ) -> None:
@@ -397,5 +477,7 @@ def test_site_context_endpoint_exposes_new_zoning_keys(
         "zoning_pct_res",
         "zoning_pct_comm",
         "zoning_pct_emp",
+        "zoning_max_storeys",
+        "zoning_max_height_m",
     ):
         assert key in body, f"Missing key {key} in /site-context response"

@@ -50,6 +50,8 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
         "zoning_class": None,
         "zoning_max_units": None,
         "zoning_max_density": None,
+        "zoning_max_storeys": None,
+        "zoning_max_height_m": None,
         "permitted_use_category": None,
         "zoning_min_frontage_m": None,
         "zoning_min_lot_area_sqm": None,
@@ -204,6 +206,30 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
         """).fetchall()
         if rows:
             result["in_mtsa"] = 1
+
+    # Zoning height overlay (HT_STORIES + HT_HEIGHT)
+    height_path = ref_dir / "zoning_height.geojson"
+    if height_path.exists():
+        escaped = str(height_path).replace("'", "''")
+        desc = con.execute(
+            f"DESCRIBE SELECT * FROM ST_Read('{escaped}')"
+        ).fetchall()
+        available_h = {str(r[0]).upper() for r in desc}
+        ht_stories_col = "h.HT_STORIES" if "HT_STORIES" in available_h else "NULL"
+        ht_height_col = "h.HT_HEIGHT" if "HT_HEIGHT" in available_h else "NULL"
+        rows = con.execute(f"""
+            SELECT {ht_stories_col}, {ht_height_col}
+            FROM ST_Read('{escaped}') h
+            WHERE ST_Within({point_sql}, h.geom)
+            LIMIT 1
+        """).fetchall()
+        if rows:
+            stories_val = _positive_or_none(rows[0][0])
+            if stories_val is not None:
+                result["zoning_max_storeys"] = int(stories_val)
+            height_val = _positive_or_none(rows[0][1])
+            if height_val is not None:
+                result["zoning_max_height_m"] = height_val
 
     con.close()
     return result

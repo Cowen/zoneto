@@ -96,6 +96,8 @@ def _format_site(site: dict[str, Any]) -> str:
     limits = []
     if site.get("zoning_max_storeys"):
         limits.append(f"max {site['zoning_max_storeys']} storeys")
+    if site.get("zoning_max_height_m"):
+        limits.append(f"max {site['zoning_max_height_m']}m height")
     if site.get("zoning_max_units"):
         limits.append(f"max {site['zoning_max_units']} units")
     if site.get("zoning_max_density"):

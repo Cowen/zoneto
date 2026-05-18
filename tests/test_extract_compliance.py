@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from zoneto.analytics.compliance import (
     Severity,
     Violation,
@@ -612,3 +614,120 @@ class TestComplianceProhibitedUses:
         violations = check_compliance(features, self._employment_site())
         rule_ids = [v.rule_id for v in violations]
         assert "prohibited_use" not in rule_ids
+
+
+# ---------------------------------------------------------------------------
+# proposed_height_m extraction
+# ---------------------------------------------------------------------------
+
+
+class TestExtractHeightM:
+    def test_extracts_metres_spelling(self) -> None:
+        """Given: Description with 'metres'.
+        When: Extracting features.
+        Then: proposed_height_m is populated."""
+        result = extract_project_features("A building 15 metres tall.")
+        assert result.proposed_height_m == pytest.approx(15.0)
+
+    def test_extracts_meter_spelling(self) -> None:
+        """Given: Description with 'meter' (American spelling).
+        When: Extracting features.
+        Then: proposed_height_m is populated."""
+        result = extract_project_features("A 12.5 meter structure.")
+        assert result.proposed_height_m == pytest.approx(12.5)
+
+    def test_extracts_abbreviated_m(self) -> None:
+        """Given: Description with 'm' abbreviation.
+        When: Extracting features.
+        Then: proposed_height_m is populated."""
+        result = extract_project_features("A 20m residential tower.")
+        assert result.proposed_height_m == pytest.approx(20.0)
+
+    def test_returns_none_when_absent(self) -> None:
+        """Given: Description with no height in metres.
+        When: Extracting features.
+        Then: proposed_height_m is None."""
+        result = extract_project_features("A 12-storey residential building.")
+        assert result.proposed_height_m is None
+
+    def test_returns_none_for_empty_description(self) -> None:
+        """Given: Empty description.
+        When: Extracting features.
+        Then: proposed_height_m is None."""
+        result = extract_project_features("")
+        assert result.proposed_height_m is None
+
+
+# ---------------------------------------------------------------------------
+# _check_height_m compliance rule
+# ---------------------------------------------------------------------------
+
+
+class TestComplianceHeightM:
+    def _site(
+        self, zoning_max_height_m: float | None = None
+    ) -> dict:
+        return {
+            "zoning_class": "RM",
+            "zoning_max_units": None,
+            "zoning_max_storeys": None,
+            "zoning_max_height_m": zoning_max_height_m,
+            "zoning_max_density": None,
+            "permitted_use_category": "Residential",
+            "in_heritage_register": 0,
+            "in_heritage_district": 0,
+            "in_mtsa": 0,
+            "in_secondary_plan": 0,
+            "zoning_holding": 0,
+        }
+
+    def _features(self, height_m: float | None) -> ProjectFeatures:
+        return ProjectFeatures(
+            proposed_storeys=None,
+            proposed_units=None,
+            proposed_use="residential",
+            has_ground_floor_retail=False,
+            proposed_height_m=height_m,
+        )
+
+    def test_no_violation_when_within_limit(self) -> None:
+        """Given: Proposed height within zone maximum.
+        When: Checking compliance.
+        Then: No height_exceeds_max violation."""
+        violations = check_compliance(self._features(10.0), self._site(12.0))
+        rule_ids = [v.rule_id for v in violations]
+        assert "height_exceeds_max" not in rule_ids
+
+    def test_needs_variance_for_small_excess(self) -> None:
+        """Given: Proposed height slightly over limit (≤10% excess).
+        When: Checking compliance.
+        Then: height_exceeds_max violation with NEEDS_VARIANCE severity."""
+        violations = check_compliance(self._features(13.0), self._site(12.0))
+        height_vs = [v for v in violations if v.rule_id == "height_exceeds_max"]
+        assert len(height_vs) == 1
+        assert height_vs[0].severity == Severity.NEEDS_VARIANCE
+
+    def test_needs_rezoning_for_large_excess(self) -> None:
+        """Given: Proposed height far over limit (>10% excess).
+        When: Checking compliance.
+        Then: height_exceeds_max violation with NEEDS_REZONING severity."""
+        violations = check_compliance(self._features(20.0), self._site(12.0))
+        height_vs = [v for v in violations if v.rule_id == "height_exceeds_max"]
+        assert len(height_vs) == 1
+        assert height_vs[0].severity == Severity.NEEDS_REZONING
+
+    def test_no_violation_when_height_unknown(self) -> None:
+        """Given: No proposed height extracted.
+        When: Checking compliance.
+        Then: No height violation."""
+        violations = check_compliance(self._features(None), self._site(12.0))
+        rule_ids = [v.rule_id for v in violations]
+        assert "height_exceeds_max" not in rule_ids
+
+    def test_no_violation_when_max_unknown(self) -> None:
+        """Given: No zone height limit available.
+        When: Checking compliance.
+        Then: No height violation (cannot determine exceedance)."""
+        violations = check_compliance(self._features(20.0), self._site(None))
+        rule_ids = [v.rule_id for v in violations]
+        assert "height_exceeds_max" not in rule_ids

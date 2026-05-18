@@ -18,10 +18,12 @@ class ProjectFeatures:
     proposed_use: str | None
     has_ground_floor_retail: bool
     description: str | None = None
+    proposed_height_m: float | None = None
 
 
 _STOREY_RE = re.compile(r"(?i)(\d+)\s*-?\s*store?ys?")
 _UNIT_RE = re.compile(r"(?i)(\d+)\s+(?:dwelling\s+)?units?")
+_HEIGHT_M_RE = re.compile(r"(?i)(\d+(?:\.\d+)?)\s*-?\s*(?:metres?|meters?|m)\b")
 _RETAIL_PHRASES = (
     "ground floor retail",
     "ground-floor retail",
@@ -62,6 +64,11 @@ def extract_project_features(description: str | None) -> ProjectFeatures:
     if unit_match:
         units = int(unit_match.group(1))
 
+    height_m: float | None = None
+    height_match = _HEIGHT_M_RE.search(description)
+    if height_match:
+        height_m = float(height_match.group(1))
+
     proposed_use = classify_use(description)
 
     lower = description.lower()
@@ -73,4 +80,5 @@ def extract_project_features(description: str | None) -> ProjectFeatures:
         proposed_use=proposed_use,
         has_ground_floor_retail=has_retail,
         description=description,
+        proposed_height_m=height_m,
     )
