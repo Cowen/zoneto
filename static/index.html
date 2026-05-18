@@ -192,6 +192,79 @@
     .map-legend-dot {
       width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
     }
+
+    /* Evaluate panel */
+    #evaluate-card h2 { font-size: 1rem; font-weight: 700; margin-bottom: 0.4rem; }
+    .eval-grid {
+      display: grid; grid-template-columns: 1fr 2fr; gap: 1rem; margin-bottom: 1rem;
+    }
+    @media (max-width: 640px) { .eval-grid { grid-template-columns: 1fr; } }
+    textarea {
+      width: 100%; padding: 0.5rem 0.75rem;
+      border: 1px solid #ced4da; border-radius: 4px;
+      font-size: 0.9rem; resize: vertical; font-family: inherit;
+    }
+    textarea:focus { outline: 2px solid #0d6efd; outline-offset: 1px; }
+    #eval-status { font-size: 0.85rem; color: #6c757d; margin-top: 0.5rem; min-height: 1.2rem; }
+
+    .severity-badge {
+      display: inline-block; padding: 0.15rem 0.45rem;
+      border-radius: 3px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    }
+    .severity-informational { background: #cfe2ff; color: #084298; }
+    .severity-needs_variance { background: #fff3cd; color: #664d03; }
+    .severity-needs_rezoning { background: #f8d7da; color: #842029; }
+    .violation-item {
+      padding: 0.6rem 0.75rem; margin-bottom: 0.4rem;
+      border-radius: 4px; border: 1px solid #dee2e6; font-size: 0.85rem;
+    }
+    .violation-item-informational { border-left: 4px solid #0d6efd; }
+    .violation-item-needs_variance { border-left: 4px solid #fd7e14; }
+    .violation-item-needs_rezoning { border-left: 4px solid #dc3545; }
+
+    .eval-summary {
+      margin: 0.75rem 0; padding: 0.75rem 1rem;
+      background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;
+      font-size: 0.88rem; line-height: 1.6;
+    }
+    .suggestions-list {
+      margin: 0.75rem 0; padding: 0.6rem 1rem;
+      background: #d1e7dd; border-radius: 6px; border: 1px solid #a3cfbb;
+      font-size: 0.85rem;
+    }
+    .suggestions-list ul { margin: 0.25rem 0 0 1.2rem; }
+
+    details.section-item {
+      border: 1px solid #dee2e6; border-radius: 4px;
+      margin-bottom: 0.3rem; font-size: 0.82rem;
+    }
+    details.section-item summary {
+      padding: 0.45rem 0.75rem; cursor: pointer; user-select: none;
+      display: flex; justify-content: space-between; align-items: center;
+      list-style: none; gap: 0.75rem;
+    }
+    details.section-item summary::-webkit-details-marker { display: none; }
+    details.section-item[open] summary { border-bottom: 1px solid #dee2e6; font-weight: 600; }
+    details.section-item .section-body {
+      padding: 0.6rem 0.75rem; color: #495057; line-height: 1.5; white-space: pre-wrap;
+    }
+
+    /* Q&A chat */
+    .qa-container { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e9ecef; }
+    .qa-container h4 { font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .qa-messages { max-height: 300px; overflow-y: auto; margin-bottom: 0.5rem; }
+    .qa-msg { padding: 0.45rem 0.75rem; margin-bottom: 0.35rem; border-radius: 6px; font-size: 0.85rem; line-height: 1.5; }
+    .qa-msg-user { background: #e7f1ff; color: #084298; text-align: right; }
+    .qa-msg-assistant { background: #f8f9fa; color: #212529; }
+    .qa-form { display: flex; gap: 0.5rem; }
+    .qa-form input { flex: 1; }
+    .qa-form button {
+      background: #495057; color: #fff; border: none; border-radius: 4px;
+      padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+    }
+    .qa-form button:hover { background: #343a40; }
+    .qa-form button:disabled { background: #adb5bd; cursor: not-allowed; }
   </style>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -199,6 +272,36 @@
 <body>
   <h1>Zoneto</h1>
   <p class="tagline">Toronto development application intelligence</p>
+
+  <div class="card" id="evaluate-card">
+    <h2>Evaluate a development proposal</h2>
+    <p style="font-size:0.85rem;color:#6c757d;margin-bottom:0.75rem">
+      Check your proposal against By-law 569-2013. The rule engine flags violations deterministically — the AI explains them and answers follow-up questions.
+    </p>
+    <form id="evaluate-form">
+      <div class="eval-grid">
+        <div>
+          <label for="eval-address">Address</label>
+          <input type="text" id="eval-address" placeholder="e.g. 441 King St W, Toronto" />
+        </div>
+        <div>
+          <label for="eval-description">Project description</label>
+          <textarea id="eval-description" rows="2" placeholder="e.g. A 14-storey mixed-use building with 180 residential units and ground-floor retail."></textarea>
+        </div>
+      </div>
+      <button type="submit" id="eval-btn">Evaluate proposal</button>
+      <div id="eval-status"></div>
+    </form>
+    <div id="eval-results" style="display:none;margin-top:1.25rem">
+      <div id="eval-site-context"></div>
+      <div id="eval-extracted"></div>
+      <div id="eval-violations"></div>
+      <div id="eval-summary"></div>
+      <div id="eval-suggestions"></div>
+      <div id="eval-sections"></div>
+      <div id="eval-qa"></div>
+    </div>
+  </div>
 
   <div class="card">
     <form id="query-form">
@@ -828,7 +931,7 @@
       return scenario.proposed_use_category ?? null;
     }
 
-    function renderSiteContext(ctx) {
+    function renderSiteContext(ctx, targetEl) {
       const flag = (label, value, warnIfOn, { tooltip, href } = {}) => {
         const on = value === 1 || value === true;
         const cls = on ? (warnIfOn ? 'ctx-flag-warn' : 'ctx-flag-on') : 'ctx-flag-off';
@@ -947,7 +1050,7 @@
         const tip = "Share of OZ and SA applications in this ward appealed to the Ontario Land Tribunal in the three years before this application was filed. Excludes future data to avoid leakage.";
         html += `<span class="ctx-flag ${cls}" data-tooltip="${escHtml(tip)}">Ward appeal rate (3yr): ${rate}%</span>`;
       }
-      siteContextEl.innerHTML = html ? `<div class="site-context">${html}</div>` : '';
+      (targetEl || siteContextEl).innerHTML = html ? `<div class="site-context">${html}</div>` : '';
     }
 
     function renderBaseRate(applications) {
@@ -1386,6 +1489,221 @@
           <tbody>${rows}</tbody>
         </table>`;
     }
+    // --- Evaluate panel ---
+
+    let _evalAddress = '';
+    let _evalDescription = '';
+    let _evalHistory = [];
+
+    const evaluateForm = document.getElementById('evaluate-form');
+    const evalStatusEl = document.getElementById('eval-status');
+    const evalResultsEl = document.getElementById('eval-results');
+    const torontoRe = /\b(toronto|north york|east york|scarborough|etobicoke|york)\b/i;
+
+    evaluateForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('eval-btn');
+      btn.disabled = true;
+      evalStatusEl.textContent = 'Evaluating…';
+      evalResultsEl.style.display = 'none';
+      _evalHistory = [];
+
+      try {
+        _evalAddress = document.getElementById('eval-address').value.trim();
+        _evalDescription = document.getElementById('eval-description').value.trim();
+        if (!_evalAddress)     throw new Error('Please enter an address.');
+        if (!_evalDescription) throw new Error('Please enter a project description.');
+
+        const addr = torontoRe.test(_evalAddress) ? _evalAddress : `${_evalAddress}, Toronto, Ontario`;
+        const res = await fetch('/evaluate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: addr, description: _evalDescription }),
+        });
+        if (res.status === 503) {
+          throw new Error('LLM service not available — ANTHROPIC_API_KEY not set on the server.');
+        }
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || res.statusText);
+        }
+
+        const data = await res.json();
+        const n = data.violations.length;
+        evalStatusEl.textContent = n === 0 ? 'No violations detected.'
+          : n === 1 ? '1 violation detected.' : `${n} violations detected.`;
+
+        renderSiteContext(data.site_context, document.getElementById('eval-site-context'));
+        renderExtracted(data.extracted);
+        renderViolations(data.violations);
+        renderEvalSummary(data.summary_md);
+        renderSuggestions(data.suggestions);
+        renderRelevantSections(data.relevant_sections);
+        renderQA();
+        evalResultsEl.style.display = 'block';
+      } catch (err) {
+        evalStatusEl.textContent = 'Error: ' + err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    const SEV_LABEL = {
+      informational:   'Informational',
+      needs_variance:  'Minor Variance',
+      needs_rezoning:  'Rezoning Required',
+    };
+
+    function renderExtracted(extracted) {
+      const el = document.getElementById('eval-extracted');
+      const parts = [];
+      if (extracted.proposed_storeys != null) parts.push(`${extracted.proposed_storeys} storeys`);
+      if (extracted.proposed_units   != null) parts.push(`${extracted.proposed_units} units`);
+      if (extracted.proposed_use)             parts.push(extracted.proposed_use.replace(/_/g, ' '));
+      if (extracted.has_ground_floor_retail)  parts.push('ground-floor retail');
+      el.innerHTML = parts.length
+        ? `<div style="margin-bottom:0.6rem;font-size:0.8rem;color:#6c757d">Extracted: ${escHtml(parts.join(' · '))}</div>`
+        : '';
+    }
+
+    function renderViolations(violations) {
+      const el = document.getElementById('eval-violations');
+      if (!violations.length) {
+        el.innerHTML = '<div style="margin-bottom:0.75rem;padding:0.6rem 0.75rem;background:#d1e7dd;border-radius:4px;font-size:0.85rem;color:#0a3622">No zoning violations detected from available structured data.</div>';
+        return;
+      }
+      const items = violations.map(v => `
+        <div class="violation-item violation-item-${escHtml(v.severity)}">
+          <div style="display:flex;align-items:baseline;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.2rem">
+            <span class="severity-badge severity-${escHtml(v.severity)}">${escHtml(SEV_LABEL[v.severity] ?? v.severity)}</span>
+            <span style="font-weight:600">${escHtml(v.rule_id.replace(/_/g, ' '))}</span>
+          </div>
+          <div>Observed: <strong>${escHtml(v.observed)}</strong> — Allowed: ${escHtml(v.allowed)}</div>
+          <div style="color:#6c757d;font-size:0.78rem;margin-top:0.15rem">${escHtml(v.section_ref)}</div>
+          ${v.suggested_remedy ? `<div style="margin-top:0.25rem;font-size:0.82rem;color:#0a3622">&#8594; ${escHtml(v.suggested_remedy)}</div>` : ''}
+        </div>`).join('');
+      el.innerHTML = `<div style="margin-bottom:0.75rem">
+        <div style="font-size:0.78rem;font-weight:700;color:#495057;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.4rem">Violations</div>
+        ${items}</div>`;
+    }
+
+    function renderEvalSummary(md) {
+      const el = document.getElementById('eval-summary');
+      if (!md) { el.innerHTML = ''; return; }
+      el.innerHTML = `<div class="eval-summary">${mdToHtml(escHtml(md))}</div>`;
+    }
+
+    function renderSuggestions(suggestions) {
+      const el = document.getElementById('eval-suggestions');
+      if (!suggestions.length) { el.innerHTML = ''; return; }
+      const items = suggestions.map(s => `<li>${escHtml(s)}</li>`).join('');
+      el.innerHTML = `<div class="suggestions-list">
+        <div style="font-size:0.78rem;font-weight:700;margin-bottom:0.3rem">Suggested path forward</div>
+        <ul>${items}</ul></div>`;
+    }
+
+    function renderRelevantSections(sections) {
+      const el = document.getElementById('eval-sections');
+      if (!sections.length) { el.innerHTML = ''; return; }
+      const items = sections.map(s => `
+        <details class="section-item">
+          <summary>
+            <span>&#167;${escHtml(s.section_number)} ${escHtml(s.section_title)}</span>
+            <span style="font-size:0.72rem;color:#adb5bd;white-space:nowrap">score ${s.score.toFixed(2)} &#183; ${escHtml(s.source_file)}</span>
+          </summary>
+          <div class="section-body">${escHtml(s.excerpt)}</div>
+        </details>`).join('');
+      el.innerHTML = `<div style="margin-top:0.75rem">
+        <div style="font-size:0.78rem;font-weight:700;color:#495057;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.4rem">Relevant By-law 569-2013 sections</div>
+        ${items}</div>`;
+    }
+
+    function renderQA() {
+      const el = document.getElementById('eval-qa');
+      el.innerHTML = `
+        <div class="qa-container">
+          <h4>Ask a follow-up question</h4>
+          <div id="qa-messages" class="qa-messages"></div>
+          <form id="qa-form" class="qa-form">
+            <input type="text" id="qa-input" placeholder="e.g. What changes would let me build as-of-right?" autocomplete="off" />
+            <button type="submit" id="qa-btn">Ask</button>
+          </form>
+        </div>`;
+
+      document.getElementById('qa-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const qInput = document.getElementById('qa-input');
+        const qBtn   = document.getElementById('qa-btn');
+        const msgsEl = document.getElementById('qa-messages');
+        const question = qInput.value.trim();
+        if (!question) return;
+
+        qInput.value = '';
+        qBtn.disabled = true;
+
+        const userEl = document.createElement('div');
+        userEl.className = 'qa-msg qa-msg-user';
+        userEl.textContent = question;
+        msgsEl.appendChild(userEl);
+
+        const thinkEl = document.createElement('div');
+        thinkEl.className = 'qa-msg qa-msg-assistant';
+        thinkEl.textContent = '…';
+        msgsEl.appendChild(thinkEl);
+        msgsEl.scrollTop = msgsEl.scrollHeight;
+
+        try {
+          const addr = torontoRe.test(_evalAddress) ? _evalAddress : `${_evalAddress}, Toronto, Ontario`;
+          const res = await fetch('/ask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address: addr, description: _evalDescription, question, history: _evalHistory }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            throw new Error(err.detail || res.statusText);
+          }
+          const data = await res.json();
+          thinkEl.textContent = data.answer ?? '';
+          _evalHistory.push({ role: 'user', content: question });
+          _evalHistory.push({ role: 'assistant', content: data.answer ?? '' });
+        } catch (err) {
+          thinkEl.textContent = 'Error: ' + err.message;
+        } finally {
+          qBtn.disabled = false;
+          msgsEl.scrollTop = msgsEl.scrollHeight;
+        }
+      });
+    }
+
+    function mdToHtml(escaped) {
+      const lines = escaped.split('\n');
+      let html = '';
+      let inList = false;
+      for (const line of lines) {
+        const li = line.match(/^[•\-\*] (.+)$/);
+        if (li) {
+          if (!inList) { html += '<ul style="margin:0.25rem 0 0.25rem 1.2rem">'; inList = true; }
+          html += `<li>${li[1].replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</li>`;
+        } else {
+          if (inList) { html += '</ul>'; inList = false; }
+          const h2 = line.match(/^## (.+)$/);
+          const h3 = line.match(/^### (.+)$/);
+          if (h2) {
+            html += `<div style="font-weight:700;margin-top:0.5rem">${h2[1]}</div>`;
+          } else if (h3) {
+            html += `<div style="font-weight:600;margin-top:0.35rem">${h3[1]}</div>`;
+          } else if (line.trim()) {
+            html += line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '<br>';
+          } else {
+            html += '<br>';
+          }
+        }
+      }
+      if (inList) html += '</ul>';
+      return html;
+    }
+
     // Restore search from URL on page load
     (function () {
       const p = new URLSearchParams(window.location.search);
