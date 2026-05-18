@@ -779,15 +779,22 @@
       const uc = zoneCode.toUpperCase();
       // Extract zone prefix (longest match first to handle RAC before RA, etc)
       let section = null;
+      let zonePrefix = null;
       for (const [prefix, sec] of Object.entries(ZONE_TO_CHAPTER_SECTION)) {
         if (uc.startsWith(prefix)) {
           section = sec;
+          zonePrefix = prefix;
           break;
         }
       }
       if (section === null) return null;
-      // Link to zone-specific chapter; no anchor since not all exceptions are published online
-      return `${_BYLAW_BASE}ZBL_NewProvision_Chapter900_${section}.htm`;
+      const base = `${_BYLAW_BASE}ZBL_NewProvision_Chapter900_${section}.htm`;
+      // Use text fragment to highlight the specific exception
+      if (exceptionNo && zonePrefix) {
+        const textToFind = `Exception ${zonePrefix} ${exceptionNo}`;
+        return `${base}#:~:text=${encodeURIComponent(textToFind)}`;
+      }
+      return base;
     }
 
     // Mirror of analytics/use_classifier._ZONE_ALLOWED. Keep in sync.
