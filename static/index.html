@@ -281,24 +281,36 @@
   <div class="card" id="evaluate-card">
     <h2>Evaluate a development proposal</h2>
     <p style="font-size:0.85rem;color:#6c757d;margin-bottom:0.75rem">
-      Check your proposal against By-law 569-2013. The rule engine flags violations deterministically — the AI explains them and answers follow-up questions.
+      Look up a site to see its zoning context and comparable applications, then describe a proposal to check it against By-law 569-2013.
     </p>
-    <form id="evaluate-form">
-      <div class="eval-grid">
-        <div>
-          <label for="eval-address">Address</label>
-          <input type="text" id="eval-address" placeholder="e.g. 441 King St W, Toronto" />
-        </div>
-        <div>
-          <label for="eval-description">Project description</label>
-          <textarea id="eval-description" rows="2" placeholder="e.g. A 14-storey mixed-use building with 180 residential units and ground-floor retail."></textarea>
+
+    <!-- Phase 1: address lookup -->
+    <div style="display:grid;grid-template-columns:1fr auto;gap:0.75rem;align-items:flex-end">
+      <div>
+        <label for="eval-address">Address</label>
+        <input type="text" id="eval-address" placeholder="e.g. 441 King St W, Toronto" />
+      </div>
+      <button type="button" id="eval-lookup-btn">Look up site</button>
+    </div>
+    <div id="eval-lookup-status"></div>
+
+    <!-- Phase 2: context, comps, proposal form (shown after lookup) -->
+    <div id="eval-site-panel" style="display:none;margin-top:1.25rem">
+      <div id="eval-site-context"></div>
+      <div id="results"></div>
+
+      <div style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid #e9ecef">
+        <label for="eval-description">Describe your proposal</label>
+        <textarea id="eval-description" rows="3" placeholder="e.g. A 14-storey mixed-use building with 180 residential units and ground-floor retail."></textarea>
+        <div style="display:flex;gap:0.75rem;align-items:center;margin-top:0.5rem">
+          <button type="button" id="eval-btn">Evaluate proposal</button>
+          <div id="eval-status"></div>
         </div>
       </div>
-      <button type="submit" id="eval-btn">Evaluate proposal</button>
-      <div id="eval-status"></div>
-    </form>
-    <div id="eval-results" style="display:none;margin-top:1.25rem">
-      <div id="eval-site-context"></div>
+    </div>
+
+    <!-- Phase 3: evaluation results (shown after evaluation) -->
+    <div id="eval-results" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid #e9ecef">
       <div id="eval-extracted"></div>
       <div id="eval-violations"></div>
       <div id="eval-summary"></div>
@@ -306,36 +318,6 @@
       <div id="eval-sections"></div>
       <div id="eval-qa"></div>
     </div>
-  </div>
-
-  <div class="card">
-    <form id="query-form">
-      <div class="form-grid">
-        <div>
-          <label for="type">Application Type</label>
-          <select id="type" name="type">
-            <option value="">Any</option>
-            <option value="OZ">OZ — Official Plan / Zoning</option>
-            <option value="SA">SA — Site Plan Approval</option>
-            <option value="OPA">OPA — Official Plan Amendment</option>
-          </select>
-        </div>
-        <div>
-          <label for="address">Address</label>
-          <input type="text" id="address" name="address" placeholder="e.g. 441 King St W, Toronto" />
-        </div>
-        <div>
-          <label for="radius">Radius (m)</label>
-          <input type="number" id="radius" name="radius" value="500" min="50" max="5000" />
-        </div>
-        <div>
-          <label for="years">Years back</label>
-          <input type="number" id="years" name="years" value="5" min="1" max="20" />
-        </div>
-      </div>
-      <button type="submit">Find Comparable Applications</button>
-      <div id="status"></div>
-    </form>
   </div>
 
   <div class="card" id="secondary-signals-card">
@@ -370,14 +352,7 @@
     </details>
   </div>
 
-  <div class="card" id="results-card" style="display:none">
-    <div id="results"></div>
-  </div>
-
   <script>
-    const form = document.getElementById('query-form');
-    const statusEl = document.getElementById('status');
-    const resultsCard = document.getElementById('results-card');
     const resultsEl = document.getElementById('results');
     const scoreSection = document.getElementById('score-section');
     const predictionsEl = document.getElementById('predictions');
@@ -451,74 +426,59 @@
       });
     }
 
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const btn = form.querySelector('button[type="submit"]');
-      btn.disabled = true;
-      resultsCard.style.display = 'none';
+    const torontoRe = /\b(toronto|north york|east york|scarborough|etobicoke|york)\b/i;
+    const evalLookupBtn = document.getElementById('eval-lookup-btn');
+    const evalLookupStatusEl = document.getElementById('eval-lookup-status');
+    const evalSitePanelEl = document.getElementById('eval-site-panel');
+
+    evalLookupBtn.addEventListener('click', async () => {
+      const rawAddress = document.getElementById('eval-address').value.trim();
+      if (!rawAddress) { evalLookupStatusEl.textContent = 'Please enter an address.'; return; }
+
+      evalLookupBtn.disabled = true;
+      evalSitePanelEl.style.display = 'none';
       secondarySignalsCard.style.display = 'none';
       secondarySignalsDetails.removeAttribute('open');
+      document.getElementById('eval-results').style.display = 'none';
+      evalLookupStatusEl.textContent = 'Looking up site…';
 
       try {
-        const rawAddress = document.getElementById('address').value.trim();
-        const torontoRe = /\b(toronto|north york|east york|scarborough|etobicoke|york)\b/i;
         const address = torontoRe.test(rawAddress) ? rawAddress : `${rawAddress}, Toronto, Ontario`;
-        const type = document.getElementById('type').value;
-        const radius = document.getElementById('radius').value;
-        const years = document.getElementById('years').value;
-
-        if (!address) {
-          throw new Error('Please enter an address.');
-        }
-
-        // Geocode address via backend proxy
-        statusEl.textContent = 'Geocoding address…';
         const geoRes = await fetch('/geocode?' + new URLSearchParams({ address }));
         if (!geoRes.ok) {
           const err = await geoRes.json().catch(() => ({ detail: geoRes.statusText }));
-          throw new Error('Geocoding failed — ' + (err.detail || geoRes.statusText) + '. Try again.');
+          throw new Error('Geocoding failed: ' + (err.detail || geoRes.statusText));
         }
         const geo = await geoRes.json();
-        const lat = geo.lat;
-        const lon = geo.lon;
-        statusEl.textContent = `Geocoded: ${geo.display_name}`;
+        const { lat, lon } = geo;
 
-        const urlParams = new URLSearchParams({ address: rawAddress });
-        if (type)   urlParams.set('type', type);
-        if (radius) urlParams.set('radius', radius);
-        if (years)  urlParams.set('years', years);
-        history.pushState({ address: rawAddress, type, radius, years }, '', '?' + urlParams.toString());
+        history.pushState({ address: rawAddress }, '', '?' + new URLSearchParams({ address: rawAddress }));
 
-        // Fetch comparable applications
-        const params = new URLSearchParams();
-        if (type) params.set('type', type);
-        params.set('lat', lat);
-        params.set('lon', lon);
-        if (radius) params.set('radius_m', radius);
-        if (years)  params.set('years', years);
+        // Site context + comps in parallel
+        const [ctxRes, compsRes] = await Promise.all([
+          fetch(`/site-context?lat=${lat}&lon=${lon}`),
+          fetch(`/comps?lat=${lat}&lon=${lon}&radius_m=500&years=5`),
+        ]);
+        const siteCtx = ctxRes.ok ? await ctxRes.json() : {};
+        const compsData = compsRes.ok ? await compsRes.json() : { applications: [], total: 0 };
 
-        const res = await fetch('/comps?' + params.toString());
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ detail: res.statusText }));
-          throw new Error(err.detail || res.statusText);
-        }
+        renderSiteContext(siteCtx, document.getElementById('eval-site-context'));
+        renderResults(compsData);
+        initMap(lat, lon, 500, compsData.applications);
 
-        const data = await res.json();
-        renderResults(data);
-        initMap(lat, lon, Number(radius), data.applications);
-        statusEl.textContent = `${geo.display_name} — ${data.total} comparable application${data.total !== 1 ? 's' : ''} found`;
+        const n = compsData.total;
+        evalLookupStatusEl.textContent =
+          `${geo.display_name} — ${n} comparable application${n !== 1 ? 's' : ''} nearby`;
 
-        // Score if application type provided
-        if (type) {
-          await fetchScore({ application_type: type, ward_number: null, lat, lon });
-        }
+        evalSitePanelEl.style.display = 'block';
+        if (_map) _map.invalidateSize();
 
-        // "What could I build here?" panel — always show site context + scenarios
-        await fetchScenarios(data.applications, lat, lon);
+        // Secondary signals (ML scenarios) — fire and forget
+        fetchScenarios(compsData.applications, lat, lon);
       } catch (err) {
-        statusEl.textContent = 'Error: ' + err.message;
+        evalLookupStatusEl.textContent = 'Error: ' + err.message;
       } finally {
-        btn.disabled = false;
+        evalLookupBtn.disabled = false;
       }
     });
 
@@ -583,8 +543,7 @@
 
     function renderResults(data) {
       if (!data.applications.length) {
-        resultsEl.innerHTML = '<p class="empty">No comparable applications found. Try broadening your search.</p>';
-        resultsCard.style.display = 'block';
+        resultsEl.innerHTML = '<p class="empty">No comparable applications found nearby.</p>';
         return;
       }
       _lastApplications = data.applications;
@@ -650,7 +609,6 @@
         });
       });
 
-      resultsCard.style.display = 'block';
     }
 
     function formatStatus(status) {
@@ -1506,13 +1464,10 @@
     let _evalDescription = '';
     let _evalHistory = [];
 
-    const evaluateForm = document.getElementById('evaluate-form');
     const evalStatusEl = document.getElementById('eval-status');
     const evalResultsEl = document.getElementById('eval-results');
-    const torontoRe = /\b(toronto|north york|east york|scarborough|etobicoke|york)\b/i;
 
-    evaluateForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
+    document.getElementById('eval-btn').addEventListener('click', async () => {
       const btn = document.getElementById('eval-btn');
       btn.disabled = true;
       evalStatusEl.textContent = 'Evaluating…';
@@ -1523,7 +1478,7 @@
         _evalAddress = document.getElementById('eval-address').value.trim();
         _evalDescription = document.getElementById('eval-description').value.trim();
         if (!_evalAddress)     throw new Error('Please enter an address.');
-        if (!_evalDescription) throw new Error('Please enter a project description.');
+        if (!_evalDescription) throw new Error('Please describe your proposal.');
 
         const addr = torontoRe.test(_evalAddress) ? _evalAddress : `${_evalAddress}, Toronto, Ontario`;
         const res = await fetch('/evaluate', {
@@ -1544,7 +1499,6 @@
         evalStatusEl.textContent = n === 0 ? 'No violations detected.'
           : n === 1 ? '1 violation detected.' : `${n} violations detected.`;
 
-        renderSiteContext(data.site_context, document.getElementById('eval-site-context'));
         renderExtracted(data.extracted);
         renderViolations(data.violations);
         renderEvalSummary(data.summary_md);
@@ -1715,25 +1669,19 @@
       return html;
     }
 
-    // Restore search from URL on page load
+    // Restore address from URL on page load
     (function () {
       const p = new URLSearchParams(window.location.search);
       if (p.get('address')) {
-        document.getElementById('address').value = p.get('address');
-        if (p.get('type'))   document.getElementById('type').value   = p.get('type');
-        if (p.get('radius')) document.getElementById('radius').value = p.get('radius');
-        if (p.get('years'))  document.getElementById('years').value  = p.get('years');
-        form.requestSubmit();
+        document.getElementById('eval-address').value = p.get('address');
+        evalLookupBtn.click();
       }
     })();
 
     window.addEventListener('popstate', (e) => {
       const p = e.state ?? Object.fromEntries(new URLSearchParams(window.location.search));
-      document.getElementById('address').value = p.address ?? '';
-      document.getElementById('type').value   = p.type    ?? '';
-      document.getElementById('radius').value = p.radius  ?? 500;
-      document.getElementById('years').value  = p.years   ?? 5;
-      if (p.address) form.requestSubmit();
+      document.getElementById('eval-address').value = p.address ?? '';
+      if (p.address) evalLookupBtn.click();
     });
   </script>
 </body>
