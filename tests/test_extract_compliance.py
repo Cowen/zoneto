@@ -285,6 +285,105 @@ class TestComplianceUse:
 
 
 # ---------------------------------------------------------------------------
+# check_compliance — unit limit advisory (low max_units, no explicit count)
+# ---------------------------------------------------------------------------
+
+
+class TestComplianceUnitLimitAdvisory:
+    def _site(self, max_units: int | None, **kwargs: object) -> dict:
+        base: dict = {
+            "zoning_max_storeys": None,
+            "zoning_max_units": max_units,
+            "zoning_max_density": None,
+            "permitted_use_category": "Residential",
+            "in_heritage_register": 0,
+            "in_heritage_district": 0,
+            "in_mtsa": 0,
+            "zoning_holding": 0,
+        }
+        base.update(kwargs)
+        return base
+
+    def test_advisory_fires_for_low_limit_with_no_count(self) -> None:
+        """Given: Residential proposal with no explicit unit count in a 4-unit zone.
+        When: Checking compliance.
+        Then: unit_limit_advisory violation fires at NEEDS_REZONING severity."""
+        extracted = ProjectFeatures(
+            proposed_storeys=14,
+            proposed_units=None,
+            proposed_use="residential",
+            has_ground_floor_retail=False,
+            description="A 14-story purpose-built rental.",
+        )
+        violations = check_compliance(extracted, self._site(max_units=4))
+        rule_ids = [v.rule_id for v in violations]
+        assert "unit_limit_advisory" in rule_ids
+        v = next(v for v in violations if v.rule_id == "unit_limit_advisory")
+        assert v.severity == Severity.NEEDS_REZONING
+
+    def test_advisory_fires_for_mixed_use_with_low_limit(self) -> None:
+        """Given: Mixed-use proposal with no unit count, zone limits to 6 units.
+        When: Checking compliance.
+        Then: unit_limit_advisory violation fires."""
+        extracted = ProjectFeatures(
+            proposed_storeys=8,
+            proposed_units=None,
+            proposed_use="mixed_use",
+            has_ground_floor_retail=True,
+            description="A mixed-use building with retail and rental apartments above.",
+        )
+        violations = check_compliance(extracted, self._site(max_units=6))
+        rule_ids = [v.rule_id for v in violations]
+        assert "unit_limit_advisory" in rule_ids
+
+    def test_advisory_suppressed_when_units_known(self) -> None:
+        """Given: Proposal with explicit unit count (handled by units_exceed_max).
+        When: Checking compliance.
+        Then: unit_limit_advisory is NOT fired — the explicit check handles it."""
+        extracted = ProjectFeatures(
+            proposed_storeys=None,
+            proposed_units=120,
+            proposed_use="residential",
+            has_ground_floor_retail=False,
+            description="A residential building with 120 units.",
+        )
+        violations = check_compliance(extracted, self._site(max_units=4))
+        rule_ids = [v.rule_id for v in violations]
+        assert "unit_limit_advisory" not in rule_ids
+        assert "units_exceed_max" in rule_ids
+
+    def test_advisory_suppressed_when_limit_is_high(self) -> None:
+        """Given: Zone has a generous unit limit (> 6).
+        When: Checking compliance.
+        Then: No advisory — the limit is not notably restrictive."""
+        extracted = ProjectFeatures(
+            proposed_storeys=None,
+            proposed_units=None,
+            proposed_use="residential",
+            has_ground_floor_retail=False,
+            description="A 6-storey residential building.",
+        )
+        violations = check_compliance(extracted, self._site(max_units=50))
+        rule_ids = [v.rule_id for v in violations]
+        assert "unit_limit_advisory" not in rule_ids
+
+    def test_advisory_suppressed_for_non_residential_use(self) -> None:
+        """Given: Employment use in a zone with a 4-unit limit.
+        When: Checking compliance.
+        Then: No unit_limit_advisory (unit limits are irrelevant to non-residential)."""
+        extracted = ProjectFeatures(
+            proposed_storeys=None,
+            proposed_units=None,
+            proposed_use="employment",
+            has_ground_floor_retail=False,
+            description="A warehouse facility.",
+        )
+        violations = check_compliance(extracted, self._site(max_units=4))
+        rule_ids = [v.rule_id for v in violations]
+        assert "unit_limit_advisory" not in rule_ids
+
+
+# ---------------------------------------------------------------------------
 # check_compliance — heritage, MTSA, holding
 # ---------------------------------------------------------------------------
 

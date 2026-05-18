@@ -79,6 +79,7 @@ def check_compliance(
     violations.extend(_check_prohibited_uses(extracted))
     violations.extend(_check_storeys(extracted, site))
     violations.extend(_check_units(extracted, site))
+    violations.extend(_check_unit_limit_advisory(extracted, site))
     violations.extend(_check_use(extracted, site))
     violations.extend(_check_heritage(site))
     violations.extend(_check_mtsa(site))
@@ -178,6 +179,43 @@ def _check_units(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Viola
                 "for an Official Plan Amendment / Rezoning to increase the "
                 "permitted density. Note: the UNITS field in the by-law may "
                 "be further constrained by FSI (density) limits."
+            ),
+        )
+    ]
+
+
+def _check_unit_limit_advisory(
+    extracted: ProjectFeatures, site: dict[str, Any]
+) -> list[Violation]:
+    """Warn when a zone has a very low unit ceiling and no explicit count was given.
+
+    When proposed_units is known, _check_units handles it explicitly. This rule
+    catches proposals where the description omits a unit count but the zone's low
+    ceiling is clearly a barrier (e.g. "14-storey rental" in a 4-unit RM zone).
+    Only fires when max_units <= 6 and the proposed use is residential or mixed.
+    """
+    max_units = site.get("zoning_max_units")
+    if max_units is None or max_units > 6:
+        return []
+    if extracted.proposed_units is not None:
+        return []
+    if extracted.proposed_use not in ("residential", "mixed_use"):
+        return []
+    return [
+        Violation(
+            rule_id="unit_limit_advisory",
+            section_ref="By-law 569-2013 — zone-specific lot requirements (UNITS)",
+            observed=(
+                f"proposed use is {extracted.proposed_use}; "
+                f"zone permits a maximum of {max_units} unit(s)"
+            ),
+            allowed=f"max {max_units} unit(s) as-of-right",
+            severity=Severity.NEEDS_REZONING,
+            suggested_remedy=(
+                f"This zone limits residential development to {max_units} unit(s) "
+                "as-of-right. Any multi-unit proposal exceeding this requires an "
+                "Official Plan Amendment / Rezoning (OZ). Confirm your unit count "
+                "and apply accordingly."
             ),
         )
     ]
