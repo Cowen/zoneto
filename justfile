@@ -20,6 +20,10 @@ aic-full:
 olt:
     uv run zoneto olt
 
+# Build the bylaw index for semantic search
+bylaw-index:
+    uv run zoneto bylaw-index
+
 # Enrich data
 enrich:
     uv run zoneto enrich

@@ -8,6 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from zoneto.analytics.bylaw_index import BylawIndex
 from zoneto.analytics.enrich import (
     enrich_coa,
     enrich_dev,
@@ -141,6 +142,49 @@ def olt(
     try:
         n = fetch_olt_decisions(DATA_DIR, delay=delay)
         console.print(f"[green]✓[/green] OLT decisions: {n} records written")
+    except Exception as exc:
+        console.print(f"  [red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def bylaw_index(
+    bylaw_dir: Annotated[
+        Path,
+        typer.Option(help="Directory containing bylaw .txt files."),
+    ] = Path("docs/bylaw"),
+    index_dir: Annotated[
+        Path,
+        typer.Option(help="Directory to write chunks.parquet and embeddings.npy."),
+    ] = Path("data/bylaw_index"),
+) -> None:
+    """Build or rebuild the by-law section embedding index."""
+    bylaw_dir = Path(bylaw_dir)
+    index_dir = Path(index_dir)
+
+    if not bylaw_dir.exists():
+        console.print(f"[red]Bylaw directory not found: {bylaw_dir}[/red]")
+        raise typer.Exit(code=1)
+
+    bylaw_files = list(bylaw_dir.glob("*.txt"))
+    if not bylaw_files:
+        console.print(f"[red]No .txt files found in {bylaw_dir}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"[bold]Building bylaw index from {len(bylaw_files)} files...[/bold]")
+    try:
+        index = BylawIndex.build(bylaw_dir, index_dir)
+
+        # Load and report statistics
+        import polars as pl  # noqa: PLC0415
+
+        chunks_df = pl.read_parquet(index_dir / "chunks.parquet")
+        n_chunks = len(chunks_df)
+
+        console.print("[green]✓[/green] Index built successfully")
+        console.print(f"  Chunks: {n_chunks:,}")
+        console.print(f"  Embeddings: {index.embeddings.shape}")
+        console.print("  Files: chunks.parquet, embeddings.npy")
     except Exception as exc:
         console.print(f"  [red]✗ {exc}[/red]")
         raise typer.Exit(code=1)
