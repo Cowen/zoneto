@@ -420,16 +420,16 @@ def test_lookup_returns_height_overlay_storeys(ref_dir: Path) -> None:
     """Given: zoning_height.geojson has HT_STORIES=6.
     When: Lookup at a point inside the polygon.
     Then: zoning_max_storeys=6 is returned."""
-    _write_height_geojson(ref_dir, {"HT_STORIES": 6, "HT_HEIGHT": 18.5})
+    _write_height_geojson(ref_dir, {"HT_STORIES": 6, "HT_LABEL": 18.5})
     result = lookup_site_context(43.65, -79.38, ref_dir)
     assert result["zoning_max_storeys"] == 6
 
 
 def test_lookup_returns_height_overlay_height_m(ref_dir: Path) -> None:
-    """Given: zoning_height.geojson has HT_HEIGHT=18.5.
+    """Given: zoning_height.geojson has HT_LABEL=18.5 (metres).
     When: Lookup at a point inside the polygon.
     Then: zoning_max_height_m=18.5 is returned."""
-    _write_height_geojson(ref_dir, {"HT_STORIES": 6, "HT_HEIGHT": 18.5})
+    _write_height_geojson(ref_dir, {"HT_STORIES": 6, "HT_LABEL": 18.5})
     result = lookup_site_context(43.65, -79.38, ref_dir)
     assert result["zoning_max_height_m"] == pytest.approx(18.5)
 
@@ -438,10 +438,10 @@ def test_lookup_returns_height_overlay_height_m(ref_dir: Path) -> None:
 def test_lookup_height_overlay_sentinel_becomes_none(
     ref_dir: Path, sentinel: float
 ) -> None:
-    """Given: HT_STORIES and HT_HEIGHT are -1 or 0 (by-law 'no limit' sentinels).
+    """Given: HT_STORIES and HT_LABEL are -1 or 0 (by-law 'no limit' sentinels).
     When: Lookup.
     Then: Both fields are None."""
-    _write_height_geojson(ref_dir, {"HT_STORIES": sentinel, "HT_HEIGHT": sentinel})
+    _write_height_geojson(ref_dir, {"HT_STORIES": sentinel, "HT_LABEL": sentinel})
     result = lookup_site_context(43.65, -79.38, ref_dir)
     assert result["zoning_max_storeys"] is None
     assert result["zoning_max_height_m"] is None

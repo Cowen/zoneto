@@ -207,16 +207,16 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
         if rows:
             result["in_mtsa"] = 1
 
-    # Zoning height overlay (HT_STORIES + HT_HEIGHT)
+    # Zoning height overlay (HT_STORIES + HT_LABEL for metres)
+    # The GeoJSON uses HT_LABEL (double) for height in metres, not HT_HEIGHT.
+    # HT_STRING carries the combined label, e.g. "HT 11.0, ST 3".
     height_path = ref_dir / "zoning_height.geojson"
     if height_path.exists():
         escaped = str(height_path).replace("'", "''")
-        desc = con.execute(
-            f"DESCRIBE SELECT * FROM ST_Read('{escaped}')"
-        ).fetchall()
+        desc = con.execute(f"DESCRIBE SELECT * FROM ST_Read('{escaped}')").fetchall()
         available_h = {str(r[0]).upper() for r in desc}
         ht_stories_col = "h.HT_STORIES" if "HT_STORIES" in available_h else "NULL"
-        ht_height_col = "h.HT_HEIGHT" if "HT_HEIGHT" in available_h else "NULL"
+        ht_height_col = "h.HT_LABEL" if "HT_LABEL" in available_h else "NULL"
         rows = con.execute(f"""
             SELECT {ht_stories_col}, {ht_height_col}
             FROM ST_Read('{escaped}') h
