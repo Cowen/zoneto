@@ -173,7 +173,7 @@ def bylaw_index(
 
     console.print(f"[bold]Building bylaw index from {len(bylaw_files)} files...[/bold]")
     try:
-        index = BylawIndex.build(bylaw_dir, index_dir)
+        index = BylawIndex.build(bylaw_dir, index_dir, progress=console.print)
 
         # Load and report statistics
         import polars as pl  # noqa: PLC0415

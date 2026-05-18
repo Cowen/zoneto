@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -263,7 +264,12 @@ class BylawIndex:
         self.model = SentenceTransformer("BAAI/bge-small-en-v1.5")
 
     @classmethod
-    def build(cls, bylaw_dir: Path, index_dir: Path) -> BylawIndex:
+    def build(
+        cls,
+        bylaw_dir: Path,
+        index_dir: Path,
+        progress: Callable[[str], None] | None = None,
+    ) -> "BylawIndex":
         """Build index from bylaw text files.
 
         Chunks all .txt files in bylaw_dir, encodes with sentence-transformers,
@@ -272,6 +278,7 @@ class BylawIndex:
         Args:
             bylaw_dir: Directory with .txt bylaw files.
             index_dir: Directory to write chunks.parquet and embeddings.npy.
+            progress: Optional callable for step-level log messages.
 
         Returns:
             Loaded BylawIndex instance ready to search.
@@ -280,23 +287,25 @@ class BylawIndex:
         index_dir = Path(index_dir)
         index_dir.mkdir(parents=True, exist_ok=True)
 
+        _log = progress or (lambda _: None)
+
         # Collect all chunks from all files
         all_chunks: list[Chunk] = []
         bylaw_files = sorted(bylaw_dir.glob("*.txt"))
 
         for bylaw_file in bylaw_files:
-            # Extract chapter number from content or filename
+            _log(f"  Chunking {bylaw_file.name}...")
             text = bylaw_file.read_text(encoding="utf-8", errors="replace")
 
             # Try to extract chapter from content (Chapter X pattern)
             chapter_match = re.search(r"Chapter\s+(\d+)", text)
             chapter = chapter_match.group(1) if chapter_match else "0"
 
-            # Chunk the file
             chunks = split_into_chunks(
                 text, source_file=bylaw_file.name, chapter=chapter
             )
             all_chunks.extend(chunks)
+            _log(f"    {len(chunks):,} chunks")
 
         # Renumber chunks with global IDs
         for i, chunk in enumerate(all_chunks):
@@ -313,19 +322,21 @@ class BylawIndex:
             "text": [c.text for c in all_chunks],
         }
         chunks_df = pl.DataFrame(chunks_data)
-
-        # Save chunks
         chunks_df.write_parquet(index_dir / "chunks.parquet")
 
-        # Encode all chunks
+        # Encode all chunks — show_progress_bar renders a tqdm bar to stderr
+        _log(
+            f"  Encoding {len(all_chunks):,} chunks with BAAI/bge-small-en-v1.5"
+            " (CPU — takes 2–8 min)..."
+        )
         model = SentenceTransformer("BAAI/bge-small-en-v1.5")
         texts = [c.text for c in all_chunks]
-        embeddings = model.encode(texts, convert_to_numpy=True).astype(np.float32)
+        embeddings = model.encode(
+            texts, convert_to_numpy=True, show_progress_bar=True
+        ).astype(np.float32)
 
-        # Save embeddings
         np.save(index_dir / "embeddings.npy", embeddings)
 
-        # Return loaded instance
         return cls(index_dir)
 
     def search(
