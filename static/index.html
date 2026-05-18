@@ -297,6 +297,13 @@
     <!-- Phase 2: context, comps, proposal form (shown after lookup) -->
     <div id="eval-site-panel" style="display:none;margin-top:1.25rem">
       <div id="eval-site-context"></div>
+      <div id="map" style="margin-bottom:0.5rem"></div>
+      <div class="map-legend" id="map-legend" style="display:none;margin-bottom:1rem">
+        <div class="map-legend-item"><div class="map-legend-dot" style="background:#0d6efd"></div>Searched address</div>
+        <div class="map-legend-item"><div class="map-legend-dot" style="background:#198754"></div>Approved</div>
+        <div class="map-legend-item"><div class="map-legend-dot" style="background:#856404;opacity:0.8"></div>Appealed</div>
+        <div class="map-legend-item"><div class="map-legend-dot" style="background:#0c5460"></div>Other / active</div>
+      </div>
       <div id="results"></div>
 
       <div style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid #e9ecef">
@@ -335,13 +342,6 @@
           Scenarios calibrated to nearby applications. Site context from the nearest comp.
         </p>
         <div id="site-context"></div>
-        <div id="map" style="margin-bottom:0.5rem"></div>
-        <div class="map-legend" id="map-legend" style="display:none;margin-bottom:1rem">
-          <div class="map-legend-item"><div class="map-legend-dot" style="background:#0d6efd"></div>Searched address</div>
-          <div class="map-legend-item"><div class="map-legend-dot" style="background:#198754"></div>Approved</div>
-          <div class="map-legend-item"><div class="map-legend-dot" style="background:#856404;opacity:0.8"></div>Appealed</div>
-          <div class="map-legend-item"><div class="map-legend-dot" style="background:#0c5460"></div>Other / active</div>
-        </div>
         <div id="base-rate"></div>
         <div id="scenarios-body"></div>
         <div id="required-studies"></div>
