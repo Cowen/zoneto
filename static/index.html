@@ -89,8 +89,13 @@
 
     .empty { text-align: center; color: #6c757d; padding: 2rem; }
 
-    #score-section { display: none; }
-    #scenarios-section { display: none; }
+    #secondary-signals-card { display: none; }
+    .secondary-summary {
+      cursor: pointer; list-style: none; padding: 0.1rem 0;
+      font-size: 0.85rem; font-weight: 600; color: #6c757d;
+    }
+    .secondary-summary::-webkit-details-marker { display: none; }
+    details[open] > .secondary-summary { color: #495057; }
 
     .badge-best { background: #d1e7dd; color: #0a3622; }
     .risk-low  { color: #198754; font-weight: 600; }
@@ -333,32 +338,36 @@
     </form>
   </div>
 
-  <div class="card" id="score-section">
-    <div class="pred-box">
-      <h3>ML Predictions (production-ready models only)</h3>
-      <div id="predictions"></div>
-    </div>
-  </div>
-
-  <div class="card" id="scenarios-section">
-    <h2 style="font-size:1rem;font-weight:700;margin-bottom:0.75rem">What could I build here?</h2>
-    <p style="font-size:0.8rem;color:#6c757d;margin-bottom:1rem">
-      Scenarios calibrated to nearby applications. Site context from the nearest comp.
-    </p>
-    <div id="site-context"></div>
-    <div id="map" style="margin-bottom:0.5rem"></div>
-    <div class="map-legend" id="map-legend" style="display:none;margin-bottom:1rem">
-      <div class="map-legend-item"><div class="map-legend-dot" style="background:#0d6efd"></div>Searched address</div>
-      <div class="map-legend-item"><div class="map-legend-dot" style="background:#198754"></div>Approved</div>
-      <div class="map-legend-item"><div class="map-legend-dot" style="background:#856404;opacity:0.8"></div>Appealed</div>
-      <div class="map-legend-item"><div class="map-legend-dot" style="background:#0c5460"></div>Other / active</div>
-    </div>
-    <div id="base-rate"></div>
-    <div id="scenarios-body"></div>
-    <div id="required-studies"></div>
-    <div id="shap-best"></div>
-    <div id="custom-scorer-container"></div>
-    <div id="model-footnote"></div>
+  <div class="card" id="secondary-signals-card">
+    <details id="secondary-signals-details">
+      <summary class="secondary-summary">&#9656; Secondary signals — ML-based scenario scoring</summary>
+      <div id="score-section" style="margin-top:1rem;padding-top:1rem;border-top:1px solid #e9ecef">
+        <div class="pred-box">
+          <h3>ML Predictions (production-ready models only)</h3>
+          <div id="predictions"></div>
+        </div>
+      </div>
+      <div id="scenarios-section" style="margin-top:1.5rem">
+        <h2 style="font-size:1rem;font-weight:700;margin-bottom:0.75rem">What could I build here?</h2>
+        <p style="font-size:0.8rem;color:#6c757d;margin-bottom:1rem">
+          Scenarios calibrated to nearby applications. Site context from the nearest comp.
+        </p>
+        <div id="site-context"></div>
+        <div id="map" style="margin-bottom:0.5rem"></div>
+        <div class="map-legend" id="map-legend" style="display:none;margin-bottom:1rem">
+          <div class="map-legend-item"><div class="map-legend-dot" style="background:#0d6efd"></div>Searched address</div>
+          <div class="map-legend-item"><div class="map-legend-dot" style="background:#198754"></div>Approved</div>
+          <div class="map-legend-item"><div class="map-legend-dot" style="background:#856404;opacity:0.8"></div>Appealed</div>
+          <div class="map-legend-item"><div class="map-legend-dot" style="background:#0c5460"></div>Other / active</div>
+        </div>
+        <div id="base-rate"></div>
+        <div id="scenarios-body"></div>
+        <div id="required-studies"></div>
+        <div id="shap-best"></div>
+        <div id="custom-scorer-container"></div>
+        <div id="model-footnote"></div>
+      </div>
+    </details>
   </div>
 
   <div class="card" id="results-card" style="display:none">
@@ -373,6 +382,8 @@
     const scoreSection = document.getElementById('score-section');
     const predictionsEl = document.getElementById('predictions');
     const scenariosSection = document.getElementById('scenarios-section');
+    const secondarySignalsCard = document.getElementById('secondary-signals-card');
+    const secondarySignalsDetails = document.getElementById('secondary-signals-details');
     const scenariosBody = document.getElementById('scenarios-body');
     const siteContextEl = document.getElementById('site-context');
     const baseRateEl = document.getElementById('base-rate');
@@ -445,8 +456,8 @@
       const btn = form.querySelector('button[type="submit"]');
       btn.disabled = true;
       resultsCard.style.display = 'none';
-      scoreSection.style.display = 'none';
-      scenariosSection.style.display = 'none';
+      secondarySignalsCard.style.display = 'none';
+      secondarySignalsDetails.removeAttribute('open');
 
       try {
         const rawAddress = document.getElementById('address').value.trim();
@@ -680,7 +691,7 @@
 
       if (rows) {
         predictionsEl.innerHTML = rows;
-        scoreSection.style.display = 'block';
+        secondarySignalsCard.style.display = 'block';
       }
     }
 
@@ -1104,7 +1115,7 @@
 
     async function fetchScenarios(applications, lat, lon) {
       scenariosBody.innerHTML = '<p class="scenario-loading">Scoring hypothetical scenarios…</p>';
-      scenariosSection.style.display = 'block';
+      secondarySignalsCard.style.display = 'block';
       if (_map) _map.invalidateSize();
       shapBestEl.innerHTML = '';
       customScorerEl.innerHTML = '';
@@ -1405,7 +1416,7 @@
     function renderScenarios(results, nearestComp) {
       const anyPredictions = results.some(r => r.predictions && Object.keys(r.predictions).length > 0);
       if (!anyPredictions) {
-        scenariosSection.style.display = 'none';
+        secondarySignalsCard.style.display = 'none';
         return;
       }
 
