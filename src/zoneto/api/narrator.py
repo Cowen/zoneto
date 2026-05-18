@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from zoneto.analytics.bylaw_index import Chunk
@@ -23,7 +24,36 @@ STRICT RULES you must always follow:
    "I cannot answer this from the available context. Please consult
    Toronto City Planning at toronto.ca/city-planning or call 311."
 5. Be concise and precise. Use plain language where possible.
+6. At the very end of your compliance summary, on its own line, write:
+   CONFIDENCE: <0-100>
+   where the number is your overall assessment of the proposal's likelihood
+   of passing development review as submitted (100 = near-certain as-of-right
+   approval, 0 = categorically prohibited or no realistic path forward).
+   Base the score on the violations, zone context, and retrieved sections.
+   This line must be the absolute last line of your response.
 """
+
+
+def _parse_confidence(raw: str) -> tuple[str, int | None]:
+    """Extract a trailing CONFIDENCE: <n> line from LLM output.
+
+    Returns (summary_markdown, score) where score is None if the line was absent.
+    Score is clamped to [0, 100].
+    """
+    lines = raw.splitlines()
+    # Strip trailing blank lines
+    while lines and not lines[-1].strip():
+        lines.pop()
+    score: int | None = None
+    if lines:
+        m = re.match(r"^\s*CONFIDENCE:\s*(-?\d+)\s*$", lines[-1], re.I)
+        if m:
+            score = min(100, max(0, int(m.group(1))))
+            lines.pop()
+    # Strip trailing blank lines again after removing score line
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines), score
 
 
 def _format_violations(violations: list[Violation]) -> str:
@@ -96,13 +126,16 @@ def narrate_evaluation(
     violations: list[Violation],
     chunks: list[Chunk],
     llm_client: LLMClient,
-) -> str:
-    """Generate a markdown compliance summary for the evaluation panel.
+) -> tuple[str, int | None]:
+    """Generate a markdown compliance summary and confidence score.
 
     The LLM receives structured context and is constrained to narrate only
     what the rule engine and retrieval system found — it cannot invent rules.
+    The trailing CONFIDENCE: <n> line is parsed out and returned separately.
 
-    Returns a markdown string suitable for rendering in the frontend.
+    Returns:
+        (summary_markdown, confidence_score) where confidence_score is 0–100
+        or None if the LLM did not emit the expected line.
     """
     user_content = f"""\
 ## Site context
@@ -127,12 +160,14 @@ Write a concise compliance summary (3–6 sentences) in plain markdown. Explain:
 
 Do not repeat the violations verbatim — explain them in plain language.
 Do not invent information not present in the context above.
+End with a CONFIDENCE line as required by the system rules.
 """
-    return llm_client.complete(
+    raw = llm_client.complete(
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_content}],
-        max_tokens=600,
+        max_tokens=650,
     )
+    return _parse_confidence(raw)
 
 
 def narrate_question(

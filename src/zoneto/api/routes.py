@@ -273,6 +273,7 @@ class EvaluateResponse(BaseModel):
     relevant_sections: list[RelevantSection]
     summary_md: str
     suggestions: list[str]
+    confidence_score: int | None = None
 
 
 class AskRequest(BaseModel):
@@ -335,7 +336,9 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         zones = _zone_prefixes(site.get("zoning_class"))
         chunks = bylaw_index.search(query, zones=zones, k=6)
 
-    summary_md = narrate_evaluation(site, extracted, violations, chunks, llm_client)
+    summary_md, confidence_score = narrate_evaluation(
+        site, extracted, violations, chunks, llm_client
+    )
 
     return EvaluateResponse(
         lat=lat,
@@ -369,6 +372,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
             for c in chunks
         ],
         summary_md=summary_md,
+        confidence_score=confidence_score,
         suggestions=[v.suggested_remedy for v in violations if v.suggested_remedy],
     )
 

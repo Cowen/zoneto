@@ -227,6 +227,23 @@
     .violation-item-needs_variance { border-left: 4px solid #fd7e14; }
     .violation-item-needs_rezoning { border-left: 4px solid #dc3545; }
 
+    .confidence-banner {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.65rem 0.9rem; border-radius: 6px; margin-bottom: 0.5rem;
+      font-size: 0.88rem; font-weight: 600;
+    }
+    .confidence-score {
+      font-size: 1.6rem; font-weight: 800; line-height: 1; min-width: 2.5rem;
+    }
+    .confidence-bar-track {
+      flex: 1; height: 8px; background: rgba(0,0,0,0.1); border-radius: 4px; overflow: hidden;
+    }
+    .confidence-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+    .confidence-high   { background: #d1e7dd; color: #0a3622; border: 1px solid #a3cfbb; }
+    .confidence-medium { background: #cfe2ff; color: #084298; border: 1px solid #9ec5fe; }
+    .confidence-low    { background: #fff3cd; color: #664d03; border: 1px solid #ffe69c; }
+    .confidence-very-low { background: #f8d7da; color: #842029; border: 1px solid #f1aeb5; }
+
     .eval-summary {
       margin: 0.75rem 0; padding: 0.75rem 1rem;
       background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;
@@ -1502,6 +1519,7 @@
         renderExtracted(data.extracted);
         renderViolations(data.violations);
         renderEvalSummary(data.summary_md);
+        renderConfidence(data.confidence_score ?? null);
         renderSuggestions(data.suggestions);
         renderRelevantSections(data.relevant_sections);
         renderQA();
@@ -1550,6 +1568,34 @@
       el.innerHTML = `<div style="margin-bottom:0.75rem">
         <div style="font-size:0.78rem;font-weight:700;color:#495057;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.4rem">Violations</div>
         ${items}</div>`;
+    }
+
+    function renderConfidence(score) {
+      const el = document.getElementById('eval-summary');
+      if (score == null) { return; }
+      const cls = score >= 80 ? 'confidence-high'
+                : score >= 60 ? 'confidence-medium'
+                : score >= 40 ? 'confidence-low'
+                : 'confidence-very-low';
+      const label = score >= 80 ? 'Likely to pass review'
+                  : score >= 60 ? 'Possible with adjustments'
+                  : score >= 40 ? 'Significant hurdles'
+                  : 'Very unlikely as submitted';
+      const fillColor = score >= 80 ? '#198754'
+                      : score >= 60 ? '#0d6efd'
+                      : score >= 40 ? '#fd7e14'
+                      : '#dc3545';
+      const banner = `<div class="confidence-banner ${cls}">
+        <div class="confidence-score">${score}</div>
+        <div style="flex:1">
+          <div style="margin-bottom:0.3rem">${escHtml(label)}</div>
+          <div class="confidence-bar-track">
+            <div class="confidence-bar-fill" style="width:${score}%;background:${fillColor}"></div>
+          </div>
+        </div>
+        <div style="font-size:0.72rem;opacity:0.7;white-space:nowrap">approval confidence</div>
+      </div>`;
+      el.insertAdjacentHTML('afterbegin', banner);
     }
 
     function renderEvalSummary(md) {
