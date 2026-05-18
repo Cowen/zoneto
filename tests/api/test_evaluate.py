@@ -34,9 +34,7 @@ def client(app):
 
 
 class TestEvaluateEndpoint:
-    def test_evaluate_returns_structured_response(
-        self, client: TestClient
-    ) -> None:
+    def test_evaluate_returns_structured_response(self, client: TestClient) -> None:
         """Given: A valid address and description.
         When: POST /evaluate with mocked geocode and site context.
         Then: Response contains all required fields."""

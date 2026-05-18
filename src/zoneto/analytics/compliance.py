@@ -101,8 +101,7 @@ def _check_prohibited_uses(extracted: ProjectFeatures) -> list[Violation]:
                 Violation(
                     rule_id="prohibited_use",
                     section_ref=(
-                        "By-law 569-2013 §60.20.20.10(1) "
-                        "— absolutely prohibited uses"
+                        "By-law 569-2013 §60.20.20.10(1) — absolutely prohibited uses"
                     ),
                     observed=f"proposed use matches a prohibited type: {label}",
                     allowed=(

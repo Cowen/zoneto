@@ -44,10 +44,7 @@ class AnthropicClient:
 
         resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         self._client = anthropic.Anthropic(api_key=resolved_key)
-        self._model = (
-            model
-            or os.environ.get("ZONETO_LLM_MODEL", self._DEFAULT_MODEL)
-        )
+        self._model = model or os.environ.get("ZONETO_LLM_MODEL", self._DEFAULT_MODEL)
 
     def complete(
         self, system: str, messages: list[dict[str, str]], max_tokens: int
