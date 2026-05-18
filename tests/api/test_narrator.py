@@ -55,6 +55,16 @@ class TestParseConfidence:
         _, score = _parse_confidence("Summary.\n\nCONFIDENCE: 40\n\n")
         assert score == 40
 
+    def test_finds_confidence_even_when_not_last_line(self) -> None:
+        """Given: LLM appended a note after the CONFIDENCE line.
+        When: Parsing.
+        Then: Score is still extracted and the CONFIDENCE line is removed."""
+        raw = "Proposal has issues.\n\nCONFIDENCE: 30\n\nPlease consult city planning."
+        summary, score = _parse_confidence(raw)
+        assert score == 30
+        assert "CONFIDENCE" not in summary
+        assert "Proposal has issues." in summary
+
     def test_summary_not_mangled_when_score_present(self) -> None:
         """Given: Multi-paragraph summary with trailing CONFIDENCE line.
         When: Parsing.

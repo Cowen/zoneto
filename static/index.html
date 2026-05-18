@@ -640,7 +640,7 @@
 
     async function fetchScore(features) {
       try {
-        const res = await fetch('/score?explain=true', {
+        const res = await fetch('/score', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ source: 'dev_applications', features }),
@@ -962,6 +962,13 @@
       if (ctx.zoning_max_density != null) {
         html += `<span class="ctx-flag ctx-flag-on" data-tooltip="Maximum floor space index (FSI) — total floor area relative to lot area. Exceeding this requires a rezoning or official plan amendment.">Max density: ${ctx.zoning_max_density} FSI</span>`;
       }
+      if (ctx.zoning_max_storeys != null || ctx.zoning_max_height_m != null) {
+        const heightParts = [];
+        if (ctx.zoning_max_storeys != null) heightParts.push(`${ctx.zoning_max_storeys} storeys`);
+        if (ctx.zoning_max_height_m != null) heightParts.push(`${ctx.zoning_max_height_m} m`);
+        const tip = "Maximum building height from the zoning height overlay (By-law 569-2013 Schedule B). Applies to ~15% of the city; where absent the base zone or a specific by-law section governs.";
+        html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}">Max height: ${escHtml(heightParts.join(' / '))}</span>`;
+      }
 
       // Lot/coverage minimums grouped together — only render when at least one is set
       const lotParts = [];
@@ -1119,6 +1126,8 @@
         // Zoning limits (display only — not model features)
         zoning_max_units:      spatialCtx.zoning_max_units ?? null,
         zoning_max_density:    spatialCtx.zoning_max_density ?? null,
+        zoning_max_storeys:    spatialCtx.zoning_max_storeys ?? null,
+        zoning_max_height_m:   spatialCtx.zoning_max_height_m ?? null,
         // Expanded by-law fields (display only)
         permitted_use_category:  spatialCtx.permitted_use_category ?? null,
         zoning_min_frontage_m:   spatialCtx.zoning_min_frontage_m ?? null,

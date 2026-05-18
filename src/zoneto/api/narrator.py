@@ -35,22 +35,24 @@ STRICT RULES you must always follow:
 
 
 def _parse_confidence(raw: str) -> tuple[str, int | None]:
-    """Extract a trailing CONFIDENCE: <n> line from LLM output.
+    """Extract a CONFIDENCE: <n> line from LLM output, scanning backward.
 
     Returns (summary_markdown, score) where score is None if the line was absent.
-    Score is clamped to [0, 100].
+    Score is clamped to [0, 100]. Scanning backward (rather than checking only
+    the last line) makes extraction robust when the LLM appends a trailing note
+    or caveat after the CONFIDENCE line.
     """
     lines = raw.splitlines()
-    # Strip trailing blank lines
     while lines and not lines[-1].strip():
         lines.pop()
     score: int | None = None
-    if lines:
-        m = re.match(r"^\s*CONFIDENCE:\s*(-?\d+)\s*$", lines[-1], re.I)
+    for i in range(len(lines) - 1, -1, -1):
+        m = re.match(r"^\s*CONFIDENCE:\s*(-?\d+)\s*$", lines[i], re.I)
         if m:
             score = min(100, max(0, int(m.group(1))))
-            lines.pop()
-    # Strip trailing blank lines again after removing score line
+            lines.pop(i)
+            break
+    # Strip trailing blank lines after removing score line
     while lines and not lines[-1].strip():
         lines.pop()
     return "\n".join(lines), score
