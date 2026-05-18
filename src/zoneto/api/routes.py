@@ -311,6 +311,48 @@ def _zone_prefixes(zoning_class: str | None) -> list[str] | None:
     return [m.group(0)] if m else None
 
 
+def _retrieve_chunks(
+    bylaw_index: Any,
+    site: dict[str, Any],
+    description: str,
+    extracted_use: str | None,
+    *,
+    k: int = 6,
+) -> list[Any]:
+    """Dual-query retrieval: zone-context first, then proposal semantics.
+
+    Runs two searches and merges the results (zone chunks first, deduped by
+    chunk_id, total bounded to k). This ensures the LLM always receives the
+    site's actual zone chapter even when the proposal description semantically
+    resembles a different zone type.
+    """
+    from zoneto.analytics.bylaw_index import Chunk  # noqa: PLC0415
+
+    zones = _zone_prefixes(site.get("zoning_class"))
+    zone_class = site.get("zoning_class") or ""
+    use_cat = site.get("permitted_use_category") or ""
+
+    # 1. Zone-specific query — anchors context to the site's zone chapter
+    zone_query = (
+        f"{zone_class} zone {use_cat} permitted uses height density requirements"
+    ).strip()
+    zone_chunks: list[Chunk] = bylaw_index.search(zone_query, zones=zones, k=k // 2 + 1)
+
+    # 2. Description-based query — retrieves proposal-relevant sections
+    desc_query = f"{description} {extracted_use or ''}".strip()
+    desc_chunks: list[Chunk] = bylaw_index.search(desc_query, zones=zones, k=k)
+
+    # Merge: zone chunks take priority, then fill with description chunks
+    seen: set[int] = set()
+    merged: list[Chunk] = []
+    for chunk in (*zone_chunks, *desc_chunks):
+        if chunk.chunk_id not in seen:
+            seen.add(chunk.chunk_id)
+            merged.append(chunk)
+
+    return merged[:k]
+
+
 @router.post("/evaluate", response_model=EvaluateResponse)
 def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
     """Evaluate a project description against By-law 569-2013 for a given address."""
@@ -332,9 +374,9 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
 
     chunks = []
     if bylaw_index is not None:
-        query = f"{body.description} {extracted.proposed_use or ''}".strip()
-        zones = _zone_prefixes(site.get("zoning_class"))
-        chunks = bylaw_index.search(query, zones=zones, k=6)
+        chunks = _retrieve_chunks(
+            bylaw_index, site, body.description, extracted.proposed_use, k=6
+        )
 
     summary_md, confidence_score = narrate_evaluation(
         site, extracted, violations, chunks, llm_client
@@ -403,8 +445,7 @@ def ask(request: Request, body: AskRequest) -> dict[str, str]:
 
     chunks = []
     if bylaw_index is not None:
-        zones = _zone_prefixes(site.get("zoning_class"))
-        chunks = bylaw_index.search(body.question, zones=zones, k=4)
+        chunks = _retrieve_chunks(bylaw_index, site, body.question, None, k=4)
 
     answer = narrate_question(
         question=body.question,

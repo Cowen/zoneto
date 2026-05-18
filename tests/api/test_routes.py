@@ -329,3 +329,90 @@ def test_geocode_nominatim_upstream_error_returns_502(
     httpx_mock.add_response(status_code=503)
     response = client.get("/geocode?address=441+King+St+W")
     assert response.status_code == 502
+
+
+# ---------------------------------------------------------------------------
+# _retrieve_chunks — dual-query retrieval helper
+# ---------------------------------------------------------------------------
+
+
+def _make_chunk(chunk_id: int, text: str = "text") -> object:
+    """Minimal stand-in for a Chunk dataclass for testing merge logic."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        chunk_id=chunk_id,
+        chapter="10",
+        section_number="10.20",
+        section_title="Test",
+        source_file="test.txt",
+        zones=[],
+        text=text,
+        score=0.8,
+    )
+
+
+class TestRetrieveChunks:
+    def _index(self, zone_results: list, desc_results: list) -> object:
+        """Mock BylawIndex whose search alternates between two result sets."""
+        from unittest.mock import MagicMock
+
+        mock = MagicMock()
+        mock.search.side_effect = [zone_results, desc_results]
+        return mock
+
+    def test_deduplicates_overlapping_results(self) -> None:
+        """Given: Both searches return the same chunk.
+        When: _retrieve_chunks merges them.
+        Then: That chunk appears only once in the result."""
+        from zoneto.api.routes import _retrieve_chunks
+
+        shared = _make_chunk(1)
+        index = self._index(
+            zone_results=[shared], desc_results=[shared, _make_chunk(2)]
+        )
+        site = {"zoning_class": "RM", "permitted_use_category": "Residential"}
+        result = _retrieve_chunks(index, site, "a rental building", None, k=6)
+        ids = [c.chunk_id for c in result]
+        assert ids.count(1) == 1
+
+    def test_zone_chunks_appear_first(self) -> None:
+        """Given: Zone search returns chunk 10, description search returns chunk 20.
+        When: Merging.
+        Then: Chunk 10 precedes chunk 20 (zone context comes first)."""
+        from zoneto.api.routes import _retrieve_chunks
+
+        index = self._index(
+            zone_results=[_make_chunk(10)],
+            desc_results=[_make_chunk(20)],
+        )
+        site = {"zoning_class": "RM", "permitted_use_category": "Residential"}
+        result = _retrieve_chunks(index, site, "a rental building", None, k=6)
+        assert result[0].chunk_id == 10
+        assert result[1].chunk_id == 20
+
+    def test_result_bounded_to_k(self) -> None:
+        """Given: Both searches return many chunks.
+        When: _retrieve_chunks merges with k=4.
+        Then: At most 4 chunks returned."""
+        from zoneto.api.routes import _retrieve_chunks
+
+        index = self._index(
+            zone_results=[_make_chunk(i) for i in range(5)],
+            desc_results=[_make_chunk(i + 10) for i in range(5)],
+        )
+        site = {"zoning_class": "RM", "permitted_use_category": "Residential"}
+        result = _retrieve_chunks(index, site, "rental", None, k=4)
+        assert len(result) <= 4
+
+    def test_zone_query_includes_zone_class(self) -> None:
+        """Given: Site has zoning_class RM.
+        When: _retrieve_chunks calls search.
+        Then: The first search call (zone query) includes 'RM' in its query string."""
+        from zoneto.api.routes import _retrieve_chunks
+
+        index = self._index(zone_results=[], desc_results=[])
+        site = {"zoning_class": "RM", "permitted_use_category": "Residential"}
+        _retrieve_chunks(index, site, "rental", None, k=6)
+        first_query = index.search.call_args_list[0][0][0]
+        assert "RM" in first_query
