@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -9,9 +10,12 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from zoneto.analytics.compliance import check_compliance
 from zoneto.analytics.explain import explain_one
+from zoneto.analytics.extract import extract_project_features
 from zoneto.analytics.score import score_one
 from zoneto.api.comps import query_comps
+from zoneto.api.narrator import narrate_evaluation, narrate_question
 from zoneto.api.site_context import lookup_site_context
 
 router = APIRouter()
@@ -233,3 +237,178 @@ def score(request: Request, body: ScoreRequest, explain: bool = False) -> ScoreR
         production_ready_models=ready_model_names,
         explanations=explanations,
     )
+
+
+# --- evaluate / ask ---
+
+
+class ViolationResult(BaseModel):
+    rule_id: str
+    section_ref: str
+    observed: str
+    allowed: str
+    severity: str
+    suggested_remedy: str
+
+
+class RelevantSection(BaseModel):
+    section_number: str
+    section_title: str
+    source_file: str
+    excerpt: str
+    score: float
+
+
+class EvaluateRequest(BaseModel):
+    address: str
+    description: str
+
+
+class EvaluateResponse(BaseModel):
+    lat: float | None = None
+    lon: float | None = None
+    site_context: dict[str, Any]
+    extracted: dict[str, Any]
+    violations: list[ViolationResult]
+    relevant_sections: list[RelevantSection]
+    summary_md: str
+    suggestions: list[str]
+
+
+class AskRequest(BaseModel):
+    address: str
+    description: str
+    question: str
+    history: list[dict[str, str]] = []
+
+
+def _geocode_address(address: str) -> tuple[float, float]:
+    """Geocode an address string to (lat, lon) via Nominatim."""
+    try:
+        resp = httpx.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": address, "format": "json", "countrycodes": "ca", "limit": 1},
+            headers={"User-Agent": "zoneto/1.0"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="Geocoding timed out") from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail="Geocoding unavailable") from exc
+    results = resp.json()
+    if not results:
+        raise HTTPException(status_code=404, detail="Address not found")
+    return float(results[0]["lat"]), float(results[0]["lon"])
+
+
+def _zone_prefixes(zoning_class: str | None) -> list[str] | None:
+    """Extract alphabetic zone prefixes for bylaw index zone filtering."""
+    if not zoning_class:
+        return None
+    m = re.match(r"[A-Z]+", zoning_class)
+    return [m.group(0)] if m else None
+
+
+@router.post("/evaluate", response_model=EvaluateResponse)
+def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
+    """Evaluate a project description against By-law 569-2013 for a given address."""
+    data_dir: Path = getattr(request.app.state, "data_dir", Path("data"))
+    ref_dir = data_dir / "reference"
+    bylaw_index = getattr(request.app.state, "bylaw_index", None)
+    llm_client = getattr(request.app.state, "llm_client", None)
+
+    if llm_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="LLM client not configured. Set ANTHROPIC_API_KEY.",
+        )
+
+    lat, lon = _geocode_address(body.address)
+    site = lookup_site_context(lat, lon, ref_dir)
+    extracted = extract_project_features(body.description)
+    violations = check_compliance(extracted, site)
+
+    chunks = []
+    if bylaw_index is not None:
+        query = f"{body.description} {extracted.proposed_use or ''}".strip()
+        zones = _zone_prefixes(site.get("zoning_class"))
+        chunks = bylaw_index.search(query, zones=zones, k=6)
+
+    summary_md = narrate_evaluation(site, extracted, violations, chunks, llm_client)
+
+    return EvaluateResponse(
+        lat=lat,
+        lon=lon,
+        site_context=site,
+        extracted={
+            "proposed_storeys": extracted.proposed_storeys,
+            "proposed_units": extracted.proposed_units,
+            "proposed_use": extracted.proposed_use,
+            "has_ground_floor_retail": extracted.has_ground_floor_retail,
+        },
+        violations=[
+            ViolationResult(
+                rule_id=v.rule_id,
+                section_ref=v.section_ref,
+                observed=v.observed,
+                allowed=v.allowed,
+                severity=v.severity.value,
+                suggested_remedy=v.suggested_remedy,
+            )
+            for v in violations
+        ],
+        relevant_sections=[
+            RelevantSection(
+                section_number=c.section_number,
+                section_title=c.section_title,
+                source_file=c.source_file,
+                excerpt=c.text[:400],
+                score=round(c.score, 4),
+            )
+            for c in chunks
+        ],
+        summary_md=summary_md,
+        suggestions=[v.suggested_remedy for v in violations if v.suggested_remedy],
+    )
+
+
+@router.post("/ask")
+def ask(request: Request, body: AskRequest) -> dict[str, str]:
+    """Answer a follow-up question about a project at an address.
+
+    Uses the same site context + bylaw retrieval as /evaluate, but
+    retrieves sections relevant to the specific question rather than the
+    full description.
+    """
+    data_dir: Path = getattr(request.app.state, "data_dir", Path("data"))
+    ref_dir = data_dir / "reference"
+    bylaw_index = getattr(request.app.state, "bylaw_index", None)
+    llm_client = getattr(request.app.state, "llm_client", None)
+
+    if llm_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="LLM client not configured. Set ANTHROPIC_API_KEY.",
+        )
+
+    lat, lon = _geocode_address(body.address)
+    site = lookup_site_context(lat, lon, ref_dir)
+    extracted = extract_project_features(body.description)
+    violations = check_compliance(extracted, site)
+
+    chunks = []
+    if bylaw_index is not None:
+        zones = _zone_prefixes(site.get("zoning_class"))
+        chunks = bylaw_index.search(body.question, zones=zones, k=4)
+
+    answer = narrate_question(
+        question=body.question,
+        site=site,
+        extracted=extracted,
+        violations=violations,
+        retrieved_chunks=chunks,
+        history=body.history,
+        llm_client=llm_client,
+    )
+    return {"answer": answer}

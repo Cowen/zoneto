@@ -36,6 +36,26 @@ def create_app(
         app.state.model_dir = resolved_model_dir
         app.state.production_ready = _load_production_ready(resolved_model_dir)
         app.state.ready = True
+
+        # Bylaw index — optional; absent if `zoneto bylaw-index` hasn't been run yet
+        bylaw_index_dir = resolved_data_dir / "bylaw_index"
+        if (bylaw_index_dir / "chunks.parquet").exists():
+            from zoneto.analytics.bylaw_index import BylawIndex  # noqa: PLC0415
+
+            app.state.bylaw_index = BylawIndex(bylaw_index_dir)
+        else:
+            app.state.bylaw_index = None
+
+        # LLM client — optional; absent when ANTHROPIC_API_KEY is not set
+        import os  # noqa: PLC0415
+
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            from zoneto.api.llm_client import make_llm_client  # noqa: PLC0415
+
+            app.state.llm_client = make_llm_client()
+        else:
+            app.state.llm_client = None
+
         yield
 
     app = FastAPI(title="Zoneto", version="0.1.0", lifespan=lifespan)
