@@ -764,6 +764,32 @@
       return _BYLAW_BASE + 'ZBL_NewProvision_Chapter1.htm';
     }
 
+    // Map zone code prefixes to By-law 569-2013 Chapter 900 section numbers
+    const ZONE_TO_CHAPTER_SECTION = {
+      RAC: 8, RA: 7, RM: 6, RT: 5, RS: 4, RD: 3, R: 2,
+      CRE: 12, CR: 11, CL: 10,
+      EO: 24, EH: 22, EL: 21, E: 20,
+      IPW: 34, IS: 33, IE: 32, IH: 31, I: 30,
+      OC: 45, OG: 43, OM: 50, ON: 41, OR: 42, O: 40,
+      UT: 50,
+    };
+
+    function zoneExceptionUrl(zoneCode, exceptionNo) {
+      if (!zoneCode) return null;
+      const uc = zoneCode.toUpperCase();
+      // Extract zone prefix (longest match first to handle RAC before RA, etc)
+      let section = null;
+      for (const [prefix, sec] of Object.entries(ZONE_TO_CHAPTER_SECTION)) {
+        if (uc.startsWith(prefix)) {
+          section = sec;
+          break;
+        }
+      }
+      if (section === null) return null;
+      // Link to zone-specific chapter; no anchor since not all exceptions are published online
+      return `${_BYLAW_BASE}ZBL_NewProvision_Chapter900_${section}.htm`;
+    }
+
     // Mirror of analytics/use_classifier._ZONE_ALLOWED. Keep in sync.
     const ZONE_ALLOWED_USES = {
       'Residential':                              new Set(['residential', 'mixed_use']),
@@ -871,8 +897,12 @@
       if (ctx.zoning_exception === 1) {
         const label = ctx.zoning_exception_no ? `Exception #${ctx.zoning_exception_no}` : 'Zone exception';
         const tip = "Site has site-specific zoning provisions on top of the base zone. Confirm the exception's conditions still permit the proposed use and form before relying on as-of-right zoning.";
-        const href = 'https://www.toronto.ca/zoning/bylaw_amendments/';
-        html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}"><a href="${escHtml(href)}" target="_blank" rel="noopener">${escHtml(label)}</a></span>`;
+        const href = zoneExceptionUrl(ctx.zoning_class, ctx.zoning_exception_no);
+        if (href) {
+          html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}"><a href="${escHtml(href)}" target="_blank" rel="noopener">${escHtml(label)}</a></span>`;
+        } else {
+          html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}">${escHtml(label)}</span>`;
+        }
       }
 
       // Regulatory flags
