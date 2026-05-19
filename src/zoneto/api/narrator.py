@@ -26,10 +26,24 @@ STRICT RULES you must always follow:
 5. Be concise and precise. Use plain language where possible.
 6. At the very end of your compliance summary, on its own line, write:
    CONFIDENCE: <0-100>
-   where the number is your overall assessment of the proposal's likelihood
-   of passing development review as submitted (100 = near-certain as-of-right
-   approval, 0 = categorically prohibited or no realistic path forward).
-   Base the score on the violations, zone context, and retrieved sections.
+   where the number is your assessment of the proposal's likelihood of
+   obtaining planning approval (through whatever process is required):
+     90–100: as-of-right or near-certain approval — no rezoning needed
+     70–89:  strong likelihood — minor variance or well-supported rezoning,
+             backed by comparable approvals or good zone fit
+     50–69:  probable — rezoning required but solid precedent exists and
+             no significant barriers detected
+     30–49:  uncertain — rezoning required with mixed signals or data gaps
+     10–29:  low probability — major barriers, poor zone fit, or active violations
+     0–9:    effectively prohibited — categorically excluded by by-law
+   Key signals that RAISE confidence:
+   - High approval rate and/or low appeal rate among comparable applications
+   - No violations from the rule engine
+   - Site falls within MTSA, secondary plan, or other permissive overlay
+   Key signals that LOWER confidence:
+   - Active violations flagged by the rule engine
+   - Categorically prohibited use
+   - Site in heritage district with major alterations proposed
    This line must be the absolute last line of your response.
 """
 
@@ -47,7 +61,10 @@ def _parse_confidence(raw: str) -> tuple[str, int | None]:
         lines.pop()
     score: int | None = None
     for i in range(len(lines) - 1, -1, -1):
-        m = re.match(r"^\s*CONFIDENCE:\s*(-?\d+)\s*$", lines[i], re.I)
+        # Allow optional markdown bold (**), trailing period/comma, and parenthetical
+        m = re.match(
+            r"^\s*\*{0,2}CONFIDENCE:\*{0,2}\s*(-?\d+)[.,)%*\s]*$", lines[i], re.I
+        )
         if m:
             score = min(100, max(0, int(m.group(1))))
             lines.pop(i)
@@ -115,13 +132,69 @@ def _format_extracted(extracted: ProjectFeatures) -> str:
     parts = []
     if extracted.proposed_storeys is not None:
         parts.append(f"{extracted.proposed_storeys} storeys")
+    if getattr(extracted, "proposed_height_m", None) is not None:
+        parts.append(f"{extracted.proposed_height_m}m height")
     if extracted.proposed_units is not None:
         parts.append(f"{extracted.proposed_units} units")
     if extracted.proposed_use:
         parts.append(f"proposed use: {extracted.proposed_use}")
     if extracted.has_ground_floor_retail:
         parts.append("ground-floor retail")
+    if getattr(extracted, "building_type", None):
+        parts.append(f"building type: {extracted.building_type}")
     return ", ".join(parts) if parts else "no structured features extracted"
+
+
+def _format_description_similarity(sim: dict[str, Any] | None) -> str:
+    """Format description similarity context for the LLM prompt.
+
+    Returns empty string when sim is None or n_similar==0 (no useful signal).
+    Highlights high-similarity approved comparables when present.
+    """
+    if not sim:
+        return ""
+    n = sim.get("n_similar", 0)
+    if not n:
+        return ""
+    parts = [
+        f"Description similarity analysis found {n} comparable OZ/SA applications "
+        "with similar project descriptions."
+    ]
+    # Highlight strongest comparable when very high similarity and known outcome
+    top_matches = sim.get("top_matches") or []
+    if top_matches:
+        best = top_matches[0]
+        if best.get("similarity", 0) >= 0.95:
+            approved = best.get("dev_approved")
+            appealed = best.get("dev_appealed")
+            app_type = best.get("application_type", "OZ")
+            if approved == 1 and appealed == 0:
+                parts.append(
+                    f"The closest comparable ({app_type}, similarity "
+                    f"{best['similarity']:.0%}) was Council-approved with no OLT "
+                    "appeal — a very strong precedent signal."
+                )
+            elif approved == 1:
+                parts.append(
+                    f"The closest comparable ({app_type}, similarity "
+                    f"{best['similarity']:.0%}) was Council-approved."
+                )
+    appeal_rate = sim.get("appeal_rate")
+    if appeal_rate is not None:
+        pct = round(appeal_rate * 100)
+        parts.append(
+            f"Across all {n} comparables, the appeal rate is {pct}%. "
+            "A low appeal rate suggests good precedent support; "
+            "a high rate suggests elevated legal risk."
+        )
+    approval_rate = sim.get("approval_rate")
+    if approval_rate is not None:
+        pct = round(approval_rate * 100)
+        parts.append(
+            f"{pct}% of comparables with known outcomes were Council-approved. "
+            "Weight this heavily in the confidence score."
+        )
+    return " ".join(parts)
 
 
 def _format_data_gaps(data_gaps: list[str]) -> str:
@@ -144,6 +217,7 @@ def narrate_evaluation(
     llm_client: LLMClient,
     *,
     data_gaps: list[str] | None = None,
+    description_similarity: dict[str, Any] | None = None,
 ) -> tuple[str, int | None]:
     """Generate a markdown compliance summary and confidence score.
 
@@ -156,6 +230,7 @@ def narrate_evaluation(
         or None if the LLM did not emit the expected line.
     """
     gaps_section = _format_data_gaps(data_gaps or [])
+    sim_section = _format_description_similarity(description_similarity)
     user_content = f"""\
 ## Site context
 {_format_site(site)}
@@ -168,10 +243,16 @@ def narrate_evaluation(
 
 ## Relevant By-law 569-2013 sections (retrieved by semantic search)
 {_format_chunks(chunks)}
-{("" if not gaps_section else (
-    "\n## Known data gaps (do not speculate beyond these)\n"
-    + gaps_section
-))}
+{("" if not sim_section else ("\n## Comparable application outcomes\n" + sim_section))}
+{
+        (
+            ""
+            if not gaps_section
+            else (
+                "\n## Known data gaps (do not speculate beyond these)\n" + gaps_section
+            )
+        )
+    }
 
 ---
 
@@ -180,7 +261,9 @@ Write a concise compliance summary (3–6 sentences) in plain markdown. Explain:
 2. What path forward is most likely (as-of-right adjustment, minor variance,
    or rezoning), citing the specific violations above.
 3. Any important context from the retrieved by-law sections above.
-4. If data gaps are listed above, note that the assessment is limited by those
+4. If comparable application outcomes are listed above, factor the appeal rate
+   of similar projects into your confidence assessment.
+5. If data gaps are listed above, note that the assessment is limited by those
    gaps and recommend the applicant supply the missing information.
 
 Do not repeat the violations verbatim — explain them in plain language.
@@ -190,7 +273,7 @@ End with a CONFIDENCE line as required by the system rules.
     raw = llm_client.complete(
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_content}],
-        max_tokens=650,
+        max_tokens=800,
     )
     return _parse_confidence(raw)
 

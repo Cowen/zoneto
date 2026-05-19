@@ -111,6 +111,18 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
             WHERE ST_Within({point_sql}, z.geom)
             LIMIT 1
         """).fetchall()
+        # Fallback: if point misses all polygons (geocoding imprecision), snap to
+        # nearest polygon within ~200m (0.002 degrees at Toronto's latitude).
+        if not rows:
+            rows = con.execute(f"""
+                SELECT
+                    {cols_sql}
+                FROM ST_Read('{escaped}') z
+                WHERE ST_DWithin({point_sql}, z.geom, 0.002)
+                ORDER BY ST_Distance({point_sql}, z.geom)
+                LIMIT 1
+            """).fetchall()
+
         if rows:
             row = rows[0]
             result["zoning_class"] = row[0]

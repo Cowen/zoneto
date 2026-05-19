@@ -339,6 +339,24 @@ def test_lookup_mixed_use_fsi_splits(ref_dir: Path) -> None:
     assert result["zoning_pct_emp"] is None  # -1 sentinel
 
 
+def test_lookup_nearby_polygon_fallback(ref_dir: Path) -> None:
+    """Given: A point slightly outside (0.0003 deg) the only zoning polygon.
+    When: Lookup.
+    Then: Falls back to the nearest polygon within tolerance and returns its zone."""
+    # The test polygon covers (-79.39,-79.37) × (43.64,43.66)
+    # A point at 43.6601 is just outside the polygon's northern edge (43.66)
+    result = lookup_site_context(43.6601, -79.38, ref_dir)
+    assert result["zoning_class"] == "CR"
+
+
+def test_lookup_far_point_not_snapped(ref_dir: Path) -> None:
+    """Given: A point 0.05 degrees outside all polygons.
+    When: Lookup.
+    Then: No snap occurs — returns None (too far for the fallback threshold)."""
+    result = lookup_site_context(43.71, -79.38, ref_dir)
+    assert result["zoning_class"] is None
+
+
 def test_lookup_missing_reference_files(tmp_path: Path) -> None:
     """Graceful degradation when reference files don't exist."""
     ref = tmp_path / "reference"

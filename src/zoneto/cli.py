@@ -467,11 +467,26 @@ def serve(
     ] = False,
 ) -> None:
     """Start the FastAPI serving layer."""
+    import os
+
     import uvicorn
 
-    from zoneto.api.app import create_app
+    if reload:
+        # Reload mode requires an import string; pass config via environment variables.
+        os.environ["ZONETO_DATA_DIR"] = str(data_dir)
+        os.environ["ZONETO_MODEL_DIR"] = str(model_dir)
+        os.environ["ZONETO_STATIC_DIR"] = str(static_dir)
+        uvicorn.run(
+            "zoneto.api.app:create_app_from_env",
+            factory=True,
+            host=host,
+            port=port,
+            reload=True,
+        )
+    else:
+        from zoneto.api.app import create_app
 
-    application = create_app(
-        data_dir=data_dir, model_dir=model_dir, static_dir=static_dir
-    )
-    uvicorn.run(application, host=host, port=port, reload=reload)
+        application = create_app(
+            data_dir=data_dir, model_dir=model_dir, static_dir=static_dir
+        )
+        uvicorn.run(application, host=host, port=port)

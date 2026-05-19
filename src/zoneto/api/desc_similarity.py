@@ -56,7 +56,13 @@ def score_description_similarity(
 
         extra_cols = [
             c
-            for c in ["dev_appealed", "folderrsn", "application_type", "street_address"]
+            for c in [
+                "dev_appealed",
+                "dev_approved",
+                "folderrsn",
+                "application_type",
+                "street_address",
+            ]
             if c in available
         ]
         select = ", ".join(svd_cols + extra_cols)
@@ -104,9 +110,23 @@ def score_description_similarity(
         else:
             appeal_rate = None
 
+        # Approval rate from labelled top matches
+        approval_rate: float | None = None
+        if "dev_approved" in extra_cols:
+            approved_col = extra_cols.index("dev_approved")
+            approved_labels = [
+                int(rows[idx][n_svd + approved_col])
+                for idx in top_indices[:top_n]
+                if rows[idx][n_svd + approved_col] is not None
+            ]
+            approval_rate = (
+                sum(approved_labels) / len(approved_labels) if approved_labels else None
+            )
+
         return {
             "top_matches": top_matches,
             "appeal_rate": appeal_rate,
+            "approval_rate": approval_rate,
             "n_similar": len(top_matches),
         }
 

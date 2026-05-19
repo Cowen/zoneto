@@ -76,3 +76,23 @@ def create_app(
         )
 
     return app
+
+
+def create_app_from_env() -> FastAPI:
+    """App factory that reads paths from environment variables.
+
+    Used by uvicorn --reload mode, which requires an import string and cannot
+    receive CLI-supplied Path arguments directly.
+
+    Environment variables:
+        ZONETO_DATA_DIR   (default: "data")
+        ZONETO_MODEL_DIR  (default: "models")
+        ZONETO_STATIC_DIR (default: "static")
+    """
+    import os  # noqa: PLC0415
+
+    return create_app(
+        data_dir=Path(os.environ.get("ZONETO_DATA_DIR", "data")),
+        model_dir=Path(os.environ.get("ZONETO_MODEL_DIR", "models")),
+        static_dir=Path(os.environ.get("ZONETO_STATIC_DIR", "static")),
+    )

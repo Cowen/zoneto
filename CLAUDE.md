@@ -1,6 +1,6 @@
 # Zoneto -- Toronto Building Data Pipeline
 
-<!-- Freshness: 2026-03-26 -->
+<!-- Freshness: 2026-05-19 -->
 <!-- Last reviewed against: main (comps spatial context fields) -->
 
 ## Purpose
@@ -176,8 +176,11 @@ providing a live alternative to the retired CKAN dev_applications dataset.
   trained models. Writes scored parquet to `data/scores/`.
 - `zoneto summary` -- prints percentile distributions (p5/p25/p50/p75/p95) and mean
   for all `pred_*` and `prob_*` columns in scored parquet files under `data/scores/`.
-- `zoneto serve [--port INT] [--host STR] [--data-dir PATH] [--model-dir PATH] [--static-dir PATH]` --
-  starts the FastAPI serving layer. Default: `0.0.0.0:8000`.
+- `zoneto serve [--port INT] [--host STR] [--data-dir PATH] [--model-dir PATH] [--static-dir PATH] [--reload]` --
+  starts the FastAPI serving layer. Default: `0.0.0.0:8000`. With `--reload`,
+  sets `ZONETO_DATA_DIR`/`ZONETO_MODEL_DIR`/`ZONETO_STATIC_DIR` env vars and
+  launches uvicorn with the import string `zoneto.api.app:create_app_from_env`
+  and `factory=True` so module changes hot-reload.
 
 `DATA_DIR` defaults to `Path("data")` (cwd-relative).
 
@@ -381,6 +384,13 @@ Scrapes Ontario Land Tribunal decisions for Toronto:
 - Lifespan loads `production_ready` flags from `metrics.json` into app state
 - Mounts `static/` directory for HTML frontend if it exists
 - Static files mounted at `/` with `html=True` (serves `index.html` as default)
+- `create_app_from_env() -> FastAPI` -- zero-argument factory that reads
+  `ZONETO_DATA_DIR`, `ZONETO_MODEL_DIR`, and `ZONETO_STATIC_DIR` env vars
+  (defaults: `data`, `models`, `static`) and delegates to `create_app(...)`.
+  Required by uvicorn `--reload` mode, which needs an import string
+  (`zoneto.api.app:create_app_from_env`) and cannot receive Path arguments
+  directly. `zoneto serve --reload` sets the three env vars before invoking
+  uvicorn with `factory=True`.
 
 ### Project Feature Extraction (`analytics/extract.py`)
 
@@ -412,28 +422,65 @@ dev_applications corpus using the trained TF-IDF + SVD pipeline.
 - Returns `None` when the TF-IDF model or enriched parquet is unavailable, when
   no SVD columns are present, or on any internal error (defensive — endpoint
   treats similarity as optional context).
-- On success returns `{"top_matches": list[dict], "appeal_rate": float | None, "n_similar": int}`.
+- On success returns `{"top_matches": list[dict], "appeal_rate": float | None, "approval_rate": float | None, "n_similar": int}`.
   Each match contains `similarity` (rounded to 3 d.p.) plus whichever of
-  `folderrsn`, `application_type`, `street_address`, `dev_appealed` are available.
+  `folderrsn`, `application_type`, `street_address`, `dev_appealed`, `dev_approved`
+  are available.
   `appeal_rate` is the share of labelled top matches that were appealed (None when
-  no labelled matches).
+  no labelled matches). `approval_rate` is the share of labelled top matches that
+  were Council-approved (None when no labelled matches).
+
+### Site Context Lookup (`api/site_context.py`)
+
+- `lookup_site_context(lat, lon, data_dir) -> dict[str, Any]` -- spatial
+  point-in-polygon lookup against zoning, heritage, secondary-plan, and MTSA
+  GeoJSON/SHP layers in `data/reference/` via DuckDB `ST_Read`. Returns a dict
+  populated with whichever of the following are resolved: `zoning_class`,
+  `zoning_max_units`, `zoning_max_density`, `zoning_max_storeys`,
+  `zoning_max_height_m`, `permitted_use_category`, `zoning_holding`,
+  `in_heritage_register`, `in_heritage_district`, `in_secondary_plan`,
+  `secondary_plan_name`, `in_mtsa`.
+- **Zoning nearest-polygon fallback:** when `ST_Within(point, zoning.geom)`
+  returns no hit (off-parcel geocoded coordinates, road/right-of-way points),
+  the lookup retries with `ST_DWithin(point, geom, 0.002)` (~200m at Toronto's
+  latitude) ordered by `ST_Distance`, snapping to the nearest zoning polygon.
+  Points more than ~200m from any polygon still resolve as "unknown zone".
+  Heritage, secondary-plan, and MTSA lookups remain strict `ST_Within` (no
+  snapping) — those flags should not bleed across boundaries.
 
 ### Narrator (`api/narrator.py`)
 
-- `narrate_evaluation(site, extracted, violations, chunks, llm_client, *, data_gaps=None) -> tuple[str, int | None]`
+- `narrate_evaluation(site, extracted, violations, chunks, llm_client, *, data_gaps=None, description_similarity=None) -> tuple[str, int | None]`
 - Generates a markdown compliance summary plus an integer 0-100 confidence
   score parsed from a trailing `CONFIDENCE: <n>` line emitted by the LLM
-  (returns `None` for the score if the line is missing).
+  (returns `None` for the score if the line is missing). Parsing is lenient:
+  scans backward from the last non-blank line and tolerates optional markdown
+  bold (`**CONFIDENCE: 75**`) and trailing punctuation (`.`, `,`, `)`, `%`).
+- The system prompt defines a tiered 0-100 confidence scale (90-100 = as-of-right,
+  70-89 = strong/well-supported rezoning, 50-69 = probable rezoning with solid
+  precedent, 30-49 = uncertain, 10-29 = low probability, 0-9 = effectively
+  prohibited) and enumerates explicit confidence-raising and -lowering signals.
 - When `data_gaps` is provided (list of human-readable strings), a "Known data
   gaps (do not speculate beyond these)" section is injected into the LLM prompt
   so the model is anchored to the missing-information scope and does not
   fabricate beyond it.
+- When `description_similarity` is provided (the dict returned by
+  `score_description_similarity`), a "Comparable application outcomes" section is
+  injected via `_format_description_similarity()` — summarising the number of
+  similar OZ/SA applications, highlighting strongest-match outcomes when
+  similarity >= 0.95, and reporting `appeal_rate` and `approval_rate`. The
+  section is omitted when the dict is None or `n_similar == 0`.
+- LLM `max_tokens` is 800 for evaluation narration (400 for follow-up questions
+  via `narrate_question`).
 
 ### Evaluate Endpoint (`api/routes.py`)
 
 `POST /evaluate` — runs the full address-to-compliance pipeline: geocode,
 site-context lookup, project-feature extraction, rule-engine compliance check,
-dual-query bylaw retrieval, LLM narration, and description-similarity scoring.
+dual-query bylaw retrieval, description-similarity scoring, and LLM narration.
+Description-similarity is computed before narration and forwarded to
+`narrate_evaluation` via `description_similarity=...` so the LLM can weight
+comparable-application outcomes when assigning its confidence score.
 
 `EvaluateResponse` fields:
 

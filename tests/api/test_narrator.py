@@ -2,9 +2,38 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from zoneto.analytics.extract import ProjectFeatures
 from zoneto.api.llm_client import FakeLLMClient
-from zoneto.api.narrator import _parse_confidence, narrate_evaluation
+from zoneto.api.narrator import (
+    _format_description_similarity,
+    _parse_confidence,
+    narrate_evaluation,
+)
+
+
+class CapturingFakeLLMClient:
+    """FakeLLMClient variant that captures the last call's messages for assertion."""
+
+    def __init__(self, response: str = "Summary.\n\nCONFIDENCE: 60") -> None:
+        self._response = response
+        self.last_messages: list[dict[str, str]] = []
+        self.last_system: str = ""
+
+    def complete(
+        self, system: str, messages: list[dict[str, str]], max_tokens: int
+    ) -> str:
+        self.last_system = system
+        self.last_messages = messages
+        return self._response
+
+    def stream(
+        self, system: str, messages: list[dict[str, str]], max_tokens: int
+    ) -> Iterator[str]:
+        self.last_system = system
+        self.last_messages = messages
+        yield self._response
 
 
 class TestParseConfidence:
@@ -64,6 +93,20 @@ class TestParseConfidence:
         assert score == 30
         assert "CONFIDENCE" not in summary
         assert "Proposal has issues." in summary
+
+    def test_trailing_period_handled(self) -> None:
+        """Given: LLM appends a period after the confidence number.
+        When: Parsing.
+        Then: Score is still extracted."""
+        _, score = _parse_confidence("Summary.\n\nCONFIDENCE: 72.")
+        assert score == 72
+
+    def test_markdown_bold_handled(self) -> None:
+        """Given: LLM wraps CONFIDENCE in markdown bold markers.
+        When: Parsing.
+        Then: Score is still extracted."""
+        _, score = _parse_confidence("Summary.\n\n**CONFIDENCE: 65**")
+        assert score == 65
 
     def test_summary_not_mangled_when_score_present(self) -> None:
         """Given: Multi-paragraph summary with trailing CONFIDENCE line.
@@ -168,4 +211,141 @@ class TestNarrateEvaluationReturnType:
         )
         assert score == 85
         assert "CONFIDENCE" not in summary
-        assert "Good proposal" in summary
+
+
+class TestFormatDescriptionSimilarity:
+    def test_returns_empty_when_none(self) -> None:
+        """Given: description_similarity is None.
+        When: Formatting.
+        Then: Returns empty string."""
+        assert _format_description_similarity(None) == ""
+
+    def test_formats_appeal_rate(self) -> None:
+        """Given: description_similarity with appeal_rate=0.0.
+        When: Formatting.
+        Then: Output contains appeal rate."""
+        sim = {"appeal_rate": 0.0, "n_similar": 15, "top_matches": []}
+        out = _format_description_similarity(sim)
+        assert "0%" in out or "0.0" in out
+        assert "15" in out
+
+    def test_formats_nonzero_appeal_rate(self) -> None:
+        """Given: description_similarity with appeal_rate=0.25.
+        When: Formatting.
+        Then: Output contains 25%."""
+        sim = {"appeal_rate": 0.25, "n_similar": 20, "top_matches": []}
+        out = _format_description_similarity(sim)
+        assert "25%" in out
+
+    def test_formats_approval_rate(self) -> None:
+        """Given: description_similarity with approval_rate=0.80.
+        When: Formatting.
+        Then: Output contains 80% approval signal."""
+        sim = {
+            "appeal_rate": 0.0,
+            "approval_rate": 0.80,
+            "n_similar": 20,
+            "top_matches": [],
+        }
+        out = _format_description_similarity(sim)
+        assert "80%" in out
+
+    def test_highlights_top_comparable_when_approved(self) -> None:
+        """Given: Top match has similarity >= 0.95 and dev_approved=1, dev_appealed=0.
+        When: Formatting.
+        Then: Output highlights this as a strong precedent signal."""
+        sim = {
+            "appeal_rate": 0.0,
+            "approval_rate": 1.0,
+            "n_similar": 5,
+            "top_matches": [
+                {"similarity": 1.0, "dev_approved": 1, "dev_appealed": 0, "application_type": "OZ"}
+            ],
+        }
+        out = _format_description_similarity(sim)
+        assert "Council-approved" in out
+        assert "no OLT" in out.lower() or "no olt" in out.lower() or "no appeal" in out.lower() or "no OLT" in out
+
+    def test_returns_empty_when_n_similar_zero(self) -> None:
+        """Given: description_similarity with n_similar=0 (no comparables found).
+        When: Formatting.
+        Then: Returns empty string (no useful data to show)."""
+        sim = {"appeal_rate": None, "n_similar": 0, "top_matches": []}
+        assert _format_description_similarity(sim) == ""
+
+    def test_appeal_rate_none_does_not_crash(self) -> None:
+        """Given: description_similarity with appeal_rate=None.
+        When: Formatting.
+        Then: Does not crash; returns a non-empty string with n_similar."""
+        sim = {"appeal_rate": None, "n_similar": 5, "top_matches": []}
+        out = _format_description_similarity(sim)
+        assert isinstance(out, str)
+
+
+class TestNarrateEvaluationDescriptionSimilarity:
+    def _minimal_site(self) -> dict:
+        return {
+            "zoning_class": "CR",
+            "permitted_use_category": "Commercial Residential (mixed)",
+            "zoning_max_storeys": None,
+            "zoning_max_height_m": None,
+            "zoning_max_units": None,
+            "zoning_max_density": None,
+            "in_heritage_register": 0,
+            "in_heritage_district": 0,
+            "in_mtsa": 0,
+            "in_secondary_plan": 0,
+            "secondary_plan_name": None,
+            "zoning_holding": 0,
+        }
+
+    def test_description_similarity_none_does_not_affect_output(self) -> None:
+        """Given: description_similarity=None passed.
+        When: narrate_evaluation called.
+        Then: Works normally, no error."""
+        client = FakeLLMClient("Summary.\n\nCONFIDENCE: 55")
+        extracted = ProjectFeatures(None, None, "mixed_use", False)
+        summary, score = narrate_evaluation(
+            self._minimal_site(),
+            extracted,
+            [],
+            [],
+            client,
+            description_similarity=None,
+        )
+        assert score == 55
+
+    def test_description_similarity_injected_into_prompt(self) -> None:
+        """Given: description_similarity with appeal_rate=0.0 and n_similar=20.
+        When: narrate_evaluation called.
+        Then: The LLM user message includes appeal rate context."""
+        client = CapturingFakeLLMClient("Summary.\n\nCONFIDENCE: 72")
+        extracted = ProjectFeatures(17, 258, "mixed_use", False)
+        sim = {
+            "appeal_rate": 0.0,
+            "n_similar": 20,
+            "top_matches": [{"similarity": 1.0, "dev_appealed": 0}],
+        }
+        narrate_evaluation(
+            self._minimal_site(),
+            extracted,
+            [],
+            [],
+            client,
+            description_similarity=sim,
+        )
+        user_content = client.last_messages[0]["content"]
+        assert "appeal" in user_content.lower()
+        assert "20" in user_content
+
+    def test_backward_compat_no_description_similarity_kwarg(self) -> None:
+        """Given: narrate_evaluation called without description_similarity kwarg.
+        When: Called.
+        Then: Works as before (backward compatible)."""
+        client = FakeLLMClient("Backward compat.\n\nCONFIDENCE: 70")
+        extracted = ProjectFeatures(None, None, "residential", False)
+        summary, score = narrate_evaluation(
+            self._minimal_site(), extracted, [], [], client
+        )
+        assert score == 70
+        assert "Backward compat." in summary

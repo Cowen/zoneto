@@ -415,12 +415,18 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         )
 
     data_gaps = _compute_data_gaps(site, extracted)
-    summary_md, confidence_score = narrate_evaluation(
-        site, extracted, violations, chunks, llm_client, data_gaps=data_gaps
-    )
     model_dir: Path = getattr(request.app.state, "model_dir", Path("models"))
     desc_sim = score_description_similarity(
         body.description or "", data_dir=data_dir, model_dir=model_dir
+    )
+    summary_md, confidence_score = narrate_evaluation(
+        site,
+        extracted,
+        violations,
+        chunks,
+        llm_client,
+        data_gaps=data_gaps,
+        description_similarity=desc_sim,
     )
 
     return EvaluateResponse(
