@@ -461,6 +461,10 @@ def serve(
         Path,
         typer.Option(help="Static files directory."),
     ] = Path("static"),
+    reload: Annotated[
+        bool,
+        typer.Option(help="Auto-reload on code changes (development only)."),
+    ] = False,
 ) -> None:
     """Start the FastAPI serving layer."""
     import uvicorn
@@ -470,4 +474,4 @@ def serve(
     application = create_app(
         data_dir=data_dir, model_dir=model_dir, static_dir=static_dir
     )
-    uvicorn.run(application, host=host, port=port)
+    uvicorn.run(application, host=host, port=port, reload=reload)

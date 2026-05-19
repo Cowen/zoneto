@@ -42,7 +42,7 @@ summary:
 
 # Start the FastAPI serving layer
 serve:
-    uv run zoneto serve
+    source .env && uv run zoneto serve --reload
 
 # Build the Docker image for the serving layer
 # Run `just bylaw-index` first to bake the bylaw index into the image.
