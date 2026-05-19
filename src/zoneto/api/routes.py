@@ -15,6 +15,7 @@ from zoneto.analytics.explain import explain_one
 from zoneto.analytics.extract import extract_project_features
 from zoneto.analytics.score import score_one
 from zoneto.api.comps import query_comps
+from zoneto.api.desc_similarity import score_description_similarity
 from zoneto.api.narrator import narrate_evaluation, narrate_question
 from zoneto.api.site_context import lookup_site_context
 
@@ -276,6 +277,8 @@ class EvaluateResponse(BaseModel):
     summary_md: str
     suggestions: list[str]
     confidence_score: int | None = None
+    data_gaps: list[str] = []
+    description_similarity: dict[str, Any] | None = None
 
 
 class AskRequest(BaseModel):
@@ -355,6 +358,37 @@ def _retrieve_chunks(
     return merged[:k]
 
 
+def _compute_data_gaps(site: dict[str, Any], extracted: Any) -> list[str]:
+    """Identify what information is unavailable and would improve the assessment."""
+    gaps: list[str] = []
+    # Lot dimensions: always unavailable from open data
+    gaps.append(
+        "Actual lot area and frontage: not available from open data "
+        "(obtain from MPAC, deed, or survey). "
+        "Compliance with minimum lot area/frontage requirements in "
+        "your zone cannot be verified."
+    )
+    # Height overlay: absent when site is outside Schedule B coverage (~85% of city)
+    if (
+        site.get("zoning_max_storeys") is None
+        and site.get("zoning_max_height_m") is None
+    ):
+        if site.get("zoning_class"):
+            gaps.append(
+                "Height overlay (By-law 569-2013 Schedule B): this site is outside the "
+                "height overlay area (~85% of the city). Base zone regulations govern "
+                "maximum height; no HT designation applies here."
+            )
+    # Building type: needed to determine which zone exception standards apply
+    if getattr(extracted, "building_type", None) is None:
+        gaps.append(
+            "Building type (detached, semi-detached, duplex, triplex, "
+            "townhouse, apartment): not specified. Some zone exceptions "
+            "and standards vary by building type."
+        )
+    return gaps
+
+
 @router.post("/evaluate", response_model=EvaluateResponse)
 def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
     """Evaluate a project description against By-law 569-2013 for a given address."""
@@ -380,8 +414,13 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
             bylaw_index, site, body.description, extracted.proposed_use, k=6
         )
 
+    data_gaps = _compute_data_gaps(site, extracted)
     summary_md, confidence_score = narrate_evaluation(
-        site, extracted, violations, chunks, llm_client
+        site, extracted, violations, chunks, llm_client, data_gaps=data_gaps
+    )
+    model_dir: Path = getattr(request.app.state, "model_dir", Path("models"))
+    desc_sim = score_description_similarity(
+        body.description or "", data_dir=data_dir, model_dir=model_dir
     )
 
     return EvaluateResponse(
@@ -393,6 +432,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
             "proposed_units": extracted.proposed_units,
             "proposed_use": extracted.proposed_use,
             "has_ground_floor_retail": extracted.has_ground_floor_retail,
+            "building_type": extracted.building_type,
         },
         violations=[
             ViolationResult(
@@ -418,6 +458,8 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         summary_md=summary_md,
         confidence_score=confidence_score,
         suggestions=[v.suggested_remedy for v in violations if v.suggested_remedy],
+        data_gaps=data_gaps,
+        description_similarity=desc_sim,
     )
 
 

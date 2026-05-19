@@ -76,6 +76,59 @@ class TestParseConfidence:
         assert "Paragraph two." in summary
 
 
+class TestNarrateEvaluationDataGaps:
+    def _minimal_site(self) -> dict:
+        return {
+            "zoning_class": "RM",
+            "permitted_use_category": "Residential",
+            "zoning_max_storeys": None,
+            "zoning_max_height_m": None,
+            "zoning_max_units": None,
+            "zoning_max_density": None,
+            "in_heritage_register": 0,
+            "in_heritage_district": 0,
+            "in_mtsa": 0,
+            "in_secondary_plan": 0,
+            "secondary_plan_name": None,
+            "zoning_holding": 0,
+        }
+
+    def test_data_gaps_accepted_without_error(self) -> None:
+        """Given: narrate_evaluation called with a non-empty data_gaps list.
+        When: LLM returns a valid response.
+        Then: Returns (summary, score) without error."""
+        client = FakeLLMClient("Summary noting gaps.\n\nCONFIDENCE: 45")
+        extracted = ProjectFeatures(None, None, "residential", False)
+        gaps = ["Actual lot area and frontage not available from open data."]
+        summary, score = narrate_evaluation(
+            self._minimal_site(), extracted, [], [], client, data_gaps=gaps
+        )
+        assert score == 45
+        assert "Summary" in summary
+
+    def test_empty_data_gaps_still_works(self) -> None:
+        """Given: narrate_evaluation called with an empty data_gaps list.
+        When: LLM returns a valid response.
+        Then: Returns (summary, score) as normal."""
+        client = FakeLLMClient("Clean site.\n\nCONFIDENCE: 90")
+        extracted = ProjectFeatures(None, None, "residential", False)
+        summary, score = narrate_evaluation(
+            self._minimal_site(), extracted, [], [], client, data_gaps=[]
+        )
+        assert score == 90
+
+    def test_no_data_gaps_arg_still_works(self) -> None:
+        """Given: narrate_evaluation called without data_gaps keyword.
+        When: LLM returns a response.
+        Then: Backward compatible — no error, normal return."""
+        client = FakeLLMClient("Normal summary.\n\nCONFIDENCE: 70")
+        extracted = ProjectFeatures(None, None, "residential", False)
+        summary, score = narrate_evaluation(
+            self._minimal_site(), extracted, [], [], client
+        )
+        assert score == 70
+
+
 class TestNarrateEvaluationReturnType:
     def _minimal_site(self) -> dict:
         return {

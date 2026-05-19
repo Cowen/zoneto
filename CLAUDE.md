@@ -382,6 +382,84 @@ Scrapes Ontario Land Tribunal decisions for Toronto:
 - Mounts `static/` directory for HTML frontend if it exists
 - Static files mounted at `/` with `html=True` (serves `index.html` as default)
 
+### Project Feature Extraction (`analytics/extract.py`)
+
+`ProjectFeatures` dataclass — structured fields extracted via regex from a
+free-text project description:
+
+| Field | Type | Notes |
+|---|---|---|
+| `proposed_storeys` | `int \| None` | regex-extracted |
+| `proposed_units` | `int \| None` | regex-extracted |
+| `proposed_use` | `str \| None` | one of: residential/commercial/mixed_use/employment/institutional |
+| `has_ground_floor_retail` | `bool` | |
+| `description` | `str \| None` | original text (default None) |
+| `proposed_height_m` | `float \| None` | regex-extracted metres value (default None) |
+| `building_type` | `str \| None` | one of: apartment/duplex/triplex/fourplex/multiplex/semi_detached/townhouse/detached (default None) |
+
+- `extract_project_features(description: str | None) -> ProjectFeatures` --
+  returns a populated dataclass; missing fields are `None` / `False`.
+
+### Description Similarity (`api/desc_similarity.py`)
+
+Computes cosine similarity between a project description and the enriched
+dev_applications corpus using the trained TF-IDF + SVD pipeline.
+
+- `score_description_similarity(description, data_dir, model_dir, *, top_n=20, min_similarity=0.1) -> dict[str, Any] | None`
+- Loads `models/desc_tfidf.joblib`, transforms description into the 20-D SVD
+  space, then computes cosine similarity against `desc_svd_0..desc_svd_19`
+  columns in `data/enriched/dev_applications.parquet` via DuckDB.
+- Returns `None` when the TF-IDF model or enriched parquet is unavailable, when
+  no SVD columns are present, or on any internal error (defensive — endpoint
+  treats similarity as optional context).
+- On success returns `{"top_matches": list[dict], "appeal_rate": float | None, "n_similar": int}`.
+  Each match contains `similarity` (rounded to 3 d.p.) plus whichever of
+  `folderrsn`, `application_type`, `street_address`, `dev_appealed` are available.
+  `appeal_rate` is the share of labelled top matches that were appealed (None when
+  no labelled matches).
+
+### Narrator (`api/narrator.py`)
+
+- `narrate_evaluation(site, extracted, violations, chunks, llm_client, *, data_gaps=None) -> tuple[str, int | None]`
+- Generates a markdown compliance summary plus an integer 0-100 confidence
+  score parsed from a trailing `CONFIDENCE: <n>` line emitted by the LLM
+  (returns `None` for the score if the line is missing).
+- When `data_gaps` is provided (list of human-readable strings), a "Known data
+  gaps (do not speculate beyond these)" section is injected into the LLM prompt
+  so the model is anchored to the missing-information scope and does not
+  fabricate beyond it.
+
+### Evaluate Endpoint (`api/routes.py`)
+
+`POST /evaluate` — runs the full address-to-compliance pipeline: geocode,
+site-context lookup, project-feature extraction, rule-engine compliance check,
+dual-query bylaw retrieval, LLM narration, and description-similarity scoring.
+
+`EvaluateResponse` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `lat`, `lon` | `float \| None` | geocoded coordinates |
+| `site_context` | `dict[str, Any]` | from `lookup_site_context` |
+| `extracted` | `dict[str, Any]` | includes `building_type` |
+| `violations` | `list[ViolationResult]` | rule-engine output |
+| `relevant_sections` | `list[RelevantSection]` | retrieved bylaw chunks |
+| `summary_md` | `str` | LLM-generated markdown summary |
+| `suggestions` | `list[str]` | suggested remedies from violations |
+| `confidence_score` | `int \| None` | 0-100 from LLM, parsed by narrator |
+| `data_gaps` | `list[str]` | always-populated; see below |
+| `description_similarity` | `dict[str, Any] \| None` | from `score_description_similarity` |
+
+`_compute_data_gaps(site, extracted) -> list[str]` always includes the lot
+area/frontage caveat. It additionally adds:
+- A height-overlay caveat when both `zoning_max_storeys` and
+  `zoning_max_height_m` are `None` **and** `zoning_class` is set (i.e. the site
+  is outside the Schedule B height overlay).
+- A building-type caveat when `extracted.building_type is None`.
+
+The same `data_gaps` list is passed to `narrate_evaluation` and returned in the
+response so the frontend and the LLM see the same set of caveats.
+
 ## Dependencies
 
 | Package | Role |

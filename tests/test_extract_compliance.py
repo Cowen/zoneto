@@ -617,6 +617,73 @@ class TestComplianceProhibitedUses:
 
 
 # ---------------------------------------------------------------------------
+# building_type extraction
+# ---------------------------------------------------------------------------
+
+
+class TestExtractBuildingType:
+    def test_extracts_apartment(self) -> None:
+        """Given: Description containing 'apartment'.
+        When: Extracting features.
+        Then: building_type is 'apartment'."""
+        result = extract_project_features(
+            "A 6-storey apartment building with 40 units."
+        )
+        assert result.building_type == "apartment"
+
+    def test_extracts_duplex(self) -> None:
+        """Given: Description containing 'duplex'.
+        When: Extracting features.
+        Then: building_type is 'duplex'."""
+        result = extract_project_features("A duplex at the rear of the lot.")
+        assert result.building_type == "duplex"
+
+    def test_extracts_triplex(self) -> None:
+        """Given: Description containing 'triplex'.
+        When: Extracting features.
+        Then: building_type is 'triplex'."""
+        result = extract_project_features("Conversion of a house to a triplex.")
+        assert result.building_type == "triplex"
+
+    def test_extracts_townhouse(self) -> None:
+        """Given: Description containing 'townhouse'.
+        When: Extracting features.
+        Then: building_type is 'townhouse'."""
+        result = extract_project_features("A 3-storey townhouse with 1 unit.")
+        assert result.building_type == "townhouse"
+
+    def test_extracts_semi_detached(self) -> None:
+        """Given: Description containing 'semi-detached'.
+        When: Extracting features.
+        Then: building_type is 'semi_detached'."""
+        result = extract_project_features("A semi-detached house renovation.")
+        assert result.building_type == "semi_detached"
+
+    def test_extracts_fourplex(self) -> None:
+        """Given: Description containing 'fourplex'.
+        When: Extracting features.
+        Then: building_type is 'fourplex'."""
+        result = extract_project_features("A new fourplex on the rear lot.")
+        assert result.building_type == "fourplex"
+
+    def test_building_type_none_when_unspecified(self) -> None:
+        """Given: Description with no explicit building type keyword.
+        When: Extracting features.
+        Then: building_type is None."""
+        result = extract_project_features(
+            "A 3-storey residential building with 4 units."
+        )
+        assert result.building_type is None
+
+    def test_building_type_none_for_empty(self) -> None:
+        """Given: Empty description.
+        When: Extracting features.
+        Then: building_type is None."""
+        result = extract_project_features("")
+        assert result.building_type is None
+
+
+# ---------------------------------------------------------------------------
 # proposed_height_m extraction
 # ---------------------------------------------------------------------------
 

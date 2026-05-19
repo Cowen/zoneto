@@ -19,11 +19,34 @@ class ProjectFeatures:
     has_ground_floor_retail: bool
     description: str | None = None
     proposed_height_m: float | None = None
+    # apartment/duplex/triplex/fourplex/multiplex/semi_detached/townhouse/detached/None
+    building_type: str | None = None
 
 
 _STOREY_RE = re.compile(r"(?i)(\d+)\s*-?\s*store?ys?")
 _UNIT_RE = re.compile(r"(?i)(\d+)\s+(?:dwelling\s+)?units?")
 _HEIGHT_M_RE = re.compile(r"(?i)(\d+(?:\.\d+)?)\s*-?\s*(?:metres?|meters?|m)\b")
+_BUILDING_TYPE_MAP: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"(?i)\bapartment\b"), "apartment"),
+    (re.compile(r"(?i)\bduplex\b"), "duplex"),
+    (re.compile(r"(?i)\btriplex\b"), "triplex"),
+    (re.compile(r"(?i)\b(fourplex|four-plex|four\s+plex)\b"), "fourplex"),
+    (re.compile(r"(?i)\bmultiplex\b"), "multiplex"),
+    (re.compile(r"(?i)\bsemi-detached\b|\bsemi\s+detached\b"), "semi_detached"),
+    (
+        re.compile(
+            r"(?i)\b(townhouse|town-house|town\s+house|row\s+house|stacked\s+townhouse)\b"
+        ),
+        "townhouse",
+    ),
+    (
+        re.compile(
+            r"(?i)\b(bungalow|single-?family|detached\s+house|detached\s+dwelling)\b"
+        ),
+        "detached",
+    ),
+]
+
 _RETAIL_PHRASES = (
     "ground floor retail",
     "ground-floor retail",
@@ -74,6 +97,12 @@ def extract_project_features(description: str | None) -> ProjectFeatures:
     lower = description.lower()
     has_retail = any(phrase in lower for phrase in _RETAIL_PHRASES)
 
+    building_type: str | None = None
+    for pattern, label in _BUILDING_TYPE_MAP:
+        if pattern.search(description):
+            building_type = label
+            break
+
     return ProjectFeatures(
         proposed_storeys=storeys,
         proposed_units=units,
@@ -81,4 +110,5 @@ def extract_project_features(description: str | None) -> ProjectFeatures:
         has_ground_floor_retail=has_retail,
         description=description,
         proposed_height_m=height_m,
+        building_type=building_type,
     )

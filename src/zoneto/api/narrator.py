@@ -124,12 +124,26 @@ def _format_extracted(extracted: ProjectFeatures) -> str:
     return ", ".join(parts) if parts else "no structured features extracted"
 
 
+def _format_data_gaps(data_gaps: list[str]) -> str:
+    if not data_gaps:
+        return ""
+    lines = [
+        "The following information is unavailable from open data and limits "
+        "the completeness of this assessment:"
+    ]
+    for gap in data_gaps:
+        lines.append(f"- {gap}")
+    return "\n".join(lines)
+
+
 def narrate_evaluation(
     site: dict[str, Any],
     extracted: ProjectFeatures,
     violations: list[Violation],
     chunks: list[Chunk],
     llm_client: LLMClient,
+    *,
+    data_gaps: list[str] | None = None,
 ) -> tuple[str, int | None]:
     """Generate a markdown compliance summary and confidence score.
 
@@ -141,6 +155,7 @@ def narrate_evaluation(
         (summary_markdown, confidence_score) where confidence_score is 0–100
         or None if the LLM did not emit the expected line.
     """
+    gaps_section = _format_data_gaps(data_gaps or [])
     user_content = f"""\
 ## Site context
 {_format_site(site)}
@@ -153,6 +168,10 @@ def narrate_evaluation(
 
 ## Relevant By-law 569-2013 sections (retrieved by semantic search)
 {_format_chunks(chunks)}
+{("" if not gaps_section else (
+    "\n## Known data gaps (do not speculate beyond these)\n"
+    + gaps_section
+))}
 
 ---
 
@@ -161,6 +180,8 @@ Write a concise compliance summary (3–6 sentences) in plain markdown. Explain:
 2. What path forward is most likely (as-of-right adjustment, minor variance,
    or rezoning), citing the specific violations above.
 3. Any important context from the retrieved by-law sections above.
+4. If data gaps are listed above, note that the assessment is limited by those
+   gaps and recommend the applicant supply the missing information.
 
 Do not repeat the violations verbatim — explain them in plain language.
 Do not invent information not present in the context above.

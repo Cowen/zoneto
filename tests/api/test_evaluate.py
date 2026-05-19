@@ -180,6 +180,154 @@ class TestEvaluateEndpoint:
             )
         assert resp.status_code == 503
 
+    def test_evaluate_returns_data_gaps(self, client: TestClient) -> None:
+        """Given: A valid proposal in a zone without height overlay.
+        When: POST /evaluate.
+        Then: Response includes a non-empty 'data_gaps' list."""
+        with (
+            patch(
+                "zoneto.api.routes._geocode_address",
+                return_value=(43.644, -79.402),
+            ),
+            patch(
+                "zoneto.api.routes.lookup_site_context",
+                return_value={
+                    "zoning_class": "RM",
+                    "zoning_max_storeys": None,
+                    "zoning_max_height_m": None,
+                    "zoning_max_units": None,
+                    "zoning_max_density": None,
+                    "permitted_use_category": "Residential",
+                    "in_heritage_register": 0,
+                    "in_heritage_district": 0,
+                    "in_secondary_plan": 0,
+                    "secondary_plan_name": None,
+                    "in_mtsa": 0,
+                    "zoning_holding": 0,
+                    "zoning_exception": 0,
+                    "zoning_exception_no": None,
+                    "zoning_min_frontage_m": None,
+                    "zoning_min_lot_area_sqm": None,
+                    "zoning_max_coverage_pct": None,
+                    "zoning_min_sqm_per_unit": None,
+                    "zoning_pct_res": None,
+                    "zoning_pct_comm": None,
+                    "zoning_pct_emp": None,
+                },
+            ),
+        ):
+            resp = client.post(
+                "/evaluate",
+                json={
+                    "address": "321 Boon Ave, Toronto",
+                    "description": "A 3-storey residential building with 4 units.",
+                },
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "data_gaps" in data
+        assert isinstance(data["data_gaps"], list)
+        assert len(data["data_gaps"]) > 0
+
+    def test_evaluate_data_gaps_includes_lot_dimensions(
+        self, client: TestClient
+    ) -> None:
+        """Given: Any valid proposal.
+        When: POST /evaluate.
+        Then: data_gaps always mentions lot dimensions unavailability."""
+        with (
+            patch(
+                "zoneto.api.routes._geocode_address",
+                return_value=(43.644, -79.402),
+            ),
+            patch(
+                "zoneto.api.routes.lookup_site_context",
+                return_value={
+                    "zoning_class": "RM7",
+                    "zoning_max_storeys": 8,
+                    "zoning_max_height_m": 25.0,
+                    "zoning_max_units": 50,
+                    "zoning_max_density": 2.0,
+                    "permitted_use_category": "Residential",
+                    "in_heritage_register": 0,
+                    "in_heritage_district": 0,
+                    "in_secondary_plan": 0,
+                    "secondary_plan_name": None,
+                    "in_mtsa": 0,
+                    "zoning_holding": 0,
+                    "zoning_exception": 0,
+                    "zoning_exception_no": None,
+                    "zoning_min_frontage_m": None,
+                    "zoning_min_lot_area_sqm": None,
+                    "zoning_max_coverage_pct": None,
+                    "zoning_min_sqm_per_unit": None,
+                    "zoning_pct_res": None,
+                    "zoning_pct_comm": None,
+                    "zoning_pct_emp": None,
+                },
+            ),
+        ):
+            resp = client.post(
+                "/evaluate",
+                json={
+                    "address": "441 King St W, Toronto",
+                    "description": "A 12-storey residential building with 80 units.",
+                },
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        combined = " ".join(data["data_gaps"]).lower()
+        assert "lot" in combined or "frontage" in combined
+
+    def test_evaluate_response_has_description_similarity_field(
+        self, client: TestClient
+    ) -> None:
+        """Given: Valid evaluate request, no enriched data available.
+        When: POST /evaluate.
+        Then: Response includes description_similarity field (None when no data)."""
+        with (
+            patch(
+                "zoneto.api.routes._geocode_address",
+                return_value=(43.644, -79.402),
+            ),
+            patch(
+                "zoneto.api.routes.lookup_site_context",
+                return_value={
+                    "zoning_class": "RM",
+                    "zoning_max_storeys": 3,
+                    "zoning_max_height_m": 11.0,
+                    "zoning_max_units": 4,
+                    "zoning_max_density": 0.8,
+                    "permitted_use_category": "Residential",
+                    "in_heritage_register": 0,
+                    "in_heritage_district": 0,
+                    "in_secondary_plan": 0,
+                    "secondary_plan_name": None,
+                    "in_mtsa": 0,
+                    "zoning_holding": 0,
+                    "zoning_exception": 1,
+                    "zoning_exception_no": "252",
+                    "zoning_min_frontage_m": 12.0,
+                    "zoning_min_lot_area_sqm": None,
+                    "zoning_max_coverage_pct": None,
+                    "zoning_min_sqm_per_unit": None,
+                    "zoning_pct_res": None,
+                    "zoning_pct_comm": None,
+                    "zoning_pct_emp": None,
+                },
+            ),
+        ):
+            resp = client.post(
+                "/evaluate",
+                json={
+                    "address": "321 Boon Ave, Toronto",
+                    "description": "A 3-storey residential building with 4 units.",
+                },
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "description_similarity" in data
+
     def test_evaluate_suggestions_match_violations(self, client: TestClient) -> None:
         """Given: A proposal with violations that have suggested remedies.
         When: POST /evaluate.

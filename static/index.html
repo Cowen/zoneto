@@ -336,6 +336,8 @@
     <!-- Phase 3: evaluation results (shown after evaluation) -->
     <div id="eval-results" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid #e9ecef">
       <div id="eval-extracted"></div>
+      <div id="eval-desc-similarity"></div>
+      <div id="eval-data-gaps"></div>
       <div id="eval-violations"></div>
       <div id="eval-summary"></div>
       <div id="eval-suggestions"></div>
@@ -968,6 +970,9 @@
         if (ctx.zoning_max_height_m != null) heightParts.push(`${ctx.zoning_max_height_m} m`);
         const tip = "Maximum building height from the zoning height overlay (By-law 569-2013 Schedule B). Applies to ~15% of the city; where absent the base zone or a specific by-law section governs.";
         html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}">Max height: ${escHtml(heightParts.join(' / '))}</span>`;
+      } else if (ctx.zoning_class) {
+        const tip = "This site is outside the By-law 569-2013 height overlay (Schedule B), which covers ~15% of the city. Base zone regulations and any applicable site-specific by-law govern maximum height — there is no HT designation here.";
+        html += `<span class="ctx-flag ctx-flag-off" data-tooltip="${escHtml(tip)}">Height overlay: N/A</span>`;
       }
 
       // Lot/coverage minimums grouped together — only render when at least one is set
@@ -1526,6 +1531,8 @@
           : n === 1 ? '1 violation detected.' : `${n} violations detected.`;
 
         renderExtracted(data.extracted);
+        renderDescSimilarity(data.description_similarity ?? null);
+        renderDataGaps(data.data_gaps ?? []);
         renderViolations(data.violations);
         renderEvalSummary(data.summary_md);
         renderConfidence(data.confidence_score ?? null);
@@ -1552,10 +1559,38 @@
       if (extracted.proposed_storeys != null) parts.push(`${extracted.proposed_storeys} storeys`);
       if (extracted.proposed_units   != null) parts.push(`${extracted.proposed_units} units`);
       if (extracted.proposed_use)             parts.push(extracted.proposed_use.replace(/_/g, ' '));
+      if (extracted.building_type)            parts.push(extracted.building_type.replace(/_/g, '-'));
       if (extracted.has_ground_floor_retail)  parts.push('ground-floor retail');
       el.innerHTML = parts.length
         ? `<div style="margin-bottom:0.6rem;font-size:0.8rem;color:#6c757d">Extracted: ${escHtml(parts.join(' · '))}</div>`
         : '';
+    }
+
+    function renderDescSimilarity(sim) {
+      const el = document.getElementById('eval-desc-similarity');
+      if (!sim || sim.n_similar < 3) { el.innerHTML = ''; return; }
+      const rate = sim.appeal_rate != null ? (sim.appeal_rate * 100).toFixed(0) : null;
+      const rateCls = sim.appeal_rate != null && sim.appeal_rate > 0.25
+        ? 'ctx-flag-warn' : 'ctx-flag-on';
+      const tip = `Appeal rate among the ${sim.n_similar} most description-similar applications in our database, ranked by TF-IDF cosine similarity. A higher rate signals this proposal type is commonly contested in Toronto's planning process.`;
+      let html = `<div style="margin-bottom:0.5rem;font-size:0.8rem;color:#6c757d">Description similarity (${sim.n_similar} comparable apps):</div>`;
+      if (rate != null) {
+        html += `<span class="ctx-flag ${rateCls}" data-tooltip="${escHtml(tip)}">Similar-app appeal rate: ${rate}%</span>`;
+      } else {
+        html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}">${sim.n_similar} similar applications found</span>`;
+      }
+      el.innerHTML = `<div style="margin-bottom:0.6rem">${html}</div>`;
+    }
+
+    function renderDataGaps(gaps) {
+      const el = document.getElementById('eval-data-gaps');
+      if (!gaps || !gaps.length) { el.innerHTML = ''; return; }
+      const items = gaps.map(g => `<li style="margin-bottom:0.2rem">${escHtml(g)}</li>`).join('');
+      el.innerHTML = `<div style="margin-bottom:0.75rem;padding:0.65rem 0.85rem;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;font-size:0.82rem;color:#664d03">
+        <div style="font-weight:700;margin-bottom:0.35rem">&#9888; Assessment limitations — data not available from open data</div>
+        <ul style="margin:0;padding-left:1.2rem">${items}</ul>
+        <div style="margin-top:0.35rem;color:#856404">Providing this information will enable a more complete compliance check.</div>
+      </div>`;
     }
 
     function renderViolations(violations) {
