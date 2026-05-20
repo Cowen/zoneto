@@ -29,21 +29,47 @@ STRICT RULES you must always follow:
    where the number is your assessment of the proposal's likelihood of
    obtaining planning approval (through whatever process is required):
      90–100: as-of-right or near-certain approval — no rezoning needed
-     70–89:  strong likelihood — minor variance or well-supported rezoning,
-             backed by comparable approvals or good zone fit
-     50–69:  probable — rezoning required but solid precedent exists and
-             no significant barriers detected
-     30–49:  uncertain — rezoning required with mixed signals or data gaps
-     10–29:  low probability — major barriers, poor zone fit, or active violations
+     70–89:  strong likelihood — well-supported rezoning, backed by direct
+             comparable approvals (especially same-zone) or good zone fit
+     50–69:  probable — rezoning required with solid precedent in similar
+             zones or corridors; no fundamental incompatibilities
+     30–49:  uncertain — rezoning required with mixed signals, data gaps,
+             or modest violation severity with limited comparable support
+     10–29:  low probability — extreme violations (e.g. units proposed 10x
+             zoning limit), no same-zone approved precedent, poor zone fit
      0–9:    effectively prohibited — categorically excluded by by-law
-   Key signals that RAISE confidence:
-   - High approval rate and/or low appeal rate among comparable applications
-   - No violations from the rule engine
-   - Site falls within MTSA, secondary plan, or other permissive overlay
-   Key signals that LOWER confidence:
-   - Active violations flagged by the rule engine
-   - Categorically prohibited use
-   - Site in heritage district with major alterations proposed
+   IMPORTANT CALIBRATION RULES:
+   - OZ/SA applications by definition require rezoning. NEEDS_REZONING
+     violations are expected and do NOT by themselves lower confidence.
+     Instead they confirm that an OZ application is the correct path.
+   - MANDATORY CAP — EXTREME VIOLATIONS: If ANY violation shows proposed
+     value ≥ 3× the zone limit (e.g. 17 storeys proposed, 3 allowed =
+     5.7×; or 258 units proposed, 4 allowed = 64×), you MUST set
+     confidence ≤ 30. No override. This is non-negotiable regardless of
+     comparable appeal rates, zone counts, or any other signal.
+     Set confidence 10–30 based on violation severity alone.
+   - Cross-zone comparables: a comparable from a different zone type does
+     NOT establish same-zone precedent. A CR-zone approval does not
+     support an RM-zone proposal (or vice versa).
+   STEP-BY-STEP CONFIDENCE ASSIGNMENT (follow exactly, in order):
+   Step 1 — Extreme violation check:
+     If ANY violation is ≥ 3× zone limit → confidence 10–30. STOP.
+   Step 2 — Base band from zone/violation profile (pick ONE):
+     A. Zero violations + compatible zone use → base band 70–80.
+        "Compatible" means the permitted_use_category matches the
+        proposal (e.g. mixed-use in a CR zone with "Commercial
+        Residential (mixed)" use category). Data gaps in specific
+        limits do NOT disqualify this — CR zones routinely have no
+        hard unit/height limits in public data.
+     B. Zero violations + mismatched or unclear zone use → 55–65.
+     C. Moderate violations (all < 3×) → 35–55.
+   Step 3 — Adjust within the base band ONLY (max ±8 total):
+     Up to +8: MTSA, secondary plan, or site-specific exception.
+     Up to -8: comparable appeal rate ≥ 25%, or heritage district.
+     The floor of the Step 2 band is an absolute floor. Appeal rate
+     and data gaps CANNOT move the score below that floor.
+     DATA GAPS ARE NOT PENALTIES — mention them as caveats in the
+     prose summary but do NOT subtract from the CONFIDENCE number.
    This line must be the absolute last line of your response.
 """
 
@@ -112,6 +138,10 @@ def _format_site(site: dict[str, Any]) -> str:
         flags.append(f"Secondary Plan: {site.get('secondary_plan_name')}")
     if site.get("zoning_holding"):
         flags.append("Holding (H) symbol")
+    if site.get("zoning_exception"):
+        exc_no = site.get("zoning_exception_no")
+        exc_label = f"No. {exc_no}" if exc_no else "site-specific"
+        flags.append(f"Site-specific Zoning Exception ({exc_label})")
     limits = []
     if site.get("zoning_max_storeys"):
         limits.append(f"max {site['zoning_max_storeys']} storeys")
@@ -145,11 +175,22 @@ def _format_extracted(extracted: ProjectFeatures) -> str:
     return ", ".join(parts) if parts else "no structured features extracted"
 
 
-def _format_description_similarity(sim: dict[str, Any] | None) -> str:
+def _format_description_similarity(
+    sim: dict[str, Any] | None,
+    *,
+    site_zoning_class: str | None = None,
+) -> str:
     """Format description similarity context for the LLM prompt.
 
     Returns empty string when sim is None or n_similar==0 (no useful signal).
-    Highlights high-similarity approved comparables when present.
+
+    Approval rates (overall, zone-matched, zone base) are intentionally excluded:
+    dev_approved labels only cover ~9.6% of applications (those that reached an
+    AIC decision milestone), creating ~97% survivorship bias across all zones.
+    Appeal rate is the honest signal and is surfaced instead.
+
+    Outcome for the single best comparable is surfaced when its zone matches the
+    query site's zone (or is unknown). Cross-zone comparables show zone only.
     """
     if not sim:
         return ""
@@ -160,40 +201,80 @@ def _format_description_similarity(sim: dict[str, Any] | None) -> str:
         f"Description similarity analysis found {n} comparable OZ/SA applications "
         "with similar project descriptions."
     ]
-    # Highlight strongest comparable when very high similarity and known outcome
+    # Surface the closest comparable's zone and — when known — its outcome.
+    # Outcome for a single high-similarity match is a direct data point, not an
+    # aggregate rate, so it is not subject to the same survivorship bias as
+    # overall approval rates. Only surface when:
+    #   - similarity >= 0.90, AND
+    #   - comparable zone matches query site zone (or is unknown)
+    # Cross-zone comparables show zone only (no outcome), since the outcome
+    # from a different zone type is not directly applicable.
     top_matches = sim.get("top_matches") or []
     if top_matches:
         best = top_matches[0]
-        if best.get("similarity", 0) >= 0.95:
-            approved = best.get("dev_approved")
-            appealed = best.get("dev_appealed")
+        if best.get("similarity", 0) >= 0.90:
             app_type = best.get("application_type", "OZ")
-            if approved == 1 and appealed == 0:
-                parts.append(
-                    f"The closest comparable ({app_type}, similarity "
-                    f"{best['similarity']:.0%}) was Council-approved with no OLT "
-                    "appeal — a very strong precedent signal."
-                )
-            elif approved == 1:
-                parts.append(
-                    f"The closest comparable ({app_type}, similarity "
-                    f"{best['similarity']:.0%}) was Council-approved."
-                )
+            best_zone = best.get("zoning_class")
+            zone_note = f" (zoning: {best_zone})" if best_zone else ""
+            # Only surface outcome when zone matches or is unknown (no cross-zone noise)
+            zone_matches = (
+                best_zone is None
+                or site_zoning_class is None
+                or best_zone == site_zoning_class
+            )
+            if zone_matches:
+                approved = best.get("dev_approved")
+                appealed = best.get("dev_appealed")
+                if approved == 1:
+                    outcome: str | None = "Council-approved"
+                    if appealed == 0:
+                        outcome += ", not appealed"
+                elif approved == 0:
+                    outcome = "not approved"
+                else:
+                    outcome = None
+                outcome_note = f" — outcome: {outcome}" if outcome else ""
+            else:
+                outcome_note = ""
+            parts.append(
+                f"The closest comparable is {app_type}{zone_note} "
+                f"with similarity {best['similarity']:.0%}{outcome_note}. "
+                "Use the zone of this comparable to judge cross-zone relevance."
+            )
+    # Appeal rate is the differentiable signal — not subject to survivorship bias.
     appeal_rate = sim.get("appeal_rate")
     if appeal_rate is not None:
         pct = round(appeal_rate * 100)
         parts.append(
             f"Across all {n} comparables, the appeal rate is {pct}%. "
-            "A low appeal rate suggests good precedent support; "
-            "a high rate suggests elevated legal risk."
+            "A low appeal rate suggests low adversarial risk; "
+            "a high rate suggests elevated OLT exposure."
         )
-    approval_rate = sim.get("approval_rate")
-    if approval_rate is not None:
-        pct = round(approval_rate * 100)
-        parts.append(
-            f"{pct}% of comparables with known outcomes were Council-approved. "
-            "Weight this heavily in the confidence score."
-        )
+    # Zone-matched analysis: count + appeal rate for same-zone comparables.
+    # Zone-matched appeal rate is more targeted than overall — filters to the
+    # same zone type, removing cross-zone noise. Not subject to survivorship bias.
+    zone_n = sim.get("zone_matched_n_similar")
+    if zone_n is not None:
+        if zone_n == 0:
+            parts.append(
+                "Zone-matched analysis: no description-similar applications in the "
+                "same zoning category were found. The comparables above are from "
+                "different zone types — they do not establish same-zone precedent."
+            )
+        else:
+            zm_appeal = sim.get("zone_matched_appeal_rate")
+            if zm_appeal is not None:
+                zm_pct = round(zm_appeal * 100)
+                parts.append(
+                    f"Zone-matched analysis: {zone_n} similar application(s) "
+                    f"in the same zone, appeal rate {zm_pct}% "
+                    "(more representative than the overall rate — same zone type)."
+                )
+            else:
+                parts.append(
+                    f"Zone-matched analysis: {zone_n} similar application(s) "
+                    "found in the same zoning category."
+                )
     return " ".join(parts)
 
 
@@ -230,7 +311,10 @@ def narrate_evaluation(
         or None if the LLM did not emit the expected line.
     """
     gaps_section = _format_data_gaps(data_gaps or [])
-    sim_section = _format_description_similarity(description_similarity)
+    site_zone = site.get("zoning_class") if site else None
+    sim_section = _format_description_similarity(
+        description_similarity, site_zoning_class=site_zone
+    )
     user_content = f"""\
 ## Site context
 {_format_site(site)}
@@ -256,7 +340,7 @@ def narrate_evaluation(
 
 ---
 
-Write a concise compliance summary (3–6 sentences) in plain markdown. Explain:
+Write a concise compliance summary (4–8 sentences maximum) in plain markdown. Explain:
 1. What the violations mean in practical terms for the applicant.
 2. What path forward is most likely (as-of-right adjustment, minor variance,
    or rezoning), citing the specific violations above.
@@ -268,14 +352,53 @@ Write a concise compliance summary (3–6 sentences) in plain markdown. Explain:
 
 Do not repeat the violations verbatim — explain them in plain language.
 Do not invent information not present in the context above.
+
+BEFORE writing CONFIDENCE, follow the three-step rule from the system prompt:
+Step 1: Check each violation ratio. If ANY exceeds 3×: set confidence 10–30, stop.
+Step 2: Determine base band (70–80 for zero violations + compatible zone; 55–65 for
+        zero violations + mismatched zone; 35–55 for moderate violations).
+Step 3: Adjust within the base band (±8 max) for MTSA/overlay/appeal rate.
+        Appeal rate CANNOT push the score below the Step 2 floor.
+Remember: data gaps are caveats, NOT violations. Do not penalise for missing data.
+VERIFY before writing CONFIDENCE:
+  - If violations list is empty AND permitted_use_category shows a compatible use
+    (mixed, commercial residential, etc.): your score MUST be ≥ 70. If you wrote
+    below 70, re-apply Step 2A — the base band floor is 70, not lower.
+
 End with a CONFIDENCE line as required by the system rules.
 """
     raw = llm_client.complete(
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_content}],
-        max_tokens=800,
+        max_tokens=1200,
     )
-    return _parse_confidence(raw)
+    summary, score = _parse_confidence(raw)
+    # Programmatic floor: when the rule engine finds zero violations AND the zone
+    # explicitly permits the proposed use category, the LLM must not drop below 70.
+    # This enforces Step 2A deterministically so LLM temperature cannot break it.
+    if score is not None and not violations:
+        use_cat = (site.get("permitted_use_category") or "").lower()
+        if "mixed" in use_cat or "commercial residential" in use_cat:
+            score = max(score, 70)
+    # Programmatic cap: when ANY proposal exceeds the zone limit by 3× or more,
+    # the LLM must not rise above 30. Step 1 is structural — LLM temperature
+    # cannot override a mandatory rezoning that exceeds 3× the as-of-right limit.
+    if score is not None:
+        proposed_storeys = getattr(extracted, "proposed_storeys", None)
+        max_storeys = (site or {}).get("zoning_max_storeys")
+        proposed_units = getattr(extracted, "proposed_units", None)
+        max_units = (site or {}).get("zoning_max_units")
+        ratios = [
+            proposed_storeys / max_storeys
+            if proposed_storeys and max_storeys
+            else None,
+            proposed_units / max_units
+            if proposed_units and max_units
+            else None,
+        ]
+        if any(r is not None and r >= 3.0 for r in ratios):
+            score = min(score, 30)
+    return summary, score
 
 
 def narrate_question(

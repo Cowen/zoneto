@@ -15,7 +15,10 @@ from zoneto.analytics.explain import explain_one
 from zoneto.analytics.extract import extract_project_features
 from zoneto.analytics.score import score_one
 from zoneto.api.comps import query_comps
-from zoneto.api.desc_similarity import score_description_similarity
+from zoneto.api.desc_similarity import (
+    score_description_similarity,
+    score_description_similarity_bert,
+)
 from zoneto.api.narrator import narrate_evaluation, narrate_question
 from zoneto.api.site_context import lookup_site_context
 
@@ -416,9 +419,23 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
 
     data_gaps = _compute_data_gaps(site, extracted)
     model_dir: Path = getattr(request.app.state, "model_dir", Path("models"))
-    desc_sim = score_description_similarity(
-        body.description or "", data_dir=data_dir, model_dir=model_dir
-    )
+    bert_model = getattr(request.app.state, "bert_model", None)
+
+    # BERT similarity preferred; fall back to TF-IDF+SVD when embeddings absent
+    if bert_model is not None:
+        desc_sim = score_description_similarity_bert(
+            body.description or "",
+            data_dir=data_dir,
+            model=bert_model,
+            zoning_class=site.get("zoning_class"),
+        )
+    else:
+        desc_sim = score_description_similarity(
+            body.description or "",
+            data_dir=data_dir,
+            model_dir=model_dir,
+            zoning_class=site.get("zoning_class"),
+        )
     summary_md, confidence_score = narrate_evaluation(
         site,
         extracted,

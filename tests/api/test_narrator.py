@@ -237,10 +237,11 @@ class TestFormatDescriptionSimilarity:
         out = _format_description_similarity(sim)
         assert "25%" in out
 
-    def test_formats_approval_rate(self) -> None:
+    def test_approval_rate_not_surfaced(self) -> None:
         """Given: description_similarity with approval_rate=0.80.
         When: Formatting.
-        Then: Output contains 80% approval signal."""
+        Then: Approval rate is NOT shown — it has survivorship bias (only labelled
+        completions, ~97% across all zones). Appeal rate is the honest signal."""
         sim = {
             "appeal_rate": 0.0,
             "approval_rate": 0.80,
@@ -248,23 +249,69 @@ class TestFormatDescriptionSimilarity:
             "top_matches": [],
         }
         out = _format_description_similarity(sim)
-        assert "80%" in out
+        assert "80%" not in out
+        assert "approval" not in out.lower() or "appeal" in out.lower()
 
-    def test_highlights_top_comparable_when_approved(self) -> None:
-        """Given: Top match has similarity >= 0.95 and dev_approved=1, dev_appealed=0.
+    def test_highlights_top_comparable_zone_when_present(self) -> None:
+        """Given: Top match has similarity >= 0.95 with known zoning_class.
         When: Formatting.
-        Then: Output highlights this as a strong precedent signal."""
+        Then: Output surfaces zone of closest comparable for zone-mismatch detection."""
         sim = {
             "appeal_rate": 0.0,
-            "approval_rate": 1.0,
             "n_similar": 5,
             "top_matches": [
-                {"similarity": 1.0, "dev_approved": 1, "dev_appealed": 0, "application_type": "OZ"}
+                {
+                    "similarity": 1.0,
+                    "dev_approved": 1,
+                    "dev_appealed": 0,
+                    "application_type": "OZ",
+                    "zoning_class": "R",
+                }
             ],
         }
         out = _format_description_similarity(sim)
-        assert "Council-approved" in out
-        assert "no OLT" in out.lower() or "no olt" in out.lower() or "no appeal" in out.lower() or "no OLT" in out
+        assert "R" in out or "zone" in out.lower()
+
+    def test_best_comparable_outcome_shown_when_approved(self) -> None:
+        """Given: Best match has dev_approved=1, dev_appealed=0, similarity=0.95.
+        When: Formatting.
+        Then: Outcome 'Council-approved' and 'not appealed' appear in output."""
+        sim = {
+            "appeal_rate": 0.2,
+            "n_similar": 10,
+            "top_matches": [
+                {
+                    "similarity": 0.95,
+                    "dev_approved": 1,
+                    "dev_appealed": 0,
+                    "application_type": "OZ",
+                    "zoning_class": "CR",
+                }
+            ],
+        }
+        out = _format_description_similarity(sim)
+        assert "council-approved" in out.lower() or "approved" in out.lower()
+        assert "not appealed" in out.lower()
+
+    def test_best_comparable_outcome_absent_when_no_approval_label(self) -> None:
+        """Given: Best match has dev_approved=None (unlabelled).
+        When: Formatting.
+        Then: No outcome note in output for the best comparable."""
+        sim = {
+            "appeal_rate": 0.0,
+            "n_similar": 5,
+            "top_matches": [
+                {
+                    "similarity": 0.95,
+                    "dev_approved": None,
+                    "application_type": "OZ",
+                    "zoning_class": "CR",
+                }
+            ],
+        }
+        out = _format_description_similarity(sim)
+        assert "council-approved" not in out.lower()
+        assert "outcome" not in out.lower()
 
     def test_returns_empty_when_n_similar_zero(self) -> None:
         """Given: description_similarity with n_similar=0 (no comparables found).
@@ -300,9 +347,10 @@ class TestNarrateEvaluationDescriptionSimilarity:
         }
 
     def test_description_similarity_none_does_not_affect_output(self) -> None:
-        """Given: description_similarity=None passed.
-        When: narrate_evaluation called.
-        Then: Works normally, no error."""
+        """Given: description_similarity=None, no violations, compatible zone.
+        When: narrate_evaluation called with LLM returning CONFIDENCE: 55.
+        Then: Score is floored to 70 (programmatic floor for zero-violation
+        compatible-zone proposals prevents LLM temperature from breaking Step 2A)."""
         client = FakeLLMClient("Summary.\n\nCONFIDENCE: 55")
         extracted = ProjectFeatures(None, None, "mixed_use", False)
         summary, score = narrate_evaluation(
@@ -313,7 +361,7 @@ class TestNarrateEvaluationDescriptionSimilarity:
             client,
             description_similarity=None,
         )
-        assert score == 55
+        assert score == 70
 
     def test_description_similarity_injected_into_prompt(self) -> None:
         """Given: description_similarity with appeal_rate=0.0 and n_similar=20.
@@ -349,3 +397,235 @@ class TestNarrateEvaluationDescriptionSimilarity:
         )
         assert score == 70
         assert "Backward compat." in summary
+
+
+class TestFormatDescriptionSimilarityZoneMatched:
+    def test_zone_mismatch_warning_when_zero_zone_matches(self) -> None:
+        """Given: Overall approval=1.0 but zone_matched_n_similar=0.
+        When: Formatting description similarity.
+        Then: Output includes a specific zone-mismatch warning phrase."""
+        sim = {
+            "appeal_rate": 0.0,
+            "approval_rate": 1.0,
+            "n_similar": 5,
+            "top_matches": [],
+            "zone_matched_n_similar": 0,
+            "zone_matched_approval_rate": None,
+        }
+        out = _format_description_similarity(sim)
+        # Must explicitly warn about zone mismatch — not just incidentally mention "no"
+        assert (
+            "same zone" in out.lower()
+            or "zone-matched" in out.lower()
+            or "same zoning" in out.lower()
+        )
+
+    def test_zone_matched_count_surfaced_not_approval_rate(self) -> None:
+        """Given: zone_matched_n_similar=3, zone_matched_approval_rate=0.0.
+        When: Formatting.
+        Then: Count of zone-matched apps is surfaced; approval rate is NOT shown
+        (survivorship bias: only completed applications are labelled)."""
+        sim = {
+            "appeal_rate": 0.0,
+            "n_similar": 5,
+            "top_matches": [],
+            "zone_matched_n_similar": 3,
+            "zone_matched_approval_rate": 0.0,
+        }
+        out = _format_description_similarity(sim)
+        assert "3" in out
+        assert "0%" not in out or "appeal" in out.lower()
+
+    def test_zone_matched_keys_absent_does_not_crash(self) -> None:
+        """Given: zone_matched keys absent (callers without zone context).
+        When: Formatting.
+        Then: No crash and normal output unchanged."""
+        sim = {
+            "appeal_rate": 0.0,
+            "n_similar": 5,
+            "top_matches": [],
+        }
+        out = _format_description_similarity(sim)
+        assert isinstance(out, str)
+        assert len(out) > 0
+        assert "zone-matched" not in out.lower()
+
+    def test_zone_matched_appeal_rate_surfaced_when_present(self) -> None:
+        """Given: zone_matched_n_similar=5, zone_matched_appeal_rate=0.1.
+        When: Formatting description similarity.
+        Then: Zone-matched appeal rate is shown as a percentage."""
+        sim = {
+            "appeal_rate": 0.25,
+            "n_similar": 20,
+            "top_matches": [],
+            "zone_matched_n_similar": 5,
+            "zone_matched_approval_rate": None,
+            "zone_matched_appeal_rate": 0.1,
+        }
+        out = _format_description_similarity(sim)
+        assert "10%" in out
+        assert "appeal rate" in out.lower()
+        assert "same zone" in out.lower()
+
+    def test_zone_matched_appeal_rate_absent_shows_count_only(self) -> None:
+        """Given: zone_matched_n_similar=5, zone_matched_appeal_rate absent.
+        When: Formatting.
+        Then: Count is shown but no appeal rate percentage for zone-matched section."""
+        sim = {
+            "appeal_rate": 0.0,
+            "n_similar": 5,
+            "top_matches": [],
+            "zone_matched_n_similar": 5,
+            "zone_matched_approval_rate": None,
+        }
+        out = _format_description_similarity(sim)
+        assert "5" in out
+        assert "zone-matched appeal rate" not in out.lower()
+
+
+class TestFormatDescriptionSimilarityZoneBaseRate:
+    def test_zone_base_approval_rate_not_surfaced(self) -> None:
+        """Given: zone_base_approval_rate=0.968 (97% approval).
+        When: Formatting description similarity.
+        Then: Approval rate is NOT shown — survivorship bias makes it meaningless
+        (~97% across all zones because only labelled completions are counted)."""
+        sim = {
+            "appeal_rate": 0.0,
+            "n_similar": 20,
+            "top_matches": [],
+            "zone_matched_n_similar": 20,
+            "zone_matched_approval_rate": None,
+            "zone_base_n": 280,
+            "zone_base_approval_rate": 0.968,
+        }
+        out = _format_description_similarity(sim)
+        assert "96%" not in out
+        assert "97%" not in out
+        assert "280" not in out or "appeal" in out.lower()
+
+    def test_zone_base_count_may_be_surfaced_without_rate(self) -> None:
+        """Given: zone_base_n=280 apps in zone.
+        When: Formatting description similarity.
+        Then: No crash regardless of whether count is shown or not."""
+        sim = {
+            "appeal_rate": 0.05,
+            "n_similar": 20,
+            "top_matches": [],
+            "zone_matched_n_similar": 20,
+            "zone_matched_approval_rate": None,
+            "zone_base_n": 280,
+            "zone_base_approval_rate": 0.968,
+        }
+        out = _format_description_similarity(sim)
+        assert isinstance(out, str)
+        assert len(out) > 0
+
+
+class TestProgrammaticCap:
+    """Programmatic ≤30 cap for extreme violations (≥3× zone limit)."""
+
+    def _site_with_max_storeys(self, max_storeys: int | None) -> dict:
+        return {
+            "zoning_class": "RM",
+            "permitted_use_category": "Residential Multiple",
+            "zoning_max_storeys": max_storeys,
+            "zoning_max_units": None,
+            "zoning_max_density": None,
+            "in_heritage_register": 0,
+            "in_heritage_district": 0,
+            "in_mtsa": 0,
+            "in_secondary_plan": 0,
+            "secondary_plan_name": None,
+            "zoning_holding": 0,
+        }
+
+    def _site_with_max_units(self, max_units: int | None) -> dict:
+        return {
+            "zoning_class": "RM",
+            "permitted_use_category": "Residential Multiple",
+            "zoning_max_storeys": None,
+            "zoning_max_units": max_units,
+            "zoning_max_density": None,
+            "in_heritage_register": 0,
+            "in_heritage_district": 0,
+            "in_mtsa": 0,
+            "in_secondary_plan": 0,
+            "secondary_plan_name": None,
+            "zoning_holding": 0,
+        }
+
+    def test_storey_ratio_3x_caps_score_at_30(self) -> None:
+        """Given: 12 proposed storeys, max 3 storeys (4× limit).
+        When: LLM returns CONFIDENCE: 45 (incorrectly high).
+        Then: Score capped to 30."""
+        from zoneto.analytics.compliance import Severity, Violation
+
+        client = FakeLLMClient("Major violation summary.\n\nCONFIDENCE: 45")
+        extracted = ProjectFeatures(12, None, "residential", False)
+        v = Violation(
+            rule_id="storeys_exceed_max",
+            section_ref="By-law 569-2013",
+            observed="12 storeys proposed",
+            allowed="max 3 storeys",
+            severity=Severity.NEEDS_REZONING,
+            suggested_remedy="Reduce storeys",
+        )
+        _, score = narrate_evaluation(
+            self._site_with_max_storeys(3), extracted, [v], [], client
+        )
+        assert score is not None
+        assert score <= 30
+
+    def test_unit_ratio_3x_caps_score_at_30(self) -> None:
+        """Given: 120 proposed units, max 4 units (30× limit).
+        When: LLM returns CONFIDENCE: 48 (incorrectly high).
+        Then: Score capped to 30."""
+        from zoneto.analytics.compliance import Severity, Violation
+
+        client = FakeLLMClient("Major violation summary.\n\nCONFIDENCE: 48")
+        extracted = ProjectFeatures(None, 120, "mixed_use", False)
+        v = Violation(
+            rule_id="unit_limit_advisory",
+            section_ref="By-law 569-2013",
+            observed="proposed use is mixed_use; zone permits a maximum of 4 unit(s)",
+            allowed="max 4 unit(s) as-of-right",
+            severity=Severity.NEEDS_REZONING,
+            suggested_remedy="Reduce units",
+        )
+        _, score = narrate_evaluation(
+            self._site_with_max_units(4), extracted, [v], [], client
+        )
+        assert score is not None
+        assert score <= 30
+
+    def test_ratio_below_3x_does_not_cap(self) -> None:
+        """Given: 4 proposed storeys, max 3 storeys (1.3× limit, below 3×).
+        When: LLM returns CONFIDENCE: 45.
+        Then: Score not capped — 45 passes through."""
+        from zoneto.analytics.compliance import Severity, Violation
+
+        client = FakeLLMClient("Moderate violation.\n\nCONFIDENCE: 45")
+        extracted = ProjectFeatures(4, None, "residential", False)
+        v = Violation(
+            rule_id="storeys_exceed_max",
+            section_ref="By-law 569-2013",
+            observed="4 storeys proposed",
+            allowed="max 3 storeys",
+            severity=Severity.NEEDS_REZONING,
+            suggested_remedy="Reduce storeys",
+        )
+        _, score = narrate_evaluation(
+            self._site_with_max_storeys(3), extracted, [v], [], client
+        )
+        assert score == 45
+
+    def test_no_zoning_max_no_cap(self) -> None:
+        """Given: zoning_max_storeys=None (no data).
+        When: LLM returns CONFIDENCE: 50.
+        Then: Score not capped — ratio can't be computed."""
+        client = FakeLLMClient("Unknown limit.\n\nCONFIDENCE: 50")
+        extracted = ProjectFeatures(12, None, "residential", False)
+        _, score = narrate_evaluation(
+            self._site_with_max_storeys(None), extracted, [], [], client
+        )
+        assert score == 50

@@ -1276,3 +1276,53 @@ def match_olt_to_dev(
             pl.Series("olt_decision_date", matched_dates, dtype=pl.Date),
         ]
     )
+
+
+def compute_bert_embeddings(data_dir: Path = Path("data")) -> int:
+    """Compute BERT embeddings for all dev_application descriptions.
+
+    Uses BAAI/bge-small-en-v1.5 (384-dim) to encode each description.
+    Writes two files to data/enriched/:
+      - desc_bert_embeddings.npy: float32 array of shape [n_rows, 384]
+      - desc_bert_index.parquet: folderrsn, application_type, dev_approved,
+        dev_appealed, zoning_class — metadata rows parallel to embeddings
+
+    Idempotent: re-encodes the full corpus each call (cheap to re-run after
+    an enrich because the model is cached by sentence-transformers).
+
+    Returns the number of rows encoded.
+    """
+    from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+
+    enriched_path = data_dir / "enriched" / "dev_applications.parquet"
+    if not enriched_path.exists():
+        logger.warning(
+            "compute_bert_embeddings: enriched parquet not found at %s", enriched_path
+        )
+        return 0
+
+    df = pl.read_parquet(enriched_path)
+    texts = df["description"].fill_null("").cast(pl.String).to_list()
+
+    logger.info("compute_bert_embeddings: encoding %d descriptions...", len(texts))
+    model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+    embeddings = model.encode(
+        texts,
+        convert_to_numpy=True,
+        show_progress_bar=True,
+        batch_size=128,
+    ).astype(np.float32)
+
+    out_dir = data_dir / "enriched"
+    np.save(out_dir / "desc_bert_embeddings.npy", embeddings)
+    logger.info("compute_bert_embeddings: saved embeddings shape %s", embeddings.shape)
+
+    # Build index with metadata columns needed for similarity scoring
+    index_cols = ["folderrsn", "application_type"]
+    for optional in ["dev_approved", "dev_appealed", "zoning_class"]:
+        if optional in df.columns:
+            index_cols.append(optional)
+    index_df = df.select(index_cols)
+    index_df.write_parquet(out_dir / "desc_bert_index.parquet")
+    logger.info("compute_bert_embeddings: saved index with %d rows", len(index_df))
+    return len(index_df)

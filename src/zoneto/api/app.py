@@ -46,6 +46,21 @@ def create_app(
         else:
             app.state.bylaw_index = None
 
+        # BERT sentence model — reuse from BylawIndex if loaded, otherwise load
+        # standalone when BERT embeddings are present and BylawIndex is absent.
+        bert_embeddings_path = (
+            resolved_data_dir / "enriched" / "desc_bert_embeddings.npy"
+        )
+        if bert_embeddings_path.exists():
+            if app.state.bylaw_index is not None:
+                app.state.bert_model = app.state.bylaw_index.model
+            else:
+                from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+
+                app.state.bert_model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+        else:
+            app.state.bert_model = None
+
         # LLM client — optional; absent when ANTHROPIC_API_KEY is not set
         import os  # noqa: PLC0415
 
