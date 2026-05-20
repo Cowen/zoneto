@@ -85,6 +85,7 @@ def check_compliance(
     violations.extend(_check_heritage(site))
     violations.extend(_check_mtsa(site))
     violations.extend(_check_holding(site))
+    violations.extend(_check_exception(site))
 
     return violations
 
@@ -373,6 +374,30 @@ def _check_holding(site: dict[str, Any]) -> list[Violation]:
                 "City Council before any development permit can be issued. "
                 "The conditions for removal are specified in the zoning by-law "
                 "or the applicable Official Plan policy."
+            ),
+        )
+    ]
+
+
+def _check_exception(site: dict[str, Any]) -> list[Violation]:
+    if not site.get("zoning_exception"):
+        return []
+    exc_no = site.get("zoning_exception_no")
+    exc_label = f"Exception No. {exc_no}" if exc_no else "a site-specific exception"
+    return [
+        Violation(
+            rule_id="zoning_exception",
+            section_ref=f"By-law 569-2013 — {exc_label}",
+            observed=f"site has {exc_label} that modifies base zone standards",
+            allowed=(
+                "site-specific exception schedules may permit uses, heights, or "
+                "densities that differ from the base zone limits shown above"
+            ),
+            severity=Severity.INFORMATIONAL,
+            suggested_remedy=(
+                f"Review {exc_label} in By-law 569-2013 to confirm which "
+                "standards are modified. Some violations flagged above may be "
+                "permitted as-of-right under the exception schedule."
             ),
         )
     ]

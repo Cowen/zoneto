@@ -445,6 +445,39 @@ class TestComplianceContextualFlags:
         hv = next(v for v in violations if v.rule_id == "holding_provision")
         assert hv.severity == Severity.NEEDS_REZONING
 
+    def test_exception_flag_informational(self) -> None:
+        """Given: Site zoning has a site-specific exception.
+        When: Checking compliance.
+        Then: zoning_exception informational violation returned."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(extracted, self._site(zoning_exception=1))
+        rule_ids = [v.rule_id for v in violations]
+        assert "zoning_exception" in rule_ids
+        ev = next(v for v in violations if v.rule_id == "zoning_exception")
+        assert ev.severity == Severity.INFORMATIONAL
+
+    def test_exception_includes_exception_number(self) -> None:
+        """Given: Site has zoning_exception=1 and zoning_exception_no='252'.
+        When: Checking compliance.
+        Then: section_ref and suggested_remedy reference '252'."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(
+            extracted,
+            self._site(zoning_exception=1, zoning_exception_no="252"),
+        )
+        ev = next(v for v in violations if v.rule_id == "zoning_exception")
+        assert "252" in ev.section_ref
+        assert "252" in ev.suggested_remedy
+
+    def test_no_exception_when_flag_zero(self) -> None:
+        """Given: Site has zoning_exception=0.
+        When: Checking compliance.
+        Then: No zoning_exception violation."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(extracted, self._site(zoning_exception=0))
+        rule_ids = [v.rule_id for v in violations]
+        assert "zoning_exception" not in rule_ids
+
     def test_no_flags_for_clean_site(self) -> None:
         """Given: Site with no contextual flags.
         When: Checking compliance with no proposed features.
