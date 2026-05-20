@@ -41,6 +41,112 @@ def _write_bert_fixture(data_dir: Path, n: int = 4) -> None:
     df.write_parquet(emb_dir / "desc_bert_index.parquet")
 
 
+def _write_bert_fixture_with_locations(
+    data_dir: Path,
+    lats: list[float | None],
+    lons: list[float | None],
+    zoning_classes: list[str | None] | None = None,
+) -> None:
+    """Write BERT fixture with lat/lon (and optional zoning_class) in the index."""
+    emb_dir = data_dir / "enriched"
+    emb_dir.mkdir(parents=True, exist_ok=True)
+    n = len(lats)
+    embs = np.ones((n, 8), dtype=np.float32)
+    np.save(emb_dir / "desc_bert_embeddings.npy", embs)
+    data: dict[str, list] = {
+        "folderrsn": [str(i) for i in range(n)],
+        "application_type": ["OZ"] * n,
+        "dev_appealed": [0] * n,
+        "lat": lats,
+        "lon": lons,
+    }
+    if zoning_classes is not None:
+        data["zoning_class"] = zoning_classes
+    df = pl.DataFrame(data)
+    df.write_parquet(emb_dir / "desc_bert_index.parquet")
+
+
+class TestDefaultRadiusBert:
+    def test_app_at_3km_excluded_by_default_radius(self, tmp_path: Path) -> None:
+        """Given: One app at 1km and one at 3km from query.
+        When: Scoring BERT with default radius (2km).
+        Then: Only the 1km app appears."""
+        from zoneto.api.desc_similarity import score_description_similarity_bert
+
+        _write_bert_fixture_with_locations(
+            tmp_path,
+            lats=[43.65 + 0.009, 43.65 + 0.027],
+            lons=[-79.38, -79.38],
+        )
+        result = score_description_similarity_bert(
+            "test",
+            data_dir=tmp_path,
+            model=_FakeBertModel(),
+            lat=43.65,
+            lon=-79.38,
+        )
+        assert result is not None
+        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        assert "0" in folder_ids
+        assert "1" not in folder_ids
+
+
+class TestSelfExclusionBert:
+    def test_app_at_query_location_excluded_when_min_dist_set(
+        self, tmp_path: Path
+    ) -> None:
+        """Given: App at exact query lat/lon and another at 300m.
+        When: Scoring BERT with min_dist_m=200.
+        Then: Exact-location app excluded; 300m app included."""
+        from zoneto.api.desc_similarity import score_description_similarity_bert
+
+        _write_bert_fixture_with_locations(
+            tmp_path,
+            lats=[43.65, 43.6527],
+            lons=[-79.38, -79.38],
+        )
+        result = score_description_similarity_bert(
+            "test",
+            data_dir=tmp_path,
+            model=_FakeBertModel(),
+            lat=43.65,
+            lon=-79.38,
+            radius_m=2000.0,
+            min_dist_m=200.0,
+        )
+        assert result is not None
+        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        assert "0" not in folder_ids
+        assert "1" in folder_ids
+
+
+class TestZoneDeranking:
+    def test_same_zone_ranks_above_different_zone(self, tmp_path: Path) -> None:
+        """Given: App A (same zone) and App B (different zone), equal text similarity.
+        When: Scoring BERT with zoning_class matching App A.
+        Then: App A ranks first; App B deranked to second."""
+        from zoneto.api.desc_similarity import score_description_similarity_bert
+
+        _write_bert_fixture_with_locations(
+            tmp_path,
+            lats=[43.651, 43.652],
+            lons=[-79.38, -79.38],
+            zoning_classes=["R", "CR"],
+        )
+        result = score_description_similarity_bert(
+            "test",
+            data_dir=tmp_path,
+            model=_FakeBertModel(),
+            lat=43.65,
+            lon=-79.38,
+            radius_m=2000.0,
+            zoning_class="R",
+        )
+        assert result is not None
+        assert len(result["top_matches"]) >= 1
+        assert result["top_matches"][0]["folderrsn"] == "0"
+
+
 class TestScoreDescriptionSimilarityBert:
     def test_returns_none_when_embeddings_missing(self, tmp_path: Path) -> None:
         """Given: No BERT embeddings on disk.
@@ -119,6 +225,69 @@ class TestScoreDescriptionSimilarityBert:
         )
         assert result is not None
         assert "zone_matched_n_similar" not in result
+
+    def test_far_apps_excluded_when_lat_lon_provided(self, tmp_path: Path) -> None:
+        """Given: One Toronto app (43.65, -79.38) and one NYC app (40.71, -74.01).
+        When: Scoring BERT with Toronto lat/lon and radius_m=1000.
+        Then: Only the Toronto app appears in top_matches."""
+        from zoneto.api.desc_similarity import score_description_similarity_bert
+
+        _write_bert_fixture_with_locations(
+            tmp_path,
+            lats=[43.65, 40.71],
+            lons=[-79.38, -74.01],
+        )
+        result = score_description_similarity_bert(
+            "test",
+            data_dir=tmp_path,
+            model=_FakeBertModel(),
+            lat=43.65,
+            lon=-79.38,
+            radius_m=1000.0,
+        )
+        assert result is not None
+        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        assert "0" in folder_ids
+        assert "1" not in folder_ids
+
+    def test_all_apps_included_without_lat_lon(self, tmp_path: Path) -> None:
+        """Given: Apps at Toronto and NYC locations in BERT index.
+        When: Scoring without lat/lon params.
+        Then: Both apps included (no proximity filter applied)."""
+        from zoneto.api.desc_similarity import score_description_similarity_bert
+
+        _write_bert_fixture_with_locations(
+            tmp_path,
+            lats=[43.65, 40.71],
+            lons=[-79.38, -74.01],
+        )
+        result = score_description_similarity_bert(
+            "test",
+            data_dir=tmp_path,
+            model=_FakeBertModel(),
+        )
+        assert result is not None
+        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        assert "0" in folder_ids
+        assert "1" in folder_ids
+
+    def test_no_crash_when_index_has_no_lat_lon(self, tmp_path: Path) -> None:
+        """Given: BERT index without lat/lon columns, lat/lon params provided.
+        When: Scoring with lat/lon.
+        Then: Returns results normally (skips filter gracefully)."""
+        from zoneto.api.desc_similarity import score_description_similarity_bert
+
+        _write_bert_fixture(tmp_path, n=2)
+        result = score_description_similarity_bert(
+            "test",
+            data_dir=tmp_path,
+            model=_FakeBertModel(),
+            lat=43.65,
+            lon=-79.38,
+            radius_m=1000.0,
+        )
+        assert result is not None
+        assert result["n_similar"] >= 0
 
     def test_zone_base_keys_absent(self, tmp_path: Path) -> None:
         """Given: zone_base_* was removed (survivorship-biased approval rate).

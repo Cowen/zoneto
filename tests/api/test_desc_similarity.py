@@ -216,6 +216,210 @@ class TestApprovalRate:
         assert result.get("approval_rate") is None
 
 
+def _write_fixture_with_locations(
+    data_dir: Path,
+    model_dir: Path,
+    lats: list[float | None],
+    lons: list[float | None],
+) -> None:
+    (data_dir / "enriched").mkdir(parents=True, exist_ok=True)
+    model_dir.mkdir(parents=True, exist_ok=True)
+    n = len(lats)
+    svd_cols = {f"desc_svd_{i}": [float(i % 3 + 1) * 0.1] * n for i in range(20)}
+    df = pl.DataFrame(
+        {
+            **svd_cols,
+            "dev_appealed": [0] * n,
+            "folderrsn": [str(i) for i in range(n)],
+            "application_type": ["OZ"] * n,
+            "lat": lats,
+            "lon": lons,
+        }
+    )
+    df.write_parquet(str(data_dir / "enriched" / "dev_applications.parquet"))
+    joblib.dump(_FakePipeline(), model_dir / "desc_tfidf.joblib")
+
+
+def _write_fixture_with_location_zones(
+    data_dir: Path,
+    model_dir: Path,
+    lats: list[float | None],
+    lons: list[float | None],
+    zoning_classes: list[str | None],
+) -> None:
+    (data_dir / "enriched").mkdir(parents=True, exist_ok=True)
+    model_dir.mkdir(parents=True, exist_ok=True)
+    n = len(lats)
+    svd_cols = {f"desc_svd_{i}": [float(i % 3 + 1) * 0.1] * n for i in range(20)}
+    df = pl.DataFrame(
+        {
+            **svd_cols,
+            "dev_appealed": [0] * n,
+            "folderrsn": [str(i) for i in range(n)],
+            "application_type": ["OZ"] * n,
+            "lat": lats,
+            "lon": lons,
+            "zoning_class": zoning_classes,
+        }
+    )
+    df.write_parquet(str(data_dir / "enriched" / "dev_applications.parquet"))
+    joblib.dump(_FakePipeline(), model_dir / "desc_tfidf.joblib")
+
+
+class TestDefaultRadius:
+    def test_app_at_3km_excluded_by_default_radius(self, tmp_path: Path) -> None:
+        """Given: One app at 1km and one at 3km from query.
+        When: Scoring with default radius (2km).
+        Then: Only the 1km app appears — 3km one excluded."""
+        data_dir = tmp_path / "data_dr"
+        model_dir = tmp_path / "models_dr"
+        _write_fixture_with_locations(
+            data_dir,
+            model_dir,
+            lats=[43.65 + 0.009, 43.65 + 0.027],  # ~1000m and ~3000m north
+            lons=[-79.38, -79.38],
+        )
+        result = score_description_similarity(
+            "test",
+            data_dir=data_dir,
+            model_dir=model_dir,
+            lat=43.65,
+            lon=-79.38,
+        )
+        assert result is not None
+        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        assert "0" in folder_ids
+        assert "1" not in folder_ids
+
+
+class TestSelfExclusion:
+    def test_app_at_query_location_excluded_when_min_dist_set(
+        self, tmp_path: Path
+    ) -> None:
+        """Given: App at exact query lat/lon (0m) and another at 300m.
+        When: Scoring with min_dist_m=200, radius_m=2000.
+        Then: Exact-location app excluded; 300m app included."""
+        data_dir = tmp_path / "data_se"
+        model_dir = tmp_path / "models_se"
+        _write_fixture_with_locations(
+            data_dir,
+            model_dir,
+            lats=[43.65, 43.6527],  # 0m and ~300m north
+            lons=[-79.38, -79.38],
+        )
+        result = score_description_similarity(
+            "test",
+            data_dir=data_dir,
+            model_dir=model_dir,
+            lat=43.65,
+            lon=-79.38,
+            radius_m=2000.0,
+            min_dist_m=200.0,
+        )
+        assert result is not None
+        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        assert "0" not in folder_ids
+        assert "1" in folder_ids
+
+
+class TestZoneDeranking:
+    def test_same_zone_ranks_above_different_zone_with_equal_text_sim(
+        self, tmp_path: Path
+    ) -> None:
+        """Given: App A (same zone, nearby) and App B (different zone, nearby),
+        equal text similarity (fake pipeline returns identical vectors).
+        When: Scoring with zoning_class matching App A.
+        Then: App A ranks first (not deranked); App B ranks lower (0.65× penalty)."""
+        data_dir = tmp_path / "data_zd"
+        model_dir = tmp_path / "models_zd"
+        _write_fixture_with_location_zones(
+            data_dir,
+            model_dir,
+            lats=[43.651, 43.652],
+            lons=[-79.38, -79.38],
+            zoning_classes=["R", "CR"],
+        )
+        result = score_description_similarity(
+            "test",
+            data_dir=data_dir,
+            model_dir=model_dir,
+            lat=43.65,
+            lon=-79.38,
+            radius_m=2000.0,
+            zoning_class="R",
+        )
+        assert result is not None
+        assert len(result["top_matches"]) >= 1
+        assert result["top_matches"][0]["folderrsn"] == "0"
+
+
+class TestProximityFilter:
+    def test_far_apps_excluded_when_lat_lon_provided(self, tmp_path: Path) -> None:
+        """Given: One Toronto app (43.65, -79.38) and one NYC app (40.71, -74.01).
+        When: Scoring with Toronto lat/lon and radius_m=1000.
+        Then: Only the Toronto app appears in top_matches."""
+        data_dir = tmp_path / "data_prox1"
+        model_dir = tmp_path / "models_prox1"
+        _write_fixture_with_locations(
+            data_dir,
+            model_dir,
+            lats=[43.65, 40.71],
+            lons=[-79.38, -74.01],
+        )
+        result = score_description_similarity(
+            "test",
+            data_dir=data_dir,
+            model_dir=model_dir,
+            lat=43.65,
+            lon=-79.38,
+            radius_m=1000.0,
+        )
+        assert result is not None
+        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        assert "0" in folder_ids
+        assert "1" not in folder_ids
+
+    def test_all_apps_included_without_lat_lon(self, tmp_path: Path) -> None:
+        """Given: Apps at Toronto and NYC locations.
+        When: Scoring without lat/lon params.
+        Then: Both apps are included (no proximity filter applied)."""
+        data_dir = tmp_path / "data_prox2"
+        model_dir = tmp_path / "models_prox2"
+        _write_fixture_with_locations(
+            data_dir,
+            model_dir,
+            lats=[43.65, 40.71],
+            lons=[-79.38, -74.01],
+        )
+        result = score_description_similarity(
+            "test",
+            data_dir=data_dir,
+            model_dir=model_dir,
+        )
+        assert result is not None
+        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        assert "0" in folder_ids
+        assert "1" in folder_ids
+
+    def test_no_crash_when_corpus_has_no_lat_lon_columns(self, tmp_path: Path) -> None:
+        """Given: Enriched parquet without lat/lon columns, lat/lon params provided.
+        When: Scoring with lat/lon.
+        Then: Returns results normally (skips filter gracefully)."""
+        data_dir = tmp_path / "data_prox3"
+        model_dir = tmp_path / "models_prox3"
+        _write_fixture(data_dir, model_dir, appeal_labels=[0, 1])
+        result = score_description_similarity(
+            "test",
+            data_dir=data_dir,
+            model_dir=model_dir,
+            lat=43.65,
+            lon=-79.38,
+            radius_m=1000.0,
+        )
+        assert result is not None
+        assert result["n_similar"] >= 0
+
+
 class TestZoneMatchedSimilarity:
     def test_zone_matched_keys_returned_when_zoning_class_provided(
         self, tmp_path: Path
@@ -308,16 +512,19 @@ class TestZoneMatchedSimilarity:
         model_dir.mkdir(parents=True, exist_ok=True)
         import joblib
         import polars as pl
+
         n = 4
         svd_cols = {f"desc_svd_{i}": [float(i % 3 + 1) * 0.1] * n for i in range(20)}
-        df = pl.DataFrame({
-            **svd_cols,
-            "dev_appealed": [1, 1, 0, 0],  # R: [1,1], RM: [0,0] → RM appeal=0%
-            "dev_approved": [1, 0, 1, 0],
-            "folderrsn": ["0", "1", "2", "3"],
-            "application_type": ["OZ"] * n,
-            "zoning_class": ["R", "R", "RM", "RM"],
-        })
+        df = pl.DataFrame(
+            {
+                **svd_cols,
+                "dev_appealed": [1, 1, 0, 0],  # R: [1,1], RM: [0,0] → RM appeal=0%
+                "dev_approved": [1, 0, 1, 0],
+                "folderrsn": ["0", "1", "2", "3"],
+                "application_type": ["OZ"] * n,
+                "zoning_class": ["R", "R", "RM", "RM"],
+            }
+        )
         df.write_parquet(str(data_dir / "enriched" / "dev_applications.parquet"))
         joblib.dump(_FakePipeline(), model_dir / "desc_tfidf.joblib")
         result = score_description_similarity(
@@ -327,5 +534,3 @@ class TestZoneMatchedSimilarity:
         assert "zone_matched_appeal_rate" in result
         # RM apps: both appealed=0 → rate = 0.0
         assert result["zone_matched_appeal_rate"] == 0.0
-
-

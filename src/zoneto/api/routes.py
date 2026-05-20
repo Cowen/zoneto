@@ -428,6 +428,9 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
             data_dir=data_dir,
             model=bert_model,
             zoning_class=site.get("zoning_class"),
+            lat=lat,
+            lon=lon,
+            min_dist_m=300.0,
         )
     else:
         desc_sim = score_description_similarity(
@@ -435,6 +438,9 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
             data_dir=data_dir,
             model_dir=model_dir,
             zoning_class=site.get("zoning_class"),
+            lat=lat,
+            lon=lon,
+            min_dist_m=300.0,
         )
     summary_md, confidence_score = narrate_evaluation(
         site,

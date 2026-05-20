@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +20,10 @@ def score_description_similarity(
     top_n: int = 20,
     min_similarity: float = 0.1,
     zoning_class: str | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    radius_m: float = 2000.0,
+    min_dist_m: float = 0.0,
 ) -> dict[str, Any] | None:
     """Score a description against the enriched application corpus.
 
@@ -67,15 +72,34 @@ def score_description_similarity(
                 "folderrsn",
                 "application_type",
                 "street_address",
+                "zoning_class",
             ]
             if c in available
         ]
         not_null_filter = f"{svd_cols[0]} IS NOT NULL"
 
-        # Fetch full corpus for overall similarity
+        prox_filter = ""
+        has_latlon = "lat" in available and "lon" in available
+        if lat is not None and lon is not None and has_latlon:
+            lat_delta = radius_m / 111_111.0
+            lon_delta = radius_m / (111_111.0 * math.cos(math.radians(lat)))
+            prox_filter = (
+                f" AND lat BETWEEN {lat - lat_delta} AND {lat + lat_delta}"
+                f" AND lon BETWEEN {lon - lon_delta} AND {lon + lon_delta}"
+            )
+            if min_dist_m > 0:
+                excl_lat = min_dist_m / 111_111.0
+                excl_lon = min_dist_m / (111_111.0 * math.cos(math.radians(lat)))
+                prox_filter += (
+                    f" AND NOT (lat BETWEEN {lat - excl_lat} AND {lat + excl_lat}"
+                    f" AND lon BETWEEN {lon - excl_lon} AND {lon + excl_lon})"
+                )
+
+        # Fetch corpus (proximity-filtered when lat/lon provided)
         select = ", ".join(svd_cols + extra_cols)
         rows = con.execute(
-            f"SELECT {select} FROM '{enriched_path}' WHERE {not_null_filter}"
+            f"SELECT {select} FROM '{enriched_path}'"
+            f" WHERE {not_null_filter}{prox_filter}"
         ).fetchall()
 
         # Fetch zone-matched corpus when caller supplies zoning_class
@@ -103,7 +127,15 @@ def score_description_similarity(
         q_norm = query_arr / (np.linalg.norm(query_arr) + 1e-10)
         c_norms = np.linalg.norm(corpus, axis=1, keepdims=True) + 1e-10
         corpus_normed = corpus / c_norms
-        similarities: np.ndarray = corpus_normed @ q_norm
+        similarities: np.ndarray = np.array(corpus_normed @ q_norm)
+
+        # Zone deranking: penalise apps from a different zone class
+        if zoning_class is not None and "zoning_class" in extra_cols:
+            zone_col_idx = n_svd + extra_cols.index("zoning_class")
+            for i, row in enumerate(rows):
+                app_zone = row[zone_col_idx]
+                if app_zone is not None and app_zone != zoning_class:
+                    similarities[i] *= 0.65
 
         top_indices = np.argsort(similarities)[::-1][:top_n]
         top_matches = []
@@ -211,6 +243,10 @@ def score_description_similarity_bert(
     top_n: int = 20,
     min_similarity: float = 0.1,
     zoning_class: str | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    radius_m: float = 2000.0,
+    min_dist_m: float = 0.0,
 ) -> dict[str, Any] | None:
     """Score a description against the BERT-encoded application corpus.
 
@@ -243,6 +279,36 @@ def score_description_similarity_bert(
         embeddings: np.ndarray = np.load(str(embeddings_path))
         index_df = pl.read_parquet(index_path)
 
+        # Proximity filter: mask corpus to outer ring [min_dist_m, radius_m]
+        cols = index_df.columns
+        if lat is not None and lon is not None and "lat" in cols and "lon" in cols:
+            lat_delta = radius_m / 111_111.0
+            lon_delta = radius_m / (111_111.0 * math.cos(math.radians(lat)))
+            excl_lat = min_dist_m / 111_111.0
+            excl_lon = (
+                min_dist_m / (111_111.0 * math.cos(math.radians(lat)))
+                if min_dist_m > 0
+                else 0.0
+            )
+            lat_vals = index_df["lat"].to_list()
+            lon_vals = index_df["lon"].to_list()
+            keep = np.array(
+                [
+                    lv is not None
+                    and lnv is not None
+                    and (lat - lat_delta) <= lv <= (lat + lat_delta)
+                    and (lon - lon_delta) <= lnv <= (lon + lon_delta)
+                    and not (
+                        min_dist_m > 0
+                        and (lat - excl_lat) <= lv <= (lat + excl_lat)
+                        and (lon - excl_lon) <= lnv <= (lon + excl_lon)
+                    )
+                    for lv, lnv in zip(lat_vals, lon_vals)
+                ]
+            )
+            embeddings = embeddings[keep]
+            index_df = index_df.filter(pl.Series(keep))
+
         query_vec: np.ndarray = model.encode(
             [description or ""], convert_to_numpy=True, show_progress_bar=False
         )
@@ -254,11 +320,18 @@ def score_description_similarity_bert(
         q_norm = q / (np.linalg.norm(q) + 1e-10)
         c_norms = np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-10
         corpus_normed = embeddings / c_norms
-        sims: np.ndarray = corpus_normed @ q_norm
+        sims: np.ndarray = np.array(corpus_normed @ q_norm)
+
+        # Zone deranking: penalise apps from a different zone class
+        cols = index_df.columns
+        if zoning_class is not None and "zoning_class" in cols:
+            app_zones = index_df["zoning_class"].to_list()
+            for i, app_zone in enumerate(app_zones):
+                if app_zone is not None and app_zone != zoning_class:
+                    sims[i] *= 0.65
 
         top_idx = np.argsort(sims)[::-1][:top_n]
         top_matches: list[dict[str, Any]] = []
-        cols = index_df.columns
         for i in top_idx:
             sim = float(sims[i])
             if sim < min_similarity:

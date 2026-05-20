@@ -1305,13 +1305,16 @@ def compute_bert_embeddings(data_dir: Path = Path("data")) -> int:
     texts = df["description"].fill_null("").cast(pl.String).to_list()
 
     logger.info("compute_bert_embeddings: encoding %d descriptions...", len(texts))
+    # float16 (half-precision) cuts memory and encoding time in half with
+    # negligible quality loss for cosine-similarity tasks.
     model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+    model.half()
     embeddings = model.encode(
         texts,
         convert_to_numpy=True,
         show_progress_bar=True,
         batch_size=128,
-    ).astype(np.float32)
+    ).astype(np.float16)
 
     out_dir = data_dir / "enriched"
     np.save(out_dir / "desc_bert_embeddings.npy", embeddings)
@@ -1319,7 +1322,7 @@ def compute_bert_embeddings(data_dir: Path = Path("data")) -> int:
 
     # Build index with metadata columns needed for similarity scoring
     index_cols = ["folderrsn", "application_type"]
-    for optional in ["dev_approved", "dev_appealed", "zoning_class"]:
+    for optional in ["dev_approved", "dev_appealed", "zoning_class", "lat", "lon"]:
         if optional in df.columns:
             index_cols.append(optional)
     index_df = df.select(index_cols)

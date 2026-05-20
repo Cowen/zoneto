@@ -392,9 +392,7 @@ End with a CONFIDENCE line as required by the system rules.
             proposed_storeys / max_storeys
             if proposed_storeys and max_storeys
             else None,
-            proposed_units / max_units
-            if proposed_units and max_units
-            else None,
+            proposed_units / max_units if proposed_units and max_units else None,
         ]
         if any(r is not None and r >= 3.0 for r in ratios):
             score = min(score, 30)
