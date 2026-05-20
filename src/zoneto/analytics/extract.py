@@ -103,6 +103,22 @@ def extract_project_features(description: str | None) -> ProjectFeatures:
             building_type = label
             break
 
+    if building_type is None:
+        if (storeys is not None and storeys >= 5) or (
+            units is not None and units >= 20
+        ):
+            building_type = "apartment"
+        elif units is not None and 5 <= units <= 19 and (
+            storeys is None or storeys <= 4
+        ):
+            building_type = "multiplex"
+        elif units == 4:
+            building_type = "fourplex"
+        elif units == 3:
+            building_type = "triplex"
+        elif units == 2:
+            building_type = "duplex"
+
     return ProjectFeatures(
         proposed_storeys=storeys,
         proposed_units=units,

@@ -271,7 +271,7 @@ class TestEvaluateEndpoint:
                 "/evaluate",
                 json={
                     "address": "441 King St W, Toronto",
-                    "description": "A 12-storey residential building with 80 units.",
+                    "description": "A new residential development on the lands.",
                 },
             )
         assert resp.status_code == 200

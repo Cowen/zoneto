@@ -666,13 +666,66 @@ class TestExtractBuildingType:
         result = extract_project_features("A new fourplex on the rear lot.")
         assert result.building_type == "fourplex"
 
-    def test_building_type_none_when_unspecified(self) -> None:
-        """Given: Description with no explicit building type keyword.
+    def test_infers_apartment_from_high_storey_count(self) -> None:
+        """Given: Description with 17 storeys and no building type keyword.
         When: Extracting features.
-        Then: building_type is None."""
+        Then: building_type inferred as 'apartment'."""
+        result = extract_project_features(
+            "A 17-storey mixed-use building with 258 units."
+        )
+        assert result.building_type == "apartment"
+
+    def test_infers_apartment_from_large_unit_count(self) -> None:
+        """Given: Description with 20+ units and no building type keyword.
+        When: Extracting features.
+        Then: building_type inferred as 'apartment'."""
+        result = extract_project_features("A residential building with 200 units.")
+        assert result.building_type == "apartment"
+
+    def test_infers_multiplex_from_mid_unit_count(self) -> None:
+        """Given: Description with 5-19 units, <=4 storeys, no keyword.
+        When: Extracting features.
+        Then: building_type inferred as 'multiplex'."""
+        result = extract_project_features(
+            "A 3-storey residential building with 8 units."
+        )
+        assert result.building_type == "multiplex"
+
+    def test_infers_fourplex_from_4_units(self) -> None:
+        """Given: Description with exactly 4 units and no building type keyword.
+        When: Extracting features.
+        Then: building_type inferred as 'fourplex'."""
         result = extract_project_features(
             "A 3-storey residential building with 4 units."
         )
+        assert result.building_type == "fourplex"
+
+    def test_infers_triplex_from_3_units(self) -> None:
+        """Given: Description with exactly 3 units and no building type keyword.
+        When: Extracting features.
+        Then: building_type inferred as 'triplex'."""
+        result = extract_project_features("A residential building with 3 units.")
+        assert result.building_type == "triplex"
+
+    def test_infers_duplex_from_2_units(self) -> None:
+        """Given: Description with exactly 2 units and no building type keyword.
+        When: Extracting features.
+        Then: building_type inferred as 'duplex'."""
+        result = extract_project_features("A residential building with 2 units.")
+        assert result.building_type == "duplex"
+
+    def test_keyword_takes_precedence_over_inference(self) -> None:
+        """Given: Description with 'townhouse' keyword and 10 units.
+        When: Extracting features.
+        Then: keyword match wins; building_type is 'townhouse' not 'multiplex'."""
+        result = extract_project_features("A stacked townhouse with 10 units.")
+        assert result.building_type == "townhouse"
+
+    def test_building_type_none_when_unspecified(self) -> None:
+        """Given: Description with no keyword and only 1 unit (ambiguous).
+        When: Extracting features.
+        Then: building_type is None."""
+        result = extract_project_features("A residential building with 1 unit.")
         assert result.building_type is None
 
     def test_building_type_none_for_empty(self) -> None:
