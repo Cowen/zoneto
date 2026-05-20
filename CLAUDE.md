@@ -539,7 +539,7 @@ survivorship bias as the overall approval rate.
   is surfaced as a separate, more representative signal than the overall rate.
 - Site-specific zoning exceptions (`zoning_exception: 1`) are now surfaced in
   the site context section, enabling Step 3 upward adjustment.
-- Data gaps (missing lot area, height overlay, building type) are prose caveats
+- Data gaps (missing height overlay, building type) are prose caveats
   only — they do NOT deduct from the CONFIDENCE score.
 - When `data_gaps` is provided (list of human-readable strings), a "Known data
   gaps (do not speculate beyond these)" section is injected into the LLM prompt
@@ -587,8 +587,7 @@ narrator receives zone-matched stats.
 | `data_gaps` | `list[str]` | always-populated; see below |
 | `description_similarity` | `dict[str, Any] \| None` | from `score_description_similarity` |
 
-`_compute_data_gaps(site, extracted) -> list[str]` always includes the lot
-area/frontage caveat. It additionally adds:
+`_compute_data_gaps(site, extracted) -> list[str]` adds:
 - A height-overlay caveat when both `zoning_max_storeys` and
   `zoning_max_height_m` are `None` **and** `zoning_class` is set (i.e. the site
   is outside the Schedule B height overlay).

@@ -229,12 +229,12 @@ class TestEvaluateEndpoint:
         assert isinstance(data["data_gaps"], list)
         assert len(data["data_gaps"]) > 0
 
-    def test_evaluate_data_gaps_includes_lot_dimensions(
+    def test_evaluate_data_gaps_includes_building_type_when_unknown(
         self, client: TestClient
     ) -> None:
-        """Given: Any valid proposal.
+        """Given: A proposal with no recognisable building type in the description.
         When: POST /evaluate.
-        Then: data_gaps always mentions lot dimensions unavailability."""
+        Then: data_gaps mentions building type unavailability."""
         with (
             patch(
                 "zoneto.api.routes._geocode_address",
@@ -277,7 +277,7 @@ class TestEvaluateEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         combined = " ".join(data["data_gaps"]).lower()
-        assert "lot" in combined or "frontage" in combined
+        assert "building type" in combined
 
     def test_evaluate_response_has_description_similarity_field(
         self, client: TestClient

@@ -364,13 +364,6 @@ def _retrieve_chunks(
 def _compute_data_gaps(site: dict[str, Any], extracted: Any) -> list[str]:
     """Identify what information is unavailable and would improve the assessment."""
     gaps: list[str] = []
-    # Lot dimensions: always unavailable from open data
-    gaps.append(
-        "Actual lot area and frontage: not available from open data "
-        "(obtain from MPAC, deed, or survey). "
-        "Compliance with minimum lot area/frontage requirements in "
-        "your zone cannot be verified."
-    )
     # Height overlay: absent when site is outside Schedule B coverage (~85% of city)
     if (
         site.get("zoning_max_storeys") is None
