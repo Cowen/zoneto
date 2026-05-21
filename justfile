@@ -42,19 +42,19 @@ summary:
 
 # Start the FastAPI serving layer
 serve:
-    source .env && uv run zoneto serve --reload
+    uv run zoneto serve --reload
 
 # Build the Docker image for the serving layer
 # Run `just bylaw-index` first to bake the bylaw index into the image.
 # The image still builds without it (app starts with bylaw_index = None).
 docker-build:
     mkdir -p data/bylaw_index
-    docker build -t zoneto:latest .
+    podman build -t zoneto:latest .
 
 # Run the serving layer in Docker (requires prior docker-build and pipeline run)
 # Pass ANTHROPIC_API_KEY via --env for the LLM narrator.
 docker-run:
-    docker run --rm -p 8000:8000 --env ANTHROPIC_API_KEY zoneto:latest
+    podman run --rm -p 8000:8000 --env ANTHROPIC_API_KEY zoneto:latest
 
 # Measure importance of all model input features
 importance-all:
