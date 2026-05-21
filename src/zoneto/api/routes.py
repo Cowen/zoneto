@@ -339,11 +339,19 @@ def _retrieve_chunks(
     zones = _zone_prefixes(site.get("zoning_class"))
     zone_class = site.get("zoning_class") or ""
     use_cat = site.get("permitted_use_category") or ""
+    exception_no = site.get("zoning_exception_no")
 
-    # 1. Zone-specific query — anchors context to the site's zone chapter
-    zone_query = (
-        f"{zone_class} zone {use_cat} permitted uses height density requirements"
-    ).strip()
+    # 1. Zone-specific query — anchors context to the site's zone chapter.
+    # When a site-specific exception applies, target the exception schedule
+    # directly so the retrieval surfaces the actual exception provisions.
+    if exception_no:
+        zone_query = (
+            f"Exception {exception_no} {zone_class} zone site-specific provisions"
+        ).strip()
+    else:
+        zone_query = (
+            f"{zone_class} zone {use_cat} permitted uses height density requirements"
+        ).strip()
     zone_chunks: list[Chunk] = bylaw_index.search(zone_query, zones=zones, k=k // 2 + 1)
 
     # 2. Description-based query — retrieves proposal-relevant sections

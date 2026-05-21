@@ -136,6 +136,88 @@ Short section.
                 assert len(chunk.text) <= 2000
 
 
+class TestExceptionChunking:
+    def test_exception_header_produces_chunk(self) -> None:
+        """Given: Bylaw text with exception header '(252) Exception RM 252'.
+        When: Splitting into chunks.
+        Then: A chunk with section_title 'Exception RM 252' is produced."""
+        text = (
+            "(252) Exception RM 252\n"
+            "      The lands are subject to the following Site Specific Provisions.\n\n"
+            "      Site Specific Provisions:\n"
+            "        (A) The minimum lot frontage is 8.0 metres for a detached house.\n"
+            "      Prevailing By-laws and Prevailing Sections:\n"
+            "        (A) On lands known as 1500 Weston Road, "
+            "City of Toronto By-law 1268-2009.\n"
+        )
+        chunks = split_into_chunks(text, source_file="part2.txt", chapter="900")
+        titles = [c.section_title for c in chunks]
+        assert any("Exception RM 252" in t for t in titles), (
+            f"Expected 'Exception RM 252' in chunk titles, got: {titles}"
+        )
+
+    def test_exception_chunk_contains_provisions(self) -> None:
+        """Given: Exception text with site-specific provisions.
+        When: Splitting into chunks.
+        Then: The chunk text includes the provision content."""
+        text = (
+            "(1581) Exception CR 1581\n"
+            "       The lands are subject to the following provisions.\n\n"
+            "       Site Specific Provisions:\n"
+            "         (A) In a Commercial Residential zone, where the maximum\n"
+            "             lawfully permitted height exceeds the right-of-way width,\n"
+            "             angular plane requirements do not apply.\n"
+            "       Prevailing By-laws and Prevailing Sections:\n"
+            "         (A) Section 12(1) 199 of former City of Toronto By-law 438-86.\n"
+        )
+        chunks = split_into_chunks(text, source_file="part3.txt", chapter="900")
+        exception_chunks = [c for c in chunks if "Exception CR 1581" in c.section_title]
+        assert exception_chunks, "No chunk found with 'Exception CR 1581' in title"
+        combined_text = " ".join(c.text for c in exception_chunks)
+        assert (
+            "angular plane" in combined_text
+            or "Commercial Residential" in combined_text
+        )
+
+    def test_exception_section_number_extracted(self) -> None:
+        """Given: Exception header '(252) Exception RM 252'.
+        When: Splitting into chunks.
+        Then: The chunk's section_number contains '252'."""
+        text = (
+            "(252) Exception RM 252\n"
+            "      Site Specific Provisions:\n"
+            "        (A) The minimum lot frontage is 8.0 metres for a detached house.\n"
+            "      Prevailing By-laws and Prevailing Sections: (None Apply)\n"
+        )
+        chunks = split_into_chunks(text, source_file="part2.txt", chapter="900")
+        exception_chunks = [c for c in chunks if "Exception RM 252" in c.section_title]
+        assert exception_chunks
+        assert "252" in exception_chunks[0].section_number
+
+    def test_consecutive_exceptions_chunked_separately(self) -> None:
+        """Given: Two consecutive exception headers.
+        When: Splitting into chunks.
+        Then: Each exception becomes a separate chunk."""
+        text = (
+            "(252) Exception RM 252\n"
+            "      Site Specific Provisions:\n"
+            "        (A) The minimum lot frontage is 8.0 metres for a detached house.\n"
+            "      Prevailing By-laws and Prevailing Sections: (None Apply)\n"
+            "(253) Exception RM 253\n"
+            "      Site Specific Provisions:\n"
+            "        (A) A detached house, semi-detached house, duplex, triplex, or "
+            "townhouse are the only residential building types permitted.\n"
+            "      Prevailing By-laws and Prevailing Sections: (None Apply)\n"
+        )
+        chunks = split_into_chunks(text, source_file="part2.txt", chapter="900")
+        exception_titles = [
+            c.section_title for c in chunks if "Exception RM" in c.section_title
+        ]
+        assert len(exception_titles) >= 2, (
+            f"Expected at least 2 exception chunks, got: {exception_titles}"
+        )
+
+
 class TestBylawIndexSearch:
     """Tests for BylawIndex search functionality."""
 

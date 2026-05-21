@@ -44,9 +44,12 @@ def split_into_chunks(text: str, source_file: str, chapter: str) -> list[Chunk]:
     chunks: list[Chunk] = []
     chunk_id = 0
 
-    # Split on section headers: matches patterns like "10.20.40" or "150.30.20"
-    # Also capture "Chapter X" patterns
-    section_pattern = r"^(?:Chapter\s+\d+|(?:\d+\.)+\d+)\s+([^\n]*?)(?:\n|$)"
+    # Split on section headers: "10.20.40", "Chapter X", or "(252) Exception RM 252".
+    # Lookahead (?=\s+Exception) prevents matching sub-item labels like "(1) Height.".
+    section_pattern = (
+        r"^(?:Chapter\s+\d+|(?:\d+\.)+\d+|\(\d+\)(?=\s+Exception))"
+        r"\s+([^\n]*?)(?:\n|$)"
+    )
 
     # Split text into sections
     section_matches = list(re.finditer(section_pattern, text, re.MULTILINE))

@@ -487,3 +487,61 @@ class TestAskEndpoint:
                 },
             )
         assert resp.status_code == 503
+
+
+class TestRetrieveChunksExceptionQuery:
+    """Tests that _retrieve_chunks injects the exception number into the query."""
+
+    def _make_index(self, captured: list[str]):
+        class _MockIndex:
+            def search(self, query: str, zones=None, k: int = 6):
+                captured.append(query)
+                return []
+
+        return _MockIndex()
+
+    def test_exception_number_included_in_zone_query(self) -> None:
+        """Given: Site with zoning_exception_no='252'.
+        When: _retrieve_chunks is called.
+        Then: The first (zone-context) query includes '252'."""
+        from zoneto.api.routes import _retrieve_chunks
+
+        queries: list[str] = []
+        _retrieve_chunks(
+            self._make_index(queries),
+            {
+                "zoning_class": "RM",
+                "permitted_use_category": "Residential",
+                "zoning_exception": 1,
+                "zoning_exception_no": "252",
+            },
+            "a tall building",
+            None,
+            k=4,
+        )
+        assert queries, "No queries captured"
+        assert "252" in queries[0], (
+            f"Exception number not in zone query: {queries[0]!r}"
+        )
+
+    def test_no_exception_uses_standard_query(self) -> None:
+        """Given: Site with no zoning exception.
+        When: _retrieve_chunks is called.
+        Then: The zone-context query uses the standard 'permitted uses' format."""
+        from zoneto.api.routes import _retrieve_chunks
+
+        queries: list[str] = []
+        _retrieve_chunks(
+            self._make_index(queries),
+            {
+                "zoning_class": "CR",
+                "permitted_use_category": "Commercial Residential (mixed)",
+                "zoning_exception": 0,
+                "zoning_exception_no": None,
+            },
+            "a mixed-use building",
+            None,
+            k=4,
+        )
+        assert queries
+        assert "permitted uses" in queries[0]
