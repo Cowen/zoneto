@@ -108,8 +108,8 @@ def extract_project_features(description: str | None) -> ProjectFeatures:
             units is not None and units >= 20
         ):
             building_type = "apartment"
-        elif units is not None and 5 <= units <= 19 and (
-            storeys is None or storeys <= 4
+        elif (
+            units is not None and 5 <= units <= 19 and (storeys is None or storeys <= 4)
         ):
             building_type = "multiplex"
         elif units == 4:

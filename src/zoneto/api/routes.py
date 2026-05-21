@@ -341,27 +341,26 @@ def _retrieve_chunks(
     use_cat = site.get("permitted_use_category") or ""
     exception_no = site.get("zoning_exception_no")
 
+    # 0. Direct exception lookup — guarantees the exact exception schedule
+    # surfaces first when the site has a known exception number. Score=1.0.
+    exception_chunks: list[Chunk] = []
+    if exception_no and zones:
+        exception_chunks = bylaw_index.lookup_exception(zones[0], exception_no)
+
     # 1. Zone-specific query — anchors context to the site's zone chapter.
-    # When a site-specific exception applies, target the exception schedule
-    # directly so the retrieval surfaces the actual exception provisions.
-    if exception_no:
-        zone_query = (
-            f"Exception {exception_no} {zone_class} zone site-specific provisions"
-        ).strip()
-    else:
-        zone_query = (
-            f"{zone_class} zone {use_cat} permitted uses height density requirements"
-        ).strip()
+    zone_query = (
+        f"{zone_class} zone {use_cat} permitted uses height density requirements"
+    ).strip()
     zone_chunks: list[Chunk] = bylaw_index.search(zone_query, zones=zones, k=k // 2 + 1)
 
     # 2. Description-based query — retrieves proposal-relevant sections
     desc_query = f"{description} {extracted_use or ''}".strip()
     desc_chunks: list[Chunk] = bylaw_index.search(desc_query, zones=zones, k=k)
 
-    # Merge: zone chunks take priority, then fill with description chunks
+    # Merge: exception chunks first (exact match), then zone, then description
     seen: set[int] = set()
     merged: list[Chunk] = []
-    for chunk in (*zone_chunks, *desc_chunks):
+    for chunk in (*exception_chunks, *zone_chunks, *desc_chunks):
         if chunk.chunk_id not in seen:
             seen.add(chunk.chunk_id)
             merged.append(chunk)

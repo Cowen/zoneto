@@ -490,25 +490,30 @@ class TestAskEndpoint:
 
 
 class TestRetrieveChunksExceptionQuery:
-    """Tests that _retrieve_chunks injects the exception number into the query."""
+    """Tests that _retrieve_chunks uses direct lookup for sites with exceptions."""
 
-    def _make_index(self, captured: list[str]):
+    def _make_index(self, queries: list[str], lookups: list[tuple[str, str]]):
         class _MockIndex:
             def search(self, query: str, zones=None, k: int = 6):
-                captured.append(query)
+                queries.append(query)
+                return []
+
+            def lookup_exception(self, zone: str, exception_no: str):
+                lookups.append((zone, exception_no))
                 return []
 
         return _MockIndex()
 
-    def test_exception_number_included_in_zone_query(self) -> None:
+    def test_exception_direct_lookup_called(self) -> None:
         """Given: Site with zoning_exception_no='252'.
         When: _retrieve_chunks is called.
-        Then: The first (zone-context) query includes '252'."""
+        Then: lookup_exception('RM', '252') is called for direct retrieval."""
         from zoneto.api.routes import _retrieve_chunks
 
         queries: list[str] = []
+        lookups: list[tuple[str, str]] = []
         _retrieve_chunks(
-            self._make_index(queries),
+            self._make_index(queries, lookups),
             {
                 "zoning_class": "RM",
                 "permitted_use_category": "Residential",
@@ -519,20 +524,22 @@ class TestRetrieveChunksExceptionQuery:
             None,
             k=4,
         )
-        assert queries, "No queries captured"
-        assert "252" in queries[0], (
-            f"Exception number not in zone query: {queries[0]!r}"
+        assert lookups, "lookup_exception was not called"
+        assert ("RM", "252") in lookups, (
+            f"Expected lookup_exception('RM', '252'), got: {lookups}"
         )
 
     def test_no_exception_uses_standard_query(self) -> None:
         """Given: Site with no zoning exception.
         When: _retrieve_chunks is called.
-        Then: The zone-context query uses the standard 'permitted uses' format."""
+        Then: The zone-context query uses the standard 'permitted uses' format
+              and lookup_exception is not called."""
         from zoneto.api.routes import _retrieve_chunks
 
         queries: list[str] = []
+        lookups: list[tuple[str, str]] = []
         _retrieve_chunks(
-            self._make_index(queries),
+            self._make_index(queries, lookups),
             {
                 "zoning_class": "CR",
                 "permitted_use_category": "Commercial Residential (mixed)",
@@ -545,3 +552,31 @@ class TestRetrieveChunksExceptionQuery:
         )
         assert queries
         assert "permitted uses" in queries[0]
+        assert not lookups, "lookup_exception should not be called without exception_no"
+
+
+class TestFormatChunks:
+    """Tests for _format_chunks: chunk text must not be truncated."""
+
+    def test_full_chunk_text_is_preserved(self) -> None:
+        """Given: A chunk whose text is longer than 600 characters.
+        When: _format_chunks renders it.
+        Then: The full text appears in the output without truncation."""
+        from zoneto.analytics.bylaw_index import Chunk
+        from zoneto.api.narrator import _format_chunks  # type: ignore[attr-defined]
+
+        long_text = "x" * 700
+        chunk = Chunk(
+            chunk_id=1,
+            chapter="10",
+            section_number="10.80",
+            section_title="Exception RM 252",
+            source_file="part10.txt",
+            zones=["RM"],
+            text=long_text,
+            score=1.0,
+        )
+        result = _format_chunks([chunk])
+        assert long_text in result, (
+            "Chunk text was truncated — expected full 700-char text in output"
+        )

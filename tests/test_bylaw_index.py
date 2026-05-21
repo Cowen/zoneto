@@ -218,6 +218,73 @@ class TestExceptionChunking:
         )
 
 
+class TestExceptionLookup:
+    def test_lookup_exception_returns_exact_chunk(self) -> None:
+        """Given: Index with Exception RM 252 chunk.
+        When: lookup_exception('RM', '252') is called.
+        Then: Returns chunk(s) with section_title containing 'Exception RM 252'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            chunks_data = {
+                "chunk_id": [0, 1, 2],
+                "chapter": ["900", "900", "900"],
+                "section_number": ["134", "252", "265"],
+                "section_title": [
+                    "Exception RM 134",
+                    "Exception RM 252",
+                    "Exception RM 265",
+                ],
+                "source_file": ["part2.txt"] * 3,
+                "zones": [["RM"], ["RM"], ["RM"]],
+                "text": [
+                    "(134) Exception RM 134\nSite Specific Provisions: (None Apply)",
+                    "(252) Exception RM 252\nSite Specific Provisions:\n"
+                    "  (A) The minimum lot frontage is 8.0 metres.",
+                    "(265) Exception RM 265\nSite Specific Provisions: (None Apply)",
+                ],
+            }
+            pl.DataFrame(chunks_data).write_parquet(index_dir / "chunks.parquet")
+            model = MockModel()
+            np.save(
+                index_dir / "embeddings.npy",
+                model.encode(chunks_data["text"]),
+            )
+            with patch("zoneto.analytics.bylaw_index.SentenceTransformer") as m:
+                m.return_value = MockModel()
+                index = BylawIndex(index_dir)
+
+            results = index.lookup_exception("RM", "252")
+            assert results, "Expected at least one chunk"
+            assert all("Exception RM 252" in c.section_title for c in results)
+
+    def test_lookup_exception_returns_empty_when_not_found(self) -> None:
+        """Given: Index without a matching exception.
+        When: lookup_exception('RM', '9999') is called.
+        Then: Returns empty list."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            chunks_data = {
+                "chunk_id": [0],
+                "chapter": ["900"],
+                "section_number": ["252"],
+                "section_title": ["Exception RM 252"],
+                "source_file": ["part2.txt"],
+                "zones": [["RM"]],
+                "text": ["(252) Exception RM 252\nSite Specific Provisions: (None)."],
+            }
+            pl.DataFrame(chunks_data).write_parquet(index_dir / "chunks.parquet")
+            model = MockModel()
+            np.save(
+                index_dir / "embeddings.npy",
+                model.encode(chunks_data["text"]),
+            )
+            with patch("zoneto.analytics.bylaw_index.SentenceTransformer") as m:
+                m.return_value = MockModel()
+                index = BylawIndex(index_dir)
+
+            assert index.lookup_exception("RM", "9999") == []
+
+
 class TestBylawIndexSearch:
     """Tests for BylawIndex search functionality."""
 

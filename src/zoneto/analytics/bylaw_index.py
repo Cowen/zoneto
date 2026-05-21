@@ -396,3 +396,36 @@ class BylawIndex:
             results.append(chunk)
 
         return results
+
+    def lookup_exception(self, zone: str, exception_no: str) -> list[Chunk]:
+        """Direct lookup for a named exception schedule by zone and number.
+
+        Filters chunks whose section_title contains 'Exception {zone} {exception_no}'.
+        Score is set to 1.0 (exact match). Returns empty list when not found.
+
+        Args:
+            zone: Zone code prefix (e.g., "RM").
+            exception_no: Exception number as string (e.g., "252").
+
+        Returns:
+            All matching chunks, score=1.0.
+        """
+        title_target = f"Exception {zone} {exception_no}"
+        matching = self.chunks_df.filter(
+            pl.col("section_title").str.contains(title_target, literal=True)
+        )
+        results = []
+        for row in matching.iter_rows(named=True):
+            results.append(
+                Chunk(
+                    chunk_id=row["chunk_id"],
+                    chapter=row["chapter"],
+                    section_number=row["section_number"],
+                    section_title=row["section_title"],
+                    source_file=row["source_file"],
+                    zones=list(row["zones"]),
+                    text=row["text"],
+                    score=1.0,
+                )
+            )
+        return results

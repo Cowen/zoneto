@@ -120,7 +120,7 @@ def _format_chunks(chunks: list[Chunk]) -> str:
     parts = []
     for c in chunks:
         header = f"[§{c.section_number} {c.section_title} — {c.source_file}]"
-        parts.append(f"{header}\n{c.text[:600]}")
+        parts.append(f"{header}\n{c.text}")
     return "\n\n---\n\n".join(parts)
 
 
