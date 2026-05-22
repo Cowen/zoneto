@@ -9,6 +9,8 @@ from typing import Any
 
 from fastapi import FastAPI
 
+_BERT_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+
 
 def _load_production_ready(model_dir: Path) -> dict[str, bool]:
     """Load production_ready flags from metrics.json. Returns empty dict if absent."""
@@ -57,7 +59,7 @@ def create_app(
             else:
                 from sentence_transformers import SentenceTransformer  # noqa: PLC0415
 
-                app.state.bert_model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+                app.state.bert_model = SentenceTransformer(_BERT_MODEL_NAME)
         else:
             app.state.bert_model = None
 
