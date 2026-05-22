@@ -165,4 +165,4 @@ def compute_bert_embeddings(data_dir: Path = Path("data")) -> int:
     index_df.write_parquet(out_dir / "desc_bert_index.parquet")
     logger.info("compute_bert_embeddings: saved index with %d rows", len(index_df))
 
-    return len(df)
+    return len(index_df)
