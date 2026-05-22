@@ -7,7 +7,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from zoneto.analytics.enrich import match_olt_to_dev
+from zoneto.analytics.labels import match_olt_to_dev
 
 
 @pytest.fixture

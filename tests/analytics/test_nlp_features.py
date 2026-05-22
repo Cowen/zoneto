@@ -6,7 +6,7 @@ from pathlib import Path
 
 import polars as pl
 
-from zoneto.analytics.enrich import _extract_text_features
+from zoneto.analytics.nlp import _extract_text_features
 
 
 def test_extract_text_features_produces_svd_columns(tmp_path: Path) -> None:

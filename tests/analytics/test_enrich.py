@@ -12,12 +12,12 @@ import polars as pl
 import pytest
 
 from zoneto.analytics.enrich import (
-    _spatial_join_dev,
     enrich_coa,
     enrich_dev,
     enrich_permits,
     fetch_reference,
 )
+from zoneto.analytics.spatial import _spatial_join_dev
 
 
 def _write_minimal_shp(shp_path: Path) -> None:
@@ -90,9 +90,9 @@ def test_fetch_reference_creates_dirs(
             "2,48.7,100000,3140.2,48.2\n"
         )
 
-    monkeypatch.setattr("zoneto.analytics.enrich._download", fake_download)
+    monkeypatch.setattr("zoneto.analytics.reference._download", fake_download)
     monkeypatch.setattr(
-        "zoneto.analytics.enrich._fetch_ward_profiles_csv",
+        "zoneto.analytics.reference._fetch_ward_profiles_csv",
         fake_fetch_ward_profiles_csv,
     )
     fetch_reference(data_dir=tmp_path)

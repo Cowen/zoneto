@@ -7,7 +7,7 @@ from pathlib import Path
 
 import polars as pl
 
-from zoneto.analytics.enrich import _add_mtsa_feature
+from zoneto.analytics.spatial import _add_mtsa_feature
 
 
 def _write_mtsa_geojson(path: Path) -> None:
