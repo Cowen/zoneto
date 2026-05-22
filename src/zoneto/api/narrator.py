@@ -290,6 +290,33 @@ def _format_data_gaps(data_gaps: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _apply_confidence_overrides(
+    score: int,
+    violations: list[Violation],
+    site: dict[str, Any],
+    extracted: ProjectFeatures,
+) -> int:
+    """Apply deterministic floor/cap rules after LLM scoring.
+
+    Floor: no violations + mixed/commercial-residential use → min 70.
+    Cap: proposed ≥ 3× zoning limit (storeys or units) → max 30.
+    """
+    permitted = (site.get("permitted_use_category") or "").lower()
+    if not violations and any(k in permitted for k in ("mixed", "commercial residential")):
+        score = max(score, 70)
+
+    max_storeys = site.get("zoning_max_storeys") or 0
+    max_units = site.get("zoning_max_units") or 0
+    prop_storeys = extracted.proposed_storeys or 0
+    prop_units = extracted.proposed_units or 0
+    if (max_storeys and prop_storeys / max_storeys >= 3.0) or (
+        max_units and prop_units / max_units >= 3.0
+    ):
+        score = min(score, 30)
+
+    return score
+
+
 def narrate_evaluation(
     site: dict[str, Any],
     extracted: ProjectFeatures,
@@ -373,29 +400,8 @@ End with a CONFIDENCE line as required by the system rules.
         max_tokens=1200,
     )
     summary, score = _parse_confidence(raw)
-    # Programmatic floor: when the rule engine finds zero violations AND the zone
-    # explicitly permits the proposed use category, the LLM must not drop below 70.
-    # This enforces Step 2A deterministically so LLM temperature cannot break it.
-    if score is not None and not violations:
-        use_cat = (site.get("permitted_use_category") or "").lower()
-        if "mixed" in use_cat or "commercial residential" in use_cat:
-            score = max(score, 70)
-    # Programmatic cap: when ANY proposal exceeds the zone limit by 3× or more,
-    # the LLM must not rise above 30. Step 1 is structural — LLM temperature
-    # cannot override a mandatory rezoning that exceeds 3× the as-of-right limit.
     if score is not None:
-        proposed_storeys = getattr(extracted, "proposed_storeys", None)
-        max_storeys = (site or {}).get("zoning_max_storeys")
-        proposed_units = getattr(extracted, "proposed_units", None)
-        max_units = (site or {}).get("zoning_max_units")
-        ratios = [
-            proposed_storeys / max_storeys
-            if proposed_storeys and max_storeys
-            else None,
-            proposed_units / max_units if proposed_units and max_units else None,
-        ]
-        if any(r is not None and r >= 3.0 for r in ratios):
-            score = min(score, 30)
+        score = _apply_confidence_overrides(score, violations, site, extracted)
     return summary, score
 
 
