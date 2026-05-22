@@ -67,6 +67,7 @@ def explain_one(
             logger.warning("explain_one: source %r not supported for SHAP", source)
             return []
 
+        # pandas required: sklearn's ColumnTransformer/predict APIs don't accept polars
         X_raw = pd.DataFrame([{col: features.get(col) for col in all_cols}])
         X_transformed = preprocessor.transform(X_raw)
 

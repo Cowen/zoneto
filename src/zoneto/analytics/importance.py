@@ -143,6 +143,7 @@ def feature_importance(
 
         enriched = data_dir / "enriched" / f"{source_name}.parquet"
         df = pl.read_parquet(enriched).filter(pl.col(label_col).is_not_null())
+        # pandas required: sklearn's ColumnTransformer/predict APIs don't accept polars
         X: pd.DataFrame = df.select(all_cols).to_pandas()
         y: np.ndarray = df[label_col].to_numpy()
 

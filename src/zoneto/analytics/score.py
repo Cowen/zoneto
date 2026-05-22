@@ -136,6 +136,7 @@ def score_all(
         df_dev = df_dev.with_columns(_svd_cols)
 
     all_dev_cols = DEV_CAT_COLS + DEV_NUM_COLS
+    # pandas required: sklearn's ColumnTransformer/predict APIs don't accept polars
     X_dev = df_dev.select(all_dev_cols).to_pandas()
 
     extra: dict[str, list] = {}

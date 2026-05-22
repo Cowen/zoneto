@@ -264,6 +264,7 @@ class BylawIndex:
         self.embeddings = np.load(self.embeddings_path)
 
         # Initialize model for query encoding
+        # Keep in sync with api/app.py _BERT_MODEL_NAME
         self.model = SentenceTransformer("BAAI/bge-small-en-v1.5")
 
     @classmethod
