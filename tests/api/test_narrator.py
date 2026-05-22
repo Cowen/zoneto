@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+from zoneto.analytics.compliance import Severity, Violation
 from zoneto.analytics.extract import ProjectFeatures
 from zoneto.api.llm_client import FakeLLMClient
 from zoneto.api.narrator import (
+    _apply_confidence_overrides,
     _format_description_similarity,
     _parse_confidence,
     narrate_evaluation,
@@ -629,3 +631,109 @@ class TestProgrammaticCap:
             self._site_with_max_storeys(None), extracted, [], [], client
         )
         assert score == 50
+
+
+class TestApplyConfidenceOverrides:
+    """Direct tests for the deterministic floor/cap rules (no LLM client needed)."""
+
+    def _site(
+        self,
+        permitted_use_category: str | None = None,
+        zoning_max_storeys: int | None = None,
+        zoning_max_units: int | None = None,
+    ) -> dict:
+        return {
+            "permitted_use_category": permitted_use_category,
+            "zoning_max_storeys": zoning_max_storeys,
+            "zoning_max_units": zoning_max_units,
+        }
+
+    def _extracted(
+        self, storeys: int | None = None, units: int | None = None
+    ) -> ProjectFeatures:
+        return ProjectFeatures(storeys, units, "residential", False)
+
+    def _violation(self) -> Violation:
+        return Violation(
+            rule_id="test",
+            section_ref="§1",
+            observed="observed",
+            allowed="allowed",
+            severity=Severity.NEEDS_REZONING,
+            suggested_remedy="reduce",
+        )
+
+    def test_floor_applied_no_violations_mixed_use(self) -> None:
+        """Given: no violations, permitted_use_category contains 'mixed'.
+        When: score is 60.
+        Then: Floor raises score to 70."""
+        score = _apply_confidence_overrides(
+            60, [], self._site("mixed use residential"), self._extracted()
+        )
+        assert score == 70
+
+    def test_floor_not_applied_when_violations_present(self) -> None:
+        """Given: violations present, permitted_use_category = 'mixed use'.
+        When: score is 60.
+        Then: Floor suppressed by violations."""
+        score = _apply_confidence_overrides(
+            60, [self._violation()], self._site("mixed use"), self._extracted()
+        )
+        assert score == 60
+
+    def test_floor_not_applied_for_incompatible_use(self) -> None:
+        """Given: no violations, permitted_use_category = 'employment industrial'.
+        When: score is 60.
+        Then: Floor not applied — use doesn't match 'mixed' or 'commercial residential'."""  # noqa: E501
+        score = _apply_confidence_overrides(
+            60, [], self._site("employment industrial"), self._extracted()
+        )
+        assert score == 60
+
+    def test_cap_applied_when_storeys_exceed_3x(self) -> None:
+        """Given: proposed 10 storeys, max 3 (ratio 3.33×).
+        When: score is 70.
+        Then: Cap lowers score to 30."""
+        score = _apply_confidence_overrides(
+            70, [], self._site(zoning_max_storeys=3), self._extracted(storeys=10)
+        )
+        assert score == 30
+
+    def test_cap_applied_when_units_exceed_3x(self) -> None:
+        """Given: proposed 30 units, max 10 (ratio 3.0×).
+        When: score is 70.
+        Then: Cap lowers score to 30."""
+        score = _apply_confidence_overrides(
+            70, [], self._site(zoning_max_units=10), self._extracted(units=30)
+        )
+        assert score == 30
+
+    def test_cap_not_applied_when_below_3x(self) -> None:
+        """Given: proposed 6 units, max 10 (ratio 0.6×).
+        When: score is 70.
+        Then: Cap not applied."""
+        score = _apply_confidence_overrides(
+            70, [], self._site(zoning_max_units=10), self._extracted(units=6)
+        )
+        assert score == 70
+
+    def test_no_division_by_zero_when_max_is_zero(self) -> None:
+        """Given: zoning_max_storeys=0 (falsy).
+        When: proposed 10 storeys.
+        Then: No division by zero; score unchanged."""
+        score = _apply_confidence_overrides(
+            55,
+            [],
+            self._site(zoning_max_storeys=0, zoning_max_units=0),
+            self._extracted(storeys=10, units=10),
+        )
+        assert score == 55
+
+    def test_score_above_floor_unchanged(self) -> None:
+        """Given: no violations, mixed use, score already 80.
+        When: floor is 70.
+        Then: Score stays at 80 (max(80, 70))."""
+        score = _apply_confidence_overrides(
+            80, [], self._site("mixed use"), self._extracted()
+        )
+        assert score == 80
