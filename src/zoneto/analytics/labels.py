@@ -172,3 +172,84 @@ def match_olt_to_dev(
             pl.Series("olt_decision_date", matched_dates, dtype=pl.Date),
         ]
     )
+
+
+def _add_section37_features(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
+    """Join Section 37 community benefits to dev_applications by address match.
+
+    Reads data/reference/section37.parquet. Normalizes addresses and does an
+    exact match on the lowercased, stripped address string. Multiple S.37
+    records for the same address are aggregated: monetary values are summed
+    and benefit texts are joined with "; ".
+
+    Adds columns:
+    - s37_monetary_value (Float64 | null): total CAD value of S.37 agreements
+    - s37_benefit_text (String | null): concatenated Community Benefits text
+
+    If section37.parquet is absent or the DataFrame lacks an address column,
+    both columns are null for all rows.
+    """
+    null_cols = [
+        pl.lit(None, dtype=pl.Float64).alias("s37_monetary_value"),
+        pl.lit(None, dtype=pl.String).alias("s37_benefit_text"),
+    ]
+
+    s37_path = data_dir / "reference" / "section37.parquet"
+    if not s37_path.exists():
+        return df.with_columns(null_cols)
+
+    if "address" not in df.columns:
+        return df.with_columns(null_cols)
+
+    s37 = pl.read_parquet(s37_path)
+    if "location" not in s37.columns:
+        return df.with_columns(null_cols)
+
+    # Normalize addresses: lowercase, strip, collapse internal whitespace
+    def _norm(s: str | None) -> str:
+        if not s:
+            return ""
+        return " ".join(s.lower().split())
+
+    s37_locations = [_norm(loc) for loc in s37["location"].fill_null("").to_list()]
+    s37_monetary = s37["monetary_value"].to_list() if "monetary_value" in s37.columns else [None] * len(s37)
+    s37_benefits = (
+        s37["community_benefits"].fill_null("").to_list()
+        if "community_benefits" in s37.columns
+        else [""] * len(s37)
+    )
+
+    # Build index: normalized location → list of (monetary_value, benefit_text)
+    loc_index: dict[str, list[tuple[float | None, str]]] = {}
+    for loc, mon, ben in zip(s37_locations, s37_monetary, s37_benefits):
+        if loc:
+            if loc not in loc_index:
+                loc_index[loc] = []
+            loc_index[loc].append((mon, ben))
+
+    dev_addresses = [_norm(a) for a in df["address"].fill_null("").to_list()]
+
+    s37_monetary_vals: list[float | None] = []
+    s37_benefit_texts: list[str | None] = []
+
+    for addr in dev_addresses:
+        matches = loc_index.get(addr, [])
+        if not matches:
+            s37_monetary_vals.append(None)
+            s37_benefit_texts.append(None)
+        else:
+            total_monetary: float | None = None
+            for mon, _ in matches:
+                if mon is not None:
+                    total_monetary = (total_monetary or 0.0) + mon
+            benefits = [b for _, b in matches if b]
+            benefit_text = "; ".join(benefits) if benefits else None
+            s37_monetary_vals.append(total_monetary)
+            s37_benefit_texts.append(benefit_text)
+
+    return df.with_columns(
+        [
+            pl.Series("s37_monetary_value", s37_monetary_vals, dtype=pl.Float64),
+            pl.Series("s37_benefit_text", s37_benefit_texts, dtype=pl.String),
+        ]
+    )

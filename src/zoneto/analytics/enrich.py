@@ -17,6 +17,7 @@ from zoneto.analytics.labels import (
     _DEV_DAYS_CAP,
     _DEV_REFUSED_SET,
     _DEV_SURVIVAL_TYPES,
+    _add_section37_features,
     _label_from_sets,
 )
 from zoneto.analytics.labels import (
@@ -410,6 +411,9 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         )
     else:
         df = df.with_columns(pl.lit(None, dtype=pl.Utf8).alias("proposed_use_category"))
+
+    # --- Section 37 community benefits: join by address ---
+    df = _add_section37_features(df, data_dir)
 
     # --- NLP features: TF-IDF + SVD on description column ---
     # NOTE: TF-IDF vocabulary is fit on the full corpus (all applications).
