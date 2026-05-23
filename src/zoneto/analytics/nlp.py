@@ -143,6 +143,7 @@ def compute_bert_embeddings(data_dir: Path = Path("data")) -> int:
     logger.info("compute_bert_embeddings: encoding %d descriptions...", len(texts))
     # float16 (half-precision) cuts memory and encoding time in half with
     # negligible quality loss for cosine-similarity tasks.
+    # Keep in sync with api/app.py _BERT_MODEL_NAME
     model = SentenceTransformer("BAAI/bge-small-en-v1.5")
     model.half()
     embeddings = model.encode(
