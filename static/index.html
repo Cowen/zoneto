@@ -339,6 +339,7 @@
       <div id="eval-desc-similarity"></div>
       <div id="eval-data-gaps"></div>
       <div id="eval-violations"></div>
+      <div id="eval-community-benefits"></div>
       <div id="eval-summary"></div>
       <div id="eval-suggestions"></div>
       <div id="eval-sections"></div>
@@ -555,6 +556,7 @@
       { key: 'dev_days_to_decision',  label: 'Timeline',   type: 'num' },
       { key: 'proposed_storeys',      label: 'Storeys',    type: 'num' },
       { key: 'proposed_units',        label: 'Units',      type: 'num' },
+      { key: 's37_monetary_value',    label: 'S.37 $',     type: 'num' },
     ];
     let _lastApplications = [];
     let _sortCol = null;
@@ -607,6 +609,7 @@
           <td>${timeline}</td>
           <td>${app.proposed_storeys ?? '—'}</td>
           <td>${app.proposed_units ?? '—'}</td>
+          <td data-tooltip="Section 37 community benefit contribution reported for this application">${app.s37_monetary_value != null ? '$' + Math.round(app.s37_monetary_value).toLocaleString() : '—'}</td>
         </tr>`;
       }).join('');
 
@@ -766,20 +769,22 @@
 
     function extractSiteCtx(nearestComp) {
       return {
-        ward_number:           nearestComp.ward_number ?? null,
-        zoning_class:          nearestComp.zoning_class ?? null,
-        secondary_plan_name:   nearestComp.secondary_plan_name ?? null,
-        in_heritage_register:  nearestComp.in_heritage_register ?? null,
-        in_heritage_district:  nearestComp.in_heritage_district ?? null,
-        in_secondary_plan:     nearestComp.in_secondary_plan ?? null,
-        in_mtsa:               nearestComp.in_mtsa ?? null,
-        ward_pct_renters:      nearestComp.ward_pct_renters ?? null,
-        ward_median_income:    nearestComp.ward_median_income ?? null,
-        ward_pop_density:      nearestComp.ward_pop_density ?? null,
-        ward_pct_detached:     nearestComp.ward_pct_detached ?? null,
-        ward_appeal_rate_3y:   nearestComp.ward_appeal_rate_3y ?? null,
-        year_submitted:        new Date().getFullYear(),
-        has_community_meeting: 0,
+        ward_number:              nearestComp.ward_number ?? null,
+        zoning_class:             nearestComp.zoning_class ?? null,
+        secondary_plan_name:      nearestComp.secondary_plan_name ?? null,
+        in_heritage_register:     nearestComp.in_heritage_register ?? null,
+        in_heritage_district:     nearestComp.in_heritage_district ?? null,
+        in_secondary_plan:        nearestComp.in_secondary_plan ?? null,
+        in_mtsa:                  nearestComp.in_mtsa ?? null,
+        in_trca_regulated_area:   null,
+        in_greenbelt:             null,
+        ward_pct_renters:         nearestComp.ward_pct_renters ?? null,
+        ward_median_income:       nearestComp.ward_median_income ?? null,
+        ward_pop_density:         nearestComp.ward_pop_density ?? null,
+        ward_pct_detached:        nearestComp.ward_pct_detached ?? null,
+        ward_appeal_rate_3y:      nearestComp.ward_appeal_rate_3y ?? null,
+        year_submitted:           new Date().getFullYear(),
+        has_community_meeting:    0,
       };
     }
 
@@ -1038,6 +1043,18 @@
           : "Not covered by a Secondary Plan.",
         href: 'https://www.toronto.ca/city-government/planning-development/official-plan-guidelines/official-plan/chapter-6-secondary-plans/',
       });
+      if (ctx.in_trca_regulated_area === 1) {
+        html += flag('TRCA Regulated Area', 1, true, {
+          tooltip: "Site is within a TRCA Regulated Area under O. Reg. 41/24 (Conservation Authorities Act). A TRCA permit is required before site plan submission — engage TRCA early, as review can take 3–6 months.",
+          href: 'https://trca.ca/conservation/permissions/',
+        });
+      }
+      if (ctx.in_greenbelt === 1) {
+        html += flag('Greenbelt', 1, true, {
+          tooltip: "Site is within the Ontario Greenbelt. The Greenbelt Plan prohibits most forms of urban development. Confirm with MMAH before proceeding.",
+          href: 'https://www.ontario.ca/page/greenbelt',
+        });
+      }
       if (ctx.secondary_plan_name) {
         const spHref = 'https://www.toronto.ca/city-government/planning-development/official-plan-guidelines/official-plan/chapter-6-secondary-plans/';
         html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml('The specific Secondary Plan governing this area. Click to browse all Toronto Secondary Plans.')}"><a href="${escHtml(spHref)}" target="_blank" rel="noopener">${escHtml(ctx.secondary_plan_name)}</a></span>`;
@@ -1127,7 +1144,9 @@
         in_heritage_register:  spatialCtx.in_heritage_register ?? nearestComp.in_heritage_register ?? null,
         in_heritage_district:  spatialCtx.in_heritage_district ?? nearestComp.in_heritage_district ?? null,
         in_secondary_plan:     spatialCtx.in_secondary_plan ?? nearestComp.in_secondary_plan ?? null,
-        in_mtsa:               spatialCtx.in_mtsa ?? nearestComp.in_mtsa ?? null,
+        in_mtsa:                  spatialCtx.in_mtsa ?? nearestComp.in_mtsa ?? null,
+        in_trca_regulated_area:   spatialCtx.in_trca_regulated_area ?? null,
+        in_greenbelt:             spatialCtx.in_greenbelt ?? null,
         // Zoning limits (display only — not model features)
         zoning_max_units:      spatialCtx.zoning_max_units ?? null,
         zoning_max_density:    spatialCtx.zoning_max_density ?? null,
@@ -1372,6 +1391,18 @@
           why: `Site has ${lbl} — confirm the exception's conditions still permit the proposed form and use before relying on as-of-right zoning.`,
         });
       }
+      if (ctx.in_trca_regulated_area === 1) {
+        items.push({
+          label: 'TRCA permit (O. Reg. 41/24)',
+          why: 'Site is within a TRCA Regulated Area. A TRCA permit is required before site plan submission. Engage TRCA early — review can take 3–6 months.',
+        });
+      }
+      if (ctx.in_greenbelt === 1) {
+        items.push({
+          label: 'Greenbelt Plan conformity review',
+          why: 'Site is within the Ontario Greenbelt. Confirm with the Ministry of Municipal Affairs and Housing that the proposed use is permitted under the Greenbelt Plan.',
+        });
+      }
 
       // Derive rezoning trigger from comps (most aggressive scenario seen nearby)
       const withStoreys = applications.filter(a => a.proposed_storeys != null && a.proposed_storeys > 0);
@@ -1534,6 +1565,7 @@
         renderDescSimilarity(data.description_similarity ?? null);
         renderDataGaps(data.data_gaps ?? []);
         renderViolations(data.violations);
+        renderCommunityBenefits(data.community_benefits_context ?? null);
         renderEvalSummary(data.summary_md);
         renderConfidence(data.confidence_score ?? null);
         renderSuggestions(data.suggestions);
@@ -1612,6 +1644,18 @@
       el.innerHTML = `<div style="margin-bottom:0.75rem">
         <div style="font-size:0.78rem;font-weight:700;color:#495057;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.4rem">Violations</div>
         ${items}</div>`;
+    }
+
+    function renderCommunityBenefits(cb) {
+      const el = document.getElementById('eval-community-benefits');
+      if (!cb || cb.n_comps < 1) { el.innerHTML = ''; return; }
+      const fmt = n => '$' + Math.round(n).toLocaleString();
+      const types = (cb.common_benefit_types || []).join(', ') || 'various';
+      el.innerHTML = `<div style="margin-bottom:0.75rem;padding:0.65rem 0.85rem;background:#e8f4fd;border:1px solid #9ec5fe;border-radius:4px;font-size:0.83rem;color:#084298">
+        <div style="font-weight:700;margin-bottom:0.3rem">Community Benefits (Section 37) — ${cb.n_comps} comparable Toronto rezonings</div>
+        <div>Median contribution: <strong>${fmt(cb.median_monetary)}</strong> &nbsp;(range: ${fmt(cb.p25_monetary)}–${fmt(cb.p75_monetary)})</div>
+        <div style="margin-top:0.2rem">Common benefits: ${escHtml(types)}</div>
+      </div>`;
     }
 
     function renderConfidence(score) {

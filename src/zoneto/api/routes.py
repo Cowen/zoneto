@@ -109,6 +109,8 @@ class SiteContextResult(BaseModel):
     secondary_plan_name: str | None = None
     in_secondary_plan: int = 0
     in_mtsa: int = 0
+    in_trca_regulated_area: int = 0
+    in_greenbelt: int = 0
 
 
 # --- endpoints ---
