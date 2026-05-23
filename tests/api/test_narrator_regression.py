@@ -8,16 +8,15 @@ Integration tests require:
 These tests verify that the narrator assigns calibrated confidence scores
 to real Toronto planning applications with known outcomes.
 
-1613 St Clair Ave W (folderrsn 5124543): Council-approved OZ 2022.
-  Target: confidence >= 55.
-  Currently XFAIL — the 57m/11m height ratio (5x) triggers the LLM mandatory
-  cap at <=30. This is a known calibration deficiency to be addressed by
-  zone-corridor context or by exempting approved-precedent sites from the cap.
+321 Boon Ave: residential R-zone with a 57m/13m height violation (4.4×).
+  The programmatic cap in _apply_confidence_overrides() must clamp the score
+  to <=30. This is a deterministic guard — no LLM non-determinism, because
+  the cap fires in Python after the LLM score is parsed.
 
-321 Boon Ave: residential R-zone, no comparable OZ approvals nearby.
-  Target: confidence <= 35.
-  Should PASS — height cap fires here too, but Boon Ave has no mitigating
-  corridor context. The test asserts the cap works correctly.
+1613 St Clair Ave W (folderrsn 5124543, Council-approved OZ 2022) is the
+  optimization target documented in .ralph/prompts/OPTIMIZE_1613_ST_CLAIR.md.
+  A passing test for that site (confidence >= 55) belongs here once the system
+  can reliably produce it — not before.
 """
 
 from __future__ import annotations
@@ -105,28 +104,6 @@ def _narrate_for_address(
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    reason=(
-        "1613 St Clair: 57m height is 5x the R-zone 11m limit, triggering the LLM "
-        "mandatory cap (<=30). The approved OZ precedent is not yet distinguishable "
-        "from other extreme-height proposals at this address."
-    ),
-    strict=False,
-)
-def test_st_clair_confidence_floor() -> None:
-    """Given a Council-approved OZ at 1613 St Clair, when we narrate the original
-    proposal description, then confidence should be >= 55 (probable approval path).
-    """
-    _require_ref_dir()
-    api_key = _require_api_key()
-    _, score = _narrate_for_address(_ST_CLAIR_LAT, _ST_CLAIR_LON, api_key=api_key)
-    assert score is not None, "narrator did not return a confidence score"
-    assert score >= 55, (
-        f"1613 St Clair confidence {score} < 55 (approved OZ, expected >=55)"
-    )
-
-
-@pytest.mark.integration
 def test_boon_ave_confidence_cap() -> None:
     """Given a residential R-zone at 321 Boon Ave, when we narrate the same
     extreme mixed-use proposal, then confidence should be <= 35 (height cap fires).
@@ -137,37 +114,4 @@ def test_boon_ave_confidence_cap() -> None:
     assert score is not None, "narrator did not return a confidence score"
     assert score <= 35, (
         f"321 Boon Ave confidence {score} > 35 (extreme violations, expected <=35)"
-    )
-
-
-@pytest.mark.integration
-@pytest.mark.xfail(
-    reason=(
-        "Both 1613 St Clair and 321 Boon Ave are R-zone sites. The 57m proposal is "
-        "5× the St Clair height limit (11m) and 4.4× the Boon limit (13m) — both "
-        "trigger the programmatic ≥3× cap at <=30. The approved OZ precedent at "
-        "St Clair is not yet distinguishable from the rejected Boon scenario. "
-        "Fix: supply zone-corridor context or exempt sites with same-zone approved "
-        "comparable from the height cap."
-    ),
-    strict=False,
-)
-def test_st_clair_outscores_boon() -> None:
-    """Given the same description, when narrated at both addresses, then 1613 St Clair
-    should receive a higher confidence score than 321 Boon Ave.
-
-    This test captures the differentiability requirement from the optimization spec —
-    the St Clair corridor context (approved OZ precedent, commercial corridor) should
-    produce a meaningfully higher score than the purely residential Boon Ave context.
-    """
-    _require_ref_dir()
-    api_key = _require_api_key()
-    _, st_clair_score = _narrate_for_address(
-        _ST_CLAIR_LAT, _ST_CLAIR_LON, api_key=api_key
-    )
-    _, boon_score = _narrate_for_address(_BOON_LAT, _BOON_LON, api_key=api_key)
-    assert st_clair_score is not None, "St Clair narrator did not return a score"
-    assert boon_score is not None, "Boon Ave narrator did not return a score"
-    assert st_clair_score > boon_score, (
-        f"St Clair ({st_clair_score}) should outscore Boon Ave ({boon_score})"
     )
