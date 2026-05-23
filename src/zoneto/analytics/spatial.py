@@ -168,6 +168,102 @@ def _add_mtsa_feature(df: pl.DataFrame, mtsa_path: Path) -> pl.DataFrame:
     return df.with_columns(in_mtsa_series)
 
 
+def _add_trca_feature(df: pl.DataFrame, trca_path: Path) -> pl.DataFrame:
+    """Add in_trca_regulated_area (Int8) column via DuckDB spatial join.
+
+    Rows outside the TRCA regulated area, with null coordinates, or when the
+    file is absent all get in_trca_regulated_area=0.
+    """
+    if not trca_path.exists() or "lat" not in df.columns or "lon" not in df.columns:
+        return df.with_columns(pl.lit(0, dtype=pl.Int8).alias("in_trca_regulated_area"))
+
+    valid_mask = df["lat"].is_not_null() & df["lon"].is_not_null()
+    valid_df = df.filter(valid_mask)
+
+    if len(valid_df) == 0:
+        return df.with_columns(pl.lit(0, dtype=pl.Int8).alias("in_trca_regulated_area"))
+
+    escaped = str(trca_path).replace("'", "''")
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.register("apps", valid_df.to_arrow())
+
+    result = con.execute(f"""
+        SELECT apps._rid,
+               CASE WHEN COUNT(trca.geom) > 0 THEN 1 ELSE 0 END
+                   AS in_trca_regulated_area
+        FROM apps
+        LEFT JOIN ST_Read('{escaped}') trca
+            ON ST_Within(ST_Point(apps.lon, apps.lat), trca.geom)
+        GROUP BY apps._rid
+    """).pl()
+
+    con.close()
+
+    rid_to_flag: dict[int, int] = dict(
+        zip(
+            result["_rid"].to_list(),
+            result["in_trca_regulated_area"].cast(pl.Int8).to_list(),
+        )
+    )
+    all_rids = df["_rid"].to_list() if "_rid" in df.columns else list(range(len(df)))
+    return df.with_columns(
+        pl.Series(
+            "in_trca_regulated_area",
+            [rid_to_flag.get(rid, 0) for rid in all_rids],
+            dtype=pl.Int8,
+        )
+    )
+
+
+def _add_greenbelt_feature(df: pl.DataFrame, greenbelt_path: Path) -> pl.DataFrame:
+    """Add in_greenbelt (Int8) via DuckDB spatial join against the Greenbelt boundary.
+
+    Rows outside the Greenbelt, with null coordinates, or when the file is
+    absent all get in_greenbelt=0.
+    """
+    if (
+        not greenbelt_path.exists()
+        or "lat" not in df.columns
+        or "lon" not in df.columns
+    ):
+        return df.with_columns(pl.lit(0, dtype=pl.Int8).alias("in_greenbelt"))
+
+    valid_mask = df["lat"].is_not_null() & df["lon"].is_not_null()
+    valid_df = df.filter(valid_mask)
+
+    if len(valid_df) == 0:
+        return df.with_columns(pl.lit(0, dtype=pl.Int8).alias("in_greenbelt"))
+
+    escaped = str(greenbelt_path).replace("'", "''")
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.register("apps", valid_df.to_arrow())
+
+    result = con.execute(f"""
+        SELECT apps._rid,
+               CASE WHEN COUNT(gb.geom) > 0 THEN 1 ELSE 0 END AS in_greenbelt
+        FROM apps
+        LEFT JOIN ST_Read('{escaped}') gb
+            ON ST_Within(ST_Point(apps.lon, apps.lat), gb.geom)
+        GROUP BY apps._rid
+    """).pl()
+
+    con.close()
+
+    rid_to_flag: dict[int, int] = dict(
+        zip(result["_rid"].to_list(), result["in_greenbelt"].cast(pl.Int8).to_list())
+    )
+    all_rids = df["_rid"].to_list() if "_rid" in df.columns else list(range(len(df)))
+    return df.with_columns(
+        pl.Series(
+            "in_greenbelt",
+            [rid_to_flag.get(rid, 0) for rid in all_rids],
+            dtype=pl.Int8,
+        )
+    )
+
+
 def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     """Add zoning_class, secondary_plan_name, in_heritage_register,
     in_heritage_district, in_secondary_plan, in_mtsa columns via DuckDB spatial join.
@@ -298,5 +394,13 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     # Add MTSA feature using the downloaded boundary shapefile
     mtsa_shp = ref / "mtsa.shp"
     result = _add_mtsa_feature(result, mtsa_shp)
+
+    # Add TRCA regulated area flag
+    trca_path = ref / "trca_regulated_areas.geojson"
+    result = _add_trca_feature(result, trca_path)
+
+    # Add Greenbelt boundary flag
+    greenbelt_path = ref / "greenbelt.geojson"
+    result = _add_greenbelt_feature(result, greenbelt_path)
 
     return result

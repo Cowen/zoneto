@@ -141,6 +141,8 @@ def enriched_dir(tmp_path: Path) -> Path:
             "storey_excess_ratio": [1.2, None] * 5,
             "ward_appeal_rate_3y": [0.15, None] * 5,
             "in_mtsa": [1, 0] * 5,
+            "in_trca_regulated_area": [0, 1] * 5,
+            "in_greenbelt": [0, 0] * 5,
             **{
                 f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3)] * 5
                 for i in range(20)

@@ -68,6 +68,8 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
         "secondary_plan_name": None,
         "in_secondary_plan": 0,
         "in_mtsa": 0,
+        "in_trca_regulated_area": 0,
+        "in_greenbelt": 0,
     }
 
     con = duckdb.connect()
@@ -218,6 +220,32 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
         """).fetchall()
         if rows:
             result["in_mtsa"] = 1
+
+    # TRCA regulated areas
+    trca_path = ref_dir / "trca_regulated_areas.geojson"
+    if trca_path.exists():
+        escaped = str(trca_path).replace("'", "''")
+        rows = con.execute(f"""
+            SELECT 1
+            FROM ST_Read('{escaped}') t
+            WHERE ST_Within({point_sql}, t.geom)
+            LIMIT 1
+        """).fetchall()
+        if rows:
+            result["in_trca_regulated_area"] = 1
+
+    # Ontario Greenbelt boundary
+    greenbelt_path = ref_dir / "greenbelt.geojson"
+    if greenbelt_path.exists():
+        escaped = str(greenbelt_path).replace("'", "''")
+        rows = con.execute(f"""
+            SELECT 1
+            FROM ST_Read('{escaped}') g
+            WHERE ST_Within({point_sql}, g.geom)
+            LIMIT 1
+        """).fetchall()
+        if rows:
+            result["in_greenbelt"] = 1
 
     # Zoning height overlay (HT_STORIES + HT_LABEL for metres)
     # The GeoJSON uses HT_LABEL (double) for height in metres, not HT_HEIGHT.

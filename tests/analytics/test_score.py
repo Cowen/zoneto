@@ -146,6 +146,8 @@ def _make_dev_enriched(tmp_path: Path) -> None:
             "storey_excess_ratio": [1.2, 0.0],
             "ward_appeal_rate_3y": [0.15, 0.0],
             "in_mtsa": [1, 0],
+            "in_trca_regulated_area": [0, 0],
+            "in_greenbelt": [0, 0],
             **{f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3)] for i in range(20)},
             "ward_pct_renters": [45.5, 50.2],
             "ward_median_income": [75000.0, 80000.0],
@@ -284,6 +286,8 @@ def test_score_one_returns_dict(tmp_path: Path) -> None:
             "storey_excess_ratio": 1.0,
             "ward_appeal_rate_3y": 0.15,
             "in_mtsa": 1,
+            "in_trca_regulated_area": 0,
+            "in_greenbelt": 0,
             **{f"desc_svd_{i}": float(i % 3) for i in range(20)},
             "ward_pct_renters": 45.5,
             "ward_median_income": 75000.0,
@@ -425,6 +429,8 @@ def _make_dev_enriched_mixed_types(tmp_path: Path) -> None:
             "storey_excess_ratio": [1.2, 0.0, 0.5],
             "ward_appeal_rate_3y": [0.15, 0.0, 0.0],
             "in_mtsa": [1, 0, 0],
+            "in_trca_regulated_area": [0, 0, 0],
+            "in_greenbelt": [0, 0, 0],
             **{
                 f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3), float((i + 2) % 3)]
                 for i in range(20)
@@ -504,6 +510,8 @@ def _make_dev_enriched_with_active(tmp_path: Path) -> None:
             "storey_excess_ratio": [1.2, 0.0, 0.5],
             "ward_appeal_rate_3y": [0.15, 0.0, 0.0],
             "in_mtsa": [1, 0, 0],
+            "in_trca_regulated_area": [0, 0, 0],
+            "in_greenbelt": [0, 0, 0],
             **{
                 f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3), float((i + 2) % 3)]
                 for i in range(20)

@@ -51,6 +51,8 @@ def _make_dev_parquet(tmp_path: Path) -> Path:
             "storey_excess_ratio": rng.uniform(0.1, 5.0, size=n).tolist(),
             "ward_appeal_rate_3y": rng.uniform(0.05, 0.25, size=n).tolist(),
             "in_mtsa": rng.integers(0, 2, size=n).tolist(),
+            "in_trca_regulated_area": rng.integers(0, 2, size=n).tolist(),
+            "in_greenbelt": rng.integers(0, 2, size=n).tolist(),
             **{f"desc_svd_{i}": rng.uniform(-1, 1, size=n).tolist() for i in range(20)},
             "dev_appealed": pl.Series(dev_appealed, dtype=pl.Float64),
         }

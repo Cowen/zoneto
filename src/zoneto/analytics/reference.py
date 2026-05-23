@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import logging
 import shutil
 import tempfile
@@ -65,6 +66,15 @@ _WARD_GEO_URL = (
     "/resource/9398da69-0622-4eb1-a125-4f8c7f1016a4"
     "/download/2023-wardprofiles-geographicareas.xlsx"
 )
+# TRCA Regulated Area — ArcGIS FeatureServer (6000+ polygon records, paginated)
+# Service confirmed via TRCA Open Data Portal (trca-camaps.opendata.arcgis.com)
+_TRCA_FEATURESERVER_URL = (
+    "https://services1.arcgis.com/d0ZCwU7eGKVeNiEE/arcgis/rest/services"
+    "/TRCA_Regulation_Limit2/FeatureServer/0/query"
+)
+# Ontario Greenbelt Outer Boundary — Ministry of Natural Resources Shapefile ZIP
+# CRS: EPSG:4269 (NAD83), functionally identical to WGS84 for spatial joins
+_GREENBELT_URL = "https://ws.gisetl.lrc.gov.on.ca/fmedatadownload/Packages/GBOUTBND.zip"
 
 
 def _download(url: str, dest: Path) -> None:
@@ -183,6 +193,99 @@ def _fetch_ward_profiles_csv(ref: Path) -> None:
         geo_xlsx.unlink(missing_ok=True)
 
 
+def _fetch_trca_regulated_areas(dest: Path) -> None:
+    """Download TRCA regulated areas from ArcGIS FeatureServer into a GeoJSON file.
+
+    Paginates through all records (max 2000 per page) and writes a single
+    merged FeatureCollection to *dest*.
+    """
+    features: list[dict] = []
+    page_size = 2000
+    offset = 0
+
+    with httpx.Client(follow_redirects=True, timeout=120) as client:
+        while True:
+            params = {
+                "where": "OBJECTID > 0",
+                "outFields": "OBJECTID,criteria_layers_contribution",
+                "f": "geojson",
+                "resultRecordCount": str(page_size),
+                "resultOffset": str(offset),
+            }
+            r = client.get(_TRCA_FEATURESERVER_URL, params=params)
+            r.raise_for_status()
+            page = r.json()
+            page_features = page.get("features", [])
+            features.extend(page_features)
+            logger.info(
+                "_fetch_trca_regulated_areas: fetched %d features (offset %d)",
+                len(features),
+                offset,
+            )
+            exceeded = page.get("properties", {}).get("exceededTransferLimit", False)
+            if not exceeded or len(page_features) < page_size:
+                break
+            offset += page_size
+
+    geojson = {"type": "FeatureCollection", "features": features}
+    dest.write_text(json.dumps(geojson))
+    logger.info(
+        "_fetch_trca_regulated_areas: wrote %d features to %s", len(features), dest
+    )
+
+
+def _fetch_greenbelt(dest: Path) -> None:
+    """Download Ontario Greenbelt boundary Shapefile ZIP and convert to GeoJSON.
+
+    The ZIP contains a Shapefile in EPSG:4269 (NAD83), which is functionally
+    equivalent to WGS84 for spatial joins within Canada. DuckDB spatial reads
+    the SHP directly and exports WGS84 GeoJSON — no fiona dependency needed.
+    """
+    import duckdb  # noqa: PLC0415
+
+    tmp_zip = dest.parent / "_greenbelt_tmp.zip"
+    tmp_dir = dest.parent / "_greenbelt_tmp"
+    try:
+        with httpx.Client(follow_redirects=True, timeout=300) as client:
+            r = client.get(_GREENBELT_URL)
+            r.raise_for_status()
+            tmp_zip.write_bytes(r.content)
+
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(tmp_zip) as zf:
+            zf.extractall(tmp_dir)
+
+        shp_files = list(tmp_dir.rglob("*.shp"))
+        if not shp_files:
+            logger.warning("_fetch_greenbelt: no .shp found in downloaded ZIP")
+            return
+
+        shp_path = shp_files[0]
+        escaped = str(shp_path).replace("'", "''")
+
+        con = duckdb.connect()
+        con.execute("INSTALL spatial; LOAD spatial;")
+        # NAD83 (EPSG:4269) ≈ WGS84 at sub-metre precision; treat as 4326 for joins
+        rows = con.execute(f"""
+            SELECT ST_AsGeoJSON(geom) AS geom_json
+            FROM ST_Read('{escaped}')
+        """).fetchall()
+        con.close()
+
+        features = [
+            {"type": "Feature", "geometry": json.loads(row[0]), "properties": {}}
+            for row in rows
+            if row[0] is not None
+        ]
+        geojson = {"type": "FeatureCollection", "features": features}
+        dest.write_text(json.dumps(geojson))
+        logger.info("_fetch_greenbelt: wrote %d features to %s", len(features), dest)
+    finally:
+        tmp_zip.unlink(missing_ok=True)
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+
+
 def fetch_reference(data_dir: Path = Path("data")) -> None:
     """Download all reference datasets to *data_dir*/reference/.
 
@@ -259,3 +362,23 @@ def fetch_reference(data_dir: Path = Path("data")) -> None:
     ward_profiles_csv = ref / "ward_profiles.csv"
     if not ward_profiles_csv.exists():
         _fetch_ward_profiles_csv(ref)
+
+    # TRCA regulated areas GeoJSON (paginated ArcGIS FeatureServer)
+    trca_geojson = ref / "trca_regulated_areas.geojson"
+    if not trca_geojson.exists():
+        try:
+            _fetch_trca_regulated_areas(trca_geojson)
+        except Exception:
+            logger.warning(
+                "TRCA regulated areas not available — in_trca_regulated_area will be 0"
+            )
+
+    # Ontario Greenbelt boundary GeoJSON
+    greenbelt_geojson = ref / "greenbelt.geojson"
+    if not greenbelt_geojson.exists():
+        try:
+            _fetch_greenbelt(greenbelt_geojson)
+        except Exception:
+            logger.warning(
+                "Greenbelt boundary not available — in_greenbelt will be 0 for all rows"
+            )

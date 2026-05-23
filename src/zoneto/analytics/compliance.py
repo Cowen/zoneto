@@ -84,6 +84,7 @@ def check_compliance(
     violations.extend(_check_use(extracted, site))
     violations.extend(_check_heritage(site))
     violations.extend(_check_mtsa(site))
+    violations.extend(_check_trca(site))
     violations.extend(_check_holding(site))
     violations.extend(_check_exception(site))
 
@@ -354,6 +355,25 @@ def _check_mtsa(site: dict[str, Any]) -> list[Violation]:
                 "Many MTSA zones have higher as-of-right permissions than "
                 "the base zone; some height violations flagged above may "
                 "not apply if the MTSA-specific schedule is more permissive."
+            ),
+        )
+    ]
+
+
+def _check_trca(site: dict[str, Any]) -> list[Violation]:
+    if not site.get("in_trca_regulated_area"):
+        return []
+    return [
+        Violation(
+            rule_id="trca_regulated",
+            section_ref="TRCA O. Reg. 41/24 (Conservation Authorities Act)",
+            observed="site is within a TRCA regulated area",
+            allowed="development within regulated areas requires a TRCA permit",
+            severity=Severity.INFORMATIONAL,
+            suggested_remedy=(
+                "A TRCA permit under O. Reg. 41/24 is required before site plan "
+                "submission. Engage TRCA early — permit review can take 3–6 months "
+                "and may require floodplain studies or other technical reports."
             ),
         )
     ]
