@@ -8,15 +8,12 @@ Integration tests require:
 These tests verify that the narrator assigns calibrated confidence scores
 to real Toronto planning applications with known outcomes.
 
-321 Boon Ave: residential R-zone with a 57m/13m height violation (4.4×).
-  The programmatic cap in _apply_confidence_overrides() must clamp the score
-  to <=30. This is a deterministic guard — no LLM non-determinism, because
-  the cap fires in Python after the LLM score is parsed.
+1613 St Clair Ave W (folderrsn 5124543, Council-approved OZ 2022):
+  Confidence >= 55. The approved same-zone comparable at 100% similarity
+  exempts the >=3x height cap. Programmatic floor lifts to 55.
 
-1613 St Clair Ave W (folderrsn 5124543, Council-approved OZ 2022) is the
-  optimization target documented in .ralph/prompts/OPTIMIZE_1613_ST_CLAIR.md.
-  A passing test for that site (confidence >= 55) belongs here once the system
-  can reliably produce it — not before.
+321 Boon Ave: residential R-zone, no approved same-zone comparable.
+  Confidence <= 35. Programmatic cap fires (57m/13m = 4.4x, no exemption).
 """
 
 from __future__ import annotations
@@ -104,6 +101,21 @@ def _narrate_for_address(
 
 
 @pytest.mark.integration
+def test_st_clair_confidence_floor() -> None:
+    """Given a Council-approved OZ at 1613 St Clair (same-zone comparable at 100%
+    similarity), when we narrate the original description, then confidence >= 55.
+    The approved-precedent escape hatch exempts the height cap and floors at 55.
+    """
+    _require_ref_dir()
+    api_key = _require_api_key()
+    _, score = _narrate_for_address(_ST_CLAIR_LAT, _ST_CLAIR_LON, api_key=api_key)
+    assert score is not None, "narrator did not return a confidence score"
+    assert score >= 55, (
+        f"1613 St Clair confidence {score} < 55 (approved OZ, expected >=55)"
+    )
+
+
+@pytest.mark.integration
 def test_boon_ave_confidence_cap() -> None:
     """Given a residential R-zone at 321 Boon Ave, when we narrate the same
     extreme mixed-use proposal, then confidence should be <= 35 (height cap fires).
@@ -114,4 +126,23 @@ def test_boon_ave_confidence_cap() -> None:
     assert score is not None, "narrator did not return a confidence score"
     assert score <= 35, (
         f"321 Boon Ave confidence {score} > 35 (extreme violations, expected <=35)"
+    )
+
+
+@pytest.mark.integration
+def test_st_clair_outscores_boon() -> None:
+    """Given the same description, when narrated at 1613 St Clair vs 321 Boon Ave,
+    then St Clair should score strictly higher (approved precedent exempts the cap;
+    Boon has none so it remains capped at <=30).
+    """
+    _require_ref_dir()
+    api_key = _require_api_key()
+    _, st_clair_score = _narrate_for_address(
+        _ST_CLAIR_LAT, _ST_CLAIR_LON, api_key=api_key
+    )
+    _, boon_score = _narrate_for_address(_BOON_LAT, _BOON_LON, api_key=api_key)
+    assert st_clair_score is not None, "St Clair narrator did not return a score"
+    assert boon_score is not None, "Boon Ave narrator did not return a score"
+    assert st_clair_score > boon_score, (
+        f"St Clair ({st_clair_score}) should outscore Boon Ave ({boon_score})"
     )

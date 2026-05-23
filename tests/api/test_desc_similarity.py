@@ -8,7 +8,10 @@ import joblib
 import numpy as np
 import polars as pl
 
-from zoneto.api.desc_similarity import score_description_similarity
+from zoneto.api.desc_similarity import (
+    _deduplicate_matches,
+    score_description_similarity,
+)
 
 
 class _FakePipeline:
@@ -418,6 +421,106 @@ class TestProximityFilter:
         )
         assert result is not None
         assert result["n_similar"] >= 0
+
+
+class TestDeduplicateMatches:
+    """Unit tests for _deduplicate_matches helper."""
+
+    def test_duplicate_folderrsn_keeps_highest_similarity(self) -> None:
+        """Given matches with duplicate folderrsn (sorted desc by similarity),
+        when deduplicated, then only the highest-similarity entry per app is kept."""
+        matches = [
+            {"similarity": 0.95, "folderrsn": "A", "dev_appealed": 0},
+            {"similarity": 0.90, "folderrsn": "B", "dev_appealed": None},
+            {"similarity": 0.85, "folderrsn": "A", "dev_appealed": None},
+            {"similarity": 0.80, "folderrsn": "B", "dev_appealed": 1},
+        ]
+        result = _deduplicate_matches(matches)
+        assert len(result) == 2
+        assert result[0]["folderrsn"] == "A"
+        assert result[0]["similarity"] == 0.95
+        assert result[1]["folderrsn"] == "B"
+        assert result[1]["similarity"] == 0.90
+
+    def test_none_folderrsn_rows_pass_through(self) -> None:
+        """Given matches with None folderrsn, when deduplicated,
+        then all None-folderrsn rows are kept (cannot be grouped)."""
+        matches = [
+            {"similarity": 0.95, "folderrsn": "A"},
+            {"similarity": 0.90, "folderrsn": None},
+            {"similarity": 0.85, "folderrsn": None},
+        ]
+        result = _deduplicate_matches(matches)
+        assert len(result) == 3
+
+    def test_empty_list_returns_empty(self) -> None:
+        """Given empty matches, when deduplicated, then returns empty list."""
+        assert _deduplicate_matches([]) == []
+
+    def test_no_folderrsn_key_keeps_all(self) -> None:
+        """Given matches without a folderrsn key at all,
+        when deduplicated, then all are kept (treated as ungroupable)."""
+        matches = [{"similarity": 0.9}, {"similarity": 0.8}]
+        result = _deduplicate_matches(matches)
+        assert len(result) == 2
+
+    def test_no_duplicates_unchanged(self) -> None:
+        """Given matches with all unique folderrsns,
+        when deduplicated, then result is identical."""
+        matches = [
+            {"similarity": 0.95, "folderrsn": "A"},
+            {"similarity": 0.90, "folderrsn": "B"},
+            {"similarity": 0.85, "folderrsn": "C"},
+        ]
+        result = _deduplicate_matches(matches)
+        assert len(result) == 3
+
+
+def _write_fixture_with_duplicates(data_dir: Path, model_dir: Path) -> None:
+    """Write a fixture where folderrsn 'A' appears 3 times, 'B' once."""
+    (data_dir / "enriched").mkdir(parents=True, exist_ok=True)
+    model_dir.mkdir(parents=True, exist_ok=True)
+    n = 4
+    svd_cols = {f"desc_svd_{i}": [float(i % 3 + 1) * 0.1] * n for i in range(20)}
+    df = pl.DataFrame(
+        {
+            **svd_cols,
+            "dev_appealed": [0, 0, 0, 0],
+            "dev_approved": [1, None, None, 0],
+            "folderrsn": ["A", "A", "A", "B"],
+            "application_type": ["OZ"] * n,
+        }
+    )
+    df.write_parquet(str(data_dir / "enriched" / "dev_applications.parquet"))
+    joblib.dump(_FakePipeline(), model_dir / "desc_tfidf.joblib")
+
+
+class TestDeduplicationInScorer:
+    def test_n_similar_counts_distinct_applications(self, tmp_path: Path) -> None:
+        """Given a corpus where folderrsn 'A' appears 3 times and 'B' once,
+        when scoring, then n_similar should be 2 (distinct applications),
+        not 4 (raw rows)."""
+        data_dir = tmp_path / "data_dedup"
+        model_dir = tmp_path / "models_dedup"
+        _write_fixture_with_duplicates(data_dir, model_dir)
+        result = score_description_similarity(
+            "test", data_dir=data_dir, model_dir=model_dir
+        )
+        assert result is not None
+        assert result["n_similar"] == 2
+
+    def test_top_matches_has_no_duplicate_folderrsn(self, tmp_path: Path) -> None:
+        """Given a corpus with duplicate folderrsns, when scoring,
+        then top_matches contains at most one entry per folderrsn."""
+        data_dir = tmp_path / "data_dedup2"
+        model_dir = tmp_path / "models_dedup2"
+        _write_fixture_with_duplicates(data_dir, model_dir)
+        result = score_description_similarity(
+            "test", data_dir=data_dir, model_dir=model_dir
+        )
+        assert result is not None
+        rsns = [m["folderrsn"] for m in result["top_matches"] if m.get("folderrsn")]
+        assert len(rsns) == len(set(rsns))
 
 
 class TestZoneMatchedSimilarity:

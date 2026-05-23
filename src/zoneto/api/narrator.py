@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -45,15 +46,20 @@ STRICT RULES you must always follow:
    - MANDATORY CAP — EXTREME VIOLATIONS: If ANY violation shows proposed
      value ≥ 3× the zone limit (e.g. 17 storeys proposed, 3 allowed =
      5.7×; or 258 units proposed, 4 allowed = 64×), you MUST set
-     confidence ≤ 30. No override. This is non-negotiable regardless of
-     comparable appeal rates, zone counts, or any other signal.
-     Set confidence 10–30 based on violation severity alone.
+     confidence ≤ 30. Set confidence 10–30 based on violation severity.
+     Exception — approved same-zone precedent: if the comparable
+     application outcomes include a same-zone OZ that is Council-approved
+     with similarity ≥ 90%, the cap does NOT apply. Proceed to Step 2.
+     The approved OZ is direct evidence this violation profile is
+     approvable in this zone. Treat it as a strong upward signal in Step 3.
    - Cross-zone comparables: a comparable from a different zone type does
      NOT establish same-zone precedent. A CR-zone approval does not
      support an RM-zone proposal (or vice versa).
    STEP-BY-STEP CONFIDENCE ASSIGNMENT (follow exactly, in order):
    Step 1 — Extreme violation check:
      If ANY violation is ≥ 3× zone limit → confidence 10–30. STOP.
+     Exception: same-zone OZ approved at ≥ 90% similarity → skip cap,
+     proceed to Step 2 and apply approved comparable as +8 in Step 3.
    Step 2 — Base band from zone/violation profile (pick ONE):
      A. Zero violations + compatible zone use → base band 70–80.
         "Compatible" means the permitted_use_category matches the
@@ -305,16 +311,83 @@ def _format_data_gaps(data_gaps: list[str]) -> str:
     return "\n".join(lines)
 
 
+_SAME_SITE_RADIUS_M = 250.0
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Approximate great-circle distance in metres."""
+    r = 6_371_000.0
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+    a = math.sin(d_lat / 2) ** 2 + (
+        math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(d_lon / 2) ** 2
+    )
+    return r * 2 * math.asin(math.sqrt(a))
+
+
+def _has_approved_precedent(
+    description_similarity: dict[str, Any] | None,
+    site_zone: str | None,
+) -> bool:
+    """True when top_matches has a same-zone Council-approved OZ at ≥ 90% similarity
+    AND the comparable is within _SAME_SITE_RADIUS_M of the query location.
+
+    This is the escape hatch for the extreme-violation cap: if the description
+    is a near-identical match to an application that was actually approved at the
+    same site in the same zone, the violation magnitude is not a reliable rejection
+    signal. Zone-unknown comparables (either side None) are accepted.
+
+    Distance gate: when query_lat/query_lon are in the similarity dict AND the
+    comparable has lat/lon, the comparable must be within _SAME_SITE_RADIUS_M.
+    If query coords are absent (caller didn't pass them), distance is not checked.
+    If comparable coords are absent, the match is rejected (cannot confirm proximity).
+    """
+    if not description_similarity:
+        return False
+    query_lat: float | None = description_similarity.get("query_lat")
+    query_lon: float | None = description_similarity.get("query_lon")
+    for m in description_similarity.get("top_matches", []):
+        if m.get("similarity", 0) < 0.90:
+            break  # list is sorted desc — no point continuing
+        if m.get("dev_approved") != 1:
+            continue
+        comp_zone = m.get("zoning_class")
+        zone_matches = comp_zone is None or site_zone is None or comp_zone == site_zone
+        if not zone_matches:
+            continue
+        if query_lat is not None and query_lon is not None:
+            comp_lat: float | None = m.get("lat")
+            comp_lon: float | None = m.get("lon")
+            if comp_lat is None or comp_lon is None:
+                continue  # comparable not geocoded — can't confirm proximity
+            if (
+                _haversine_m(query_lat, query_lon, comp_lat, comp_lon)
+                > _SAME_SITE_RADIUS_M
+            ):
+                continue
+        return True
+    return False
+
+
 def _apply_confidence_overrides(
     score: int,
     violations: list[Violation],
     site: dict[str, Any],
     extracted: ProjectFeatures,
+    description_similarity: dict[str, Any] | None = None,
 ) -> int:
     """Apply deterministic floor/cap rules after LLM scoring.
 
-    Floor: no violations + mixed/commercial-residential use → min 70.
-    Cap: proposed ≥ 3× zoning limit (storeys or units) → max 30.
+    Floors (applied first):
+      - No violations + mixed/commercial-residential use → min 70.
+      - Same-zone Council-approved comparable at ≥ 90% similarity → min 55.
+
+    Cap (skipped when approved precedent exists):
+      - Proposed ≥ 3× zoning limit (storeys, units, or height) → max 30.
+        Exemption: if a same-zone approved comparable matches at ≥ 90%,
+        the cap does not apply — the precedent overrides the ratio rule.
     """
     permitted = (site.get("permitted_use_category") or "").lower()
     if not violations and any(
@@ -322,17 +395,24 @@ def _apply_confidence_overrides(
     ):
         score = max(score, 70)
 
+    has_precedent = _has_approved_precedent(
+        description_similarity, site.get("zoning_class")
+    )
+    if has_precedent:
+        score = max(score, 55)
+
     max_storeys = site.get("zoning_max_storeys") or 0
     max_units = site.get("zoning_max_units") or 0
     max_height = site.get("zoning_max_height_m") or 0
     prop_storeys = extracted.proposed_storeys or 0
     prop_units = extracted.proposed_units or 0
     prop_height = extracted.proposed_height_m or 0
-    if (
+    extreme = (
         (max_storeys and prop_storeys / max_storeys >= 3.0)
         or (max_units and prop_units / max_units >= 3.0)
         or (max_height and prop_height / max_height >= 3.0)
-    ):
+    )
+    if extreme and not has_precedent:
         score = min(score, 30)
 
     return score
@@ -412,6 +492,9 @@ Do not invent information not present in the context above.
 
 BEFORE writing CONFIDENCE, follow the three-step rule from the system prompt:
 Step 1: Check each violation ratio. If ANY exceeds 3×: set confidence 10–30, stop.
+        Exception: if a same-zone OZ comparable appears with similarity ≥ 90%
+        AND Council-approved status, skip the cap — proceed to Steps 2 and 3
+        and apply the approved comparable as a +8 upward adjustment in Step 3.
 Step 2: Determine base band (70–80 for zero violations + compatible zone; 55–65 for
         zero violations + mismatched zone; 35–55 for moderate violations).
 Step 3: Adjust within the base band (±8 max) for MTSA/overlay/appeal rate.
@@ -431,7 +514,9 @@ End with a CONFIDENCE line as required by the system rules.
     )
     summary, score = _parse_confidence(raw)
     if score is not None:
-        score = _apply_confidence_overrides(score, violations, site, extracted)
+        score = _apply_confidence_overrides(
+            score, violations, site, extracted, description_similarity
+        )
     return summary, score
 
 

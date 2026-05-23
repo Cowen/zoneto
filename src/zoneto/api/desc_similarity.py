@@ -12,6 +12,28 @@ if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
 
+def _deduplicate_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deduplicate top_matches by folderrsn, keeping the highest-similarity entry.
+
+    Rows without a folderrsn key (or with None) pass through unchanged — they
+    cannot be grouped and deduplicating them would silently drop valid results.
+    The input is assumed to be sorted by similarity descending, so the first
+    occurrence of each folderrsn is already the best match for that application.
+    """
+    seen: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for m in matches:
+        rsn = m.get("folderrsn")
+        if rsn is None:
+            result.append(m)
+        else:
+            key = str(rsn)
+            if key not in seen:
+                seen.add(key)
+                result.append(m)
+    return result
+
+
 def score_description_similarity(
     description: str,
     data_dir: Path,
@@ -73,6 +95,8 @@ def score_description_similarity(
                 "application_type",
                 "street_address",
                 "zoning_class",
+                "lat",
+                "lon",
             ]
             if c in available
         ]
@@ -149,36 +173,37 @@ def score_description_similarity(
                 match[col] = row[n_svd + j]
             top_matches.append(match)
 
-        # Appeal rate from labelled top matches
-        if "dev_appealed" in extra_cols:
-            appealed_col = extra_cols.index("dev_appealed")
-            labels = [
-                int(rows[idx][n_svd + appealed_col])
-                for idx in top_indices[:top_n]
-                if rows[idx][n_svd + appealed_col] is not None
-            ]
-            appeal_rate: float | None = sum(labels) / len(labels) if labels else None
-        else:
-            appeal_rate = None
+        # Deduplicate by folderrsn — enriched parquet may have multiple rows per
+        # application (e.g. one per year). Keep highest-similarity match per app.
+        top_matches = _deduplicate_matches(top_matches)
 
-        # Approval rate from labelled top matches
+        # Rates computed from deduplicated matches (not raw indices) so duplicate
+        # applications don't inflate or distort the aggregate statistics.
+        appeal_rate: float | None = None
+        if "dev_appealed" in extra_cols:
+            ap_vals = [
+                int(m["dev_appealed"])
+                for m in top_matches
+                if m.get("dev_appealed") is not None
+            ]
+            appeal_rate = sum(ap_vals) / len(ap_vals) if ap_vals else None
+
         approval_rate: float | None = None
         if "dev_approved" in extra_cols:
-            approved_col = extra_cols.index("dev_approved")
-            approved_labels = [
-                int(rows[idx][n_svd + approved_col])
-                for idx in top_indices[:top_n]
-                if rows[idx][n_svd + approved_col] is not None
+            apr_vals = [
+                int(m["dev_approved"])
+                for m in top_matches
+                if m.get("dev_approved") is not None
             ]
-            approval_rate = (
-                sum(approved_labels) / len(approved_labels) if approved_labels else None
-            )
+            approval_rate = sum(apr_vals) / len(apr_vals) if apr_vals else None
 
         result: dict[str, Any] = {
             "top_matches": top_matches,
             "appeal_rate": appeal_rate,
             "approval_rate": approval_rate,
             "n_similar": len(top_matches),
+            "query_lat": lat,
+            "query_lon": lon,
         }
 
         # Zone-matched stats: only included when zoning_class was supplied
@@ -192,34 +217,52 @@ def score_description_similarity(
                 zm_normed = zm_corpus / zm_norms
                 zm_sims: np.ndarray = zm_normed @ q_norm
                 zm_top_idx = np.argsort(zm_sims)[::-1][:top_n]
-                zm_matches = [
-                    zm_rows[i]
-                    for i in zm_top_idx
-                    if float(zm_sims[i]) >= min_similarity
-                ]
-                result["zone_matched_n_similar"] = len(zm_matches)
+
+                # Build zm_matches as dicts so we can deduplicate by folderrsn
+                zm_match_dicts: list[dict[str, Any]] = []
+                rsn_idx = (
+                    n_svd + extra_cols.index("folderrsn")
+                    if "folderrsn" in extra_cols
+                    else None
+                )
+                for i in zm_top_idx:
+                    if float(zm_sims[i]) < min_similarity:
+                        continue
+                    row = zm_rows[i]
+                    d: dict[str, Any] = {}
+                    if rsn_idx is not None:
+                        d["folderrsn"] = row[rsn_idx]
+                    if "dev_approved" in extra_cols:
+                        apr_idx = n_svd + extra_cols.index("dev_approved")
+                        d["dev_approved"] = row[apr_idx]
+                    if "dev_appealed" in extra_cols:
+                        ap_idx = n_svd + extra_cols.index("dev_appealed")
+                        d["dev_appealed"] = row[ap_idx]
+                    zm_match_dicts.append(d)
+
+                zm_match_dicts = _deduplicate_matches(zm_match_dicts)
+                result["zone_matched_n_similar"] = len(zm_match_dicts)
+
                 if "dev_approved" in extra_cols:
-                    apr_idx = extra_cols.index("dev_approved")
                     zm_apr = [
-                        int(r[n_svd + apr_idx])
-                        for r in zm_matches
-                        if r[n_svd + apr_idx] is not None
+                        int(d["dev_approved"])
+                        for d in zm_match_dicts
+                        if d.get("dev_approved") is not None
                     ]
                     result["zone_matched_approval_rate"] = (
                         sum(zm_apr) / len(zm_apr) if zm_apr else None
                     )
                 else:
                     result["zone_matched_approval_rate"] = None
-                # Zone-matched appeal rate: appeal rate for same-zone similar apps only
+
                 if "dev_appealed" in extra_cols:
-                    appealed_col = extra_cols.index("dev_appealed")
-                    zm_appealed = [
-                        int(r[n_svd + appealed_col])
-                        for r in zm_matches
-                        if r[n_svd + appealed_col] is not None
+                    zm_ap = [
+                        int(d["dev_appealed"])
+                        for d in zm_match_dicts
+                        if d.get("dev_appealed") is not None
                     ]
                     result["zone_matched_appeal_rate"] = (
-                        sum(zm_appealed) / len(zm_appealed) if zm_appealed else None
+                        sum(zm_ap) / len(zm_ap) if zm_ap else None
                     )
                 else:
                     result["zone_matched_appeal_rate"] = None
@@ -342,22 +385,24 @@ def score_description_similarity_bert(
                 m[c] = row.get(c)  # include zoning_class so narrator can flag mismatch
             top_matches.append(m)
 
-        # Rates over top matches
+        top_matches = _deduplicate_matches(top_matches)
+
+        # Rates computed from deduplicated matches
         appeal_rate: float | None = None
         if "dev_appealed" in cols:
             ap_vals = [
-                int(index_df["dev_appealed"][int(i)])
-                for i in top_idx[:top_n]
-                if index_df["dev_appealed"][int(i)] is not None
+                int(m["dev_appealed"])
+                for m in top_matches
+                if m.get("dev_appealed") is not None
             ]
             appeal_rate = sum(ap_vals) / len(ap_vals) if ap_vals else None
 
         approval_rate: float | None = None
         if "dev_approved" in cols:
             apr_vals = [
-                int(index_df["dev_approved"][int(i)])
-                for i in top_idx[:top_n]
-                if index_df["dev_approved"][int(i)] is not None
+                int(m["dev_approved"])
+                for m in top_matches
+                if m.get("dev_approved") is not None
             ]
             approval_rate = sum(apr_vals) / len(apr_vals) if apr_vals else None
 
@@ -366,6 +411,8 @@ def score_description_similarity_bert(
             "appeal_rate": appeal_rate,
             "approval_rate": approval_rate,
             "n_similar": len(top_matches),
+            "query_lat": lat,
+            "query_lon": lon,
         }
 
         # Zone-matched stats when zoning_class provided

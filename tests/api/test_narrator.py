@@ -757,12 +757,14 @@ class TestApplyConfidenceOverrides:
         zoning_max_storeys: int | None = None,
         zoning_max_units: int | None = None,
         zoning_max_height_m: float | None = None,
+        zoning_class: str | None = None,
     ) -> dict:
         return {
             "permitted_use_category": permitted_use_category,
             "zoning_max_storeys": zoning_max_storeys,
             "zoning_max_units": zoning_max_units,
             "zoning_max_height_m": zoning_max_height_m,
+            "zoning_class": zoning_class,
         }
 
     def _extracted(
@@ -887,6 +889,91 @@ class TestApplyConfidenceOverrides:
         )
         assert score == 72
 
+    def test_approved_precedent_exempts_cap_and_floors_to_55(self) -> None:
+        """Given: height 5x limit + same-zone approved comparable at 95% similarity.
+        When: LLM returns score of 28 (was capped by Step 1 in LLM).
+        Then: programmatic cap not applied; floor lifts score to >= 55."""
+        sim = {
+            "top_matches": [
+                {"similarity": 0.95, "zoning_class": "R", "dev_approved": 1},
+            ]
+        }
+        score = _apply_confidence_overrides(
+            28,
+            [self._violation()],
+            self._site(zoning_max_height_m=11.0, zoning_class="R"),
+            self._extracted(height_m=57.0),
+            sim,
+        )
+        assert score >= 55
+
+    def test_no_precedent_cap_still_fires(self) -> None:
+        """Given: height 5x limit + no approved comparable (sim=None).
+        When: score is 72.
+        Then: cap fires → 30."""
+        score = _apply_confidence_overrides(
+            72,
+            [],
+            self._site(zoning_max_height_m=11.0, zoning_class="R"),
+            self._extracted(height_m=57.0),
+            None,
+        )
+        assert score == 30
+
+    def test_cross_zone_precedent_does_not_exempt(self) -> None:
+        """Given: height 5x limit + approved comparable in CR zone (site zone is R).
+        When: score is 72.
+        Then: cap fires — different zone does not establish same-zone precedent."""
+        sim = {
+            "top_matches": [
+                {"similarity": 0.95, "zoning_class": "CR", "dev_approved": 1},
+            ]
+        }
+        score = _apply_confidence_overrides(
+            72,
+            [],
+            self._site(zoning_max_height_m=11.0, zoning_class="R"),
+            self._extracted(height_m=57.0),
+            sim,
+        )
+        assert score == 30
+
+    def test_low_similarity_precedent_does_not_exempt(self) -> None:
+        """Given: height 5x limit + approved same-zone comparable at 85% similarity.
+        When: score is 72.
+        Then: cap fires — threshold is 90%."""
+        sim = {
+            "top_matches": [
+                {"similarity": 0.85, "zoning_class": "R", "dev_approved": 1},
+            ]
+        }
+        score = _apply_confidence_overrides(
+            72,
+            [],
+            self._site(zoning_max_height_m=11.0, zoning_class="R"),
+            self._extracted(height_m=57.0),
+            sim,
+        )
+        assert score == 30
+
+    def test_unapproved_precedent_does_not_exempt(self) -> None:
+        """Given: height 5x limit + similar comparable that was NOT approved.
+        When: score is 72.
+        Then: cap fires — only Council-approved comparables exempt the cap."""
+        sim = {
+            "top_matches": [
+                {"similarity": 0.95, "zoning_class": "R", "dev_approved": 0},
+            ]
+        }
+        score = _apply_confidence_overrides(
+            72,
+            [],
+            self._site(zoning_max_height_m=11.0, zoning_class="R"),
+            self._extracted(height_m=57.0),
+            sim,
+        )
+        assert score == 30
+
     def test_score_above_floor_unchanged(self) -> None:
         """Given: no violations, mixed use, score already 80.
         When: floor is 70.
@@ -895,3 +982,107 @@ class TestApplyConfidenceOverrides:
             80, [], self._site("mixed use"), self._extracted()
         )
         assert score == 80
+
+    def test_far_comparable_does_not_exempt_cap(self) -> None:
+        """Given: height 5x limit + approved same-zone comparable at 95% similarity,
+        but comparable is ~1.1km away (query at Boon Ave, comparable at St Clair).
+        When: score is 72.
+        Then: cap fires — comparable is too far to establish same-site precedent."""
+        sim = {
+            "query_lat": 43.66384,  # Boon Ave
+            "query_lon": -79.45013,
+            "top_matches": [
+                {
+                    "similarity": 0.95,
+                    "zoning_class": "R",
+                    "dev_approved": 1,
+                    "lat": 43.67290,  # St Clair, ~1.08km away
+                    "lon": -79.45543,
+                },
+            ],
+        }
+        score = _apply_confidence_overrides(
+            72,
+            [],
+            self._site(zoning_max_height_m=11.0, zoning_class="R"),
+            self._extracted(height_m=57.0),
+            sim,
+        )
+        assert score == 30
+
+    def test_close_comparable_exempts_cap(self) -> None:
+        """Given: height 5x limit + approved same-zone comparable at 95% similarity,
+        comparable is ~55m from query (same site).
+        When: LLM returned score 28 (had applied its own cap).
+        Then: programmatic cap skipped; floor lifts score to >= 55."""
+        sim = {
+            "query_lat": 43.67290,  # St Clair
+            "query_lon": -79.45543,
+            "top_matches": [
+                {
+                    "similarity": 0.95,
+                    "zoning_class": "R",
+                    "dev_approved": 1,
+                    "lat": 43.67295,  # ~55m away — same site
+                    "lon": -79.45548,
+                },
+            ],
+        }
+        score = _apply_confidence_overrides(
+            28,
+            [self._violation()],
+            self._site(zoning_max_height_m=11.0, zoning_class="R"),
+            self._extracted(height_m=57.0),
+            sim,
+        )
+        assert score >= 55
+
+    def test_comparable_without_coords_does_not_exempt(self) -> None:
+        """Given: approved same-zone comparable at 95% similarity, but no lat/lon
+        on the comparable row (older application without geocoding).
+        When: query lat/lon is provided.
+        Then: cap fires — cannot confirm same-site proximity without coords."""
+        sim = {
+            "query_lat": 43.67290,
+            "query_lon": -79.45543,
+            "top_matches": [
+                {
+                    "similarity": 0.95,
+                    "zoning_class": "R",
+                    "dev_approved": 1,
+                    # no lat/lon keys
+                },
+            ],
+        }
+        score = _apply_confidence_overrides(
+            72,
+            [],
+            self._site(zoning_max_height_m=11.0, zoning_class="R"),
+            self._extracted(height_m=57.0),
+            sim,
+        )
+        assert score == 30
+
+    def test_no_query_coords_does_not_filter_by_distance(self) -> None:
+        """Given: approved same-zone comparable at 95% similarity.
+        When: sim dict has no query_lat/query_lon (caller didn't pass coords).
+        Then: cap not applied — distance unknown, cannot filter out the exemption."""
+        sim = {
+            "top_matches": [
+                {
+                    "similarity": 0.95,
+                    "zoning_class": "R",
+                    "dev_approved": 1,
+                    "lat": 43.67290,
+                    "lon": -79.45543,
+                },
+            ],
+        }
+        score = _apply_confidence_overrides(
+            28,
+            [self._violation()],
+            self._site(zoning_max_height_m=11.0, zoning_class="R"),
+            self._extracted(height_m=57.0),
+            sim,
+        )
+        assert score >= 55
