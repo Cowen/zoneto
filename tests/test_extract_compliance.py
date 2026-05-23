@@ -463,6 +463,35 @@ class TestComplianceContextualFlags:
         rule_ids = [v.rule_id for v in violations]
         assert "trca_regulated" not in rule_ids
 
+    def test_greenbelt_violation_informational(self) -> None:
+        """Given: Site is within the Ontario Greenbelt.
+        When: Checking compliance.
+        Then: greenbelt violation with INFORMATIONAL severity is returned."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(extracted, self._site(in_greenbelt=1))
+        rule_ids = [v.rule_id for v in violations]
+        assert "greenbelt" in rule_ids
+        gv = next(v for v in violations if v.rule_id == "greenbelt")
+        assert gv.severity == Severity.INFORMATIONAL
+
+    def test_no_greenbelt_violation_when_flag_zero(self) -> None:
+        """Given: Site is not in the Greenbelt.
+        When: Checking compliance.
+        Then: No greenbelt violation."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(extracted, self._site(in_greenbelt=0))
+        rule_ids = [v.rule_id for v in violations]
+        assert "greenbelt" not in rule_ids
+
+    def test_no_greenbelt_violation_when_flag_absent(self) -> None:
+        """Given: Site context has no in_greenbelt key.
+        When: Checking compliance.
+        Then: No greenbelt violation (graceful default)."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(extracted, self._site())
+        rule_ids = [v.rule_id for v in violations]
+        assert "greenbelt" not in rule_ids
+
     def test_holding_provision_flag(self) -> None:
         """Given: Site zoning has a Holding (H) symbol.
         When: Checking compliance.

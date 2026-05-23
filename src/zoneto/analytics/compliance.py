@@ -85,6 +85,7 @@ def check_compliance(
     violations.extend(_check_heritage(site))
     violations.extend(_check_mtsa(site))
     violations.extend(_check_trca(site))
+    violations.extend(_check_greenbelt(site))
     violations.extend(_check_holding(site))
     violations.extend(_check_exception(site))
 
@@ -374,6 +375,29 @@ def _check_trca(site: dict[str, Any]) -> list[Violation]:
                 "A TRCA permit under O. Reg. 41/24 is required before site plan "
                 "submission. Engage TRCA early — permit review can take 3–6 months "
                 "and may require floodplain studies or other technical reports."
+            ),
+        )
+    ]
+
+
+def _check_greenbelt(site: dict[str, Any]) -> list[Violation]:
+    if not site.get("in_greenbelt"):
+        return []
+    return [
+        Violation(
+            rule_id="greenbelt",
+            section_ref="Ontario Greenbelt Plan, 2017 (O. Reg. 59/05)",
+            observed="site is within the Ontario Greenbelt",
+            allowed=(
+                "the Greenbelt Plan prohibits most forms of urban residential "
+                "or commercial development"
+            ),
+            severity=Severity.INFORMATIONAL,
+            suggested_remedy=(
+                "Confirm the proposed use is permitted under the Greenbelt Plan "
+                "with the Ministry of Municipal Affairs and Housing before "
+                "proceeding. Most urban residential and commercial development "
+                "is not permitted in the Greenbelt."
             ),
         )
     ]
