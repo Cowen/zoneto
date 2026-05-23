@@ -324,10 +324,14 @@ def _apply_confidence_overrides(
 
     max_storeys = site.get("zoning_max_storeys") or 0
     max_units = site.get("zoning_max_units") or 0
+    max_height = site.get("zoning_max_height_m") or 0
     prop_storeys = extracted.proposed_storeys or 0
     prop_units = extracted.proposed_units or 0
-    if (max_storeys and prop_storeys / max_storeys >= 3.0) or (
-        max_units and prop_units / max_units >= 3.0
+    prop_height = extracted.proposed_height_m or 0
+    if (
+        (max_storeys and prop_storeys / max_storeys >= 3.0)
+        or (max_units and prop_units / max_units >= 3.0)
+        or (max_height and prop_height / max_height >= 3.0)
     ):
         score = min(score, 30)
 

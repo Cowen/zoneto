@@ -756,17 +756,24 @@ class TestApplyConfidenceOverrides:
         permitted_use_category: str | None = None,
         zoning_max_storeys: int | None = None,
         zoning_max_units: int | None = None,
+        zoning_max_height_m: float | None = None,
     ) -> dict:
         return {
             "permitted_use_category": permitted_use_category,
             "zoning_max_storeys": zoning_max_storeys,
             "zoning_max_units": zoning_max_units,
+            "zoning_max_height_m": zoning_max_height_m,
         }
 
     def _extracted(
-        self, storeys: int | None = None, units: int | None = None
+        self,
+        storeys: int | None = None,
+        units: int | None = None,
+        height_m: float | None = None,
     ) -> ProjectFeatures:
-        return ProjectFeatures(storeys, units, "residential", False)
+        return ProjectFeatures(
+            storeys, units, "residential", False, proposed_height_m=height_m
+        )
 
     def _violation(self) -> Violation:
         return Violation(
@@ -843,6 +850,42 @@ class TestApplyConfidenceOverrides:
             self._extracted(storeys=10, units=10),
         )
         assert score == 55
+
+    def test_cap_applied_when_height_exceeds_3x(self) -> None:
+        """Given: proposed 57m height, max 11m (ratio 5.18×).
+        When: score is 72.
+        Then: Cap lowers score to 30."""
+        score = _apply_confidence_overrides(
+            72,
+            [],
+            self._site(zoning_max_height_m=11.0),
+            self._extracted(height_m=57.0),
+        )
+        assert score == 30
+
+    def test_cap_not_applied_when_height_below_3x(self) -> None:
+        """Given: proposed 13m height, max 11m (ratio 1.18×).
+        When: score is 72.
+        Then: Cap not applied — height is under 3× limit."""
+        score = _apply_confidence_overrides(
+            72,
+            [],
+            self._site(zoning_max_height_m=11.0),
+            self._extracted(height_m=13.0),
+        )
+        assert score == 72
+
+    def test_cap_not_applied_when_max_height_null(self) -> None:
+        """Given: zoning_max_height_m is None (no height overlay data).
+        When: proposed height is 57m.
+        Then: No division by zero; height cap not applied."""
+        score = _apply_confidence_overrides(
+            72,
+            [],
+            self._site(zoning_max_height_m=None),
+            self._extracted(height_m=57.0),
+        )
+        assert score == 72
 
     def test_score_above_floor_unchanged(self) -> None:
         """Given: no violations, mixed use, score already 80.
