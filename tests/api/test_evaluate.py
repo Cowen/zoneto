@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 from unittest.mock import patch
 
+import polars as pl
 import pytest
 from fastapi.testclient import TestClient
 
 from zoneto.api.app import create_app
 from zoneto.api.llm_client import FakeLLMClient
+from zoneto.api.routes import _community_benefits_context
 
 
 @pytest.fixture
@@ -376,6 +379,101 @@ class TestEvaluateEndpoint:
         # Suggestions should be non-empty when violations exist
         if data["violations"]:
             assert len(data["suggestions"]) > 0
+
+
+class TestCommunityBenefitsContext:
+    def _s37_parquet(self, ref_dir: Path, n: int = 4, ward: str = "10") -> None:
+        s37 = pl.DataFrame(
+            {
+                "ward": [ward] * n,
+                "council_date": [datetime.date(2024, 1 + i, 1) for i in range(n)],
+                "monetary_value": [100_000.0 * (i + 1) for i in range(n)],
+                "community_benefits": (
+                    ["Cash", "Parkland", "Cash", "Affordable Housing"] * 4
+                )[:n],
+                "location": [f"{i * 100} Main St" for i in range(n)],
+            }
+        )
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        s37.write_parquet(ref_dir / "section37.parquet")
+
+    def test_returns_none_when_no_s37_parquet(self, tmp_path: Path) -> None:
+        """Given: No section37.parquet in data/reference.
+        When: _community_benefits_context is called.
+        Then: Returns None."""
+        result = _community_benefits_context(data_dir=tmp_path)
+        assert result is None
+
+    def test_returns_none_when_fewer_than_min_comps(self, tmp_path: Path) -> None:
+        """Given: section37.parquet with 2 records, min_comps=3.
+        When: _community_benefits_context is called.
+        Then: Returns None."""
+        self._s37_parquet(tmp_path / "reference", n=2)
+        result = _community_benefits_context(data_dir=tmp_path, min_comps=3)
+        assert result is None
+
+    def test_returns_dict_with_required_keys(self, tmp_path: Path) -> None:
+        """Given: section37.parquet with 4 records.
+        When: _community_benefits_context is called with min_comps=3.
+        Then: Returns dict with n_comps, monetary stats, and common_benefit_types."""
+        self._s37_parquet(tmp_path / "reference", n=4)
+        result = _community_benefits_context(data_dir=tmp_path, min_comps=3)
+        assert result is not None
+        assert result["n_comps"] == 4
+        assert "median_monetary" in result
+        assert "p25_monetary" in result
+        assert "p75_monetary" in result
+        assert isinstance(result["common_benefit_types"], list)
+
+    def test_filters_by_ward_number(self, tmp_path: Path) -> None:
+        """Given: section37.parquet with ward 10 (3 records) and ward 11 (3 records).
+        When: _community_benefits_context called for ward '10'.
+        Then: Only ward 10 records are counted."""
+        ref_dir = tmp_path / "reference"
+        ref_dir.mkdir(parents=True)
+        s37 = pl.DataFrame(
+            {
+                "ward": ["10", "10", "10", "11", "11", "11"],
+                "council_date": [datetime.date(2024, 1, 1)] * 6,
+                "monetary_value": [
+                    100_000.0,
+                    200_000.0,
+                    300_000.0,
+                    9_000_000.0,
+                    9_000_000.0,
+                    9_000_000.0,
+                ],
+                "community_benefits": ["Cash"] * 6,
+                "location": [f"{i} St" for i in range(6)],
+            }
+        )
+        s37.write_parquet(ref_dir / "section37.parquet")
+        result = _community_benefits_context(
+            data_dir=tmp_path, ward_number="10", min_comps=3
+        )
+        assert result is not None
+        assert result["n_comps"] == 3
+        assert result["median_monetary"] < 500_000
+
+    def test_common_benefit_types_sorted_by_frequency(self, tmp_path: Path) -> None:
+        """Given: section37.parquet with Cash 3 times and Parkland 2 times.
+        When: _community_benefits_context is called.
+        Then: Cash appears first in common_benefit_types."""
+        ref_dir = tmp_path / "reference"
+        ref_dir.mkdir(parents=True)
+        s37 = pl.DataFrame(
+            {
+                "ward": ["10"] * 5,
+                "council_date": [datetime.date(2024, 1, 1)] * 5,
+                "monetary_value": [100_000.0] * 5,
+                "community_benefits": ["Cash", "Cash", "Cash", "Parkland", "Parkland"],
+                "location": [f"{i} St" for i in range(5)],
+            }
+        )
+        s37.write_parquet(ref_dir / "section37.parquet")
+        result = _community_benefits_context(data_dir=tmp_path, min_comps=3)
+        assert result is not None
+        assert result["common_benefit_types"][0] == "Cash"
 
 
 class TestAskEndpoint:

@@ -9,6 +9,7 @@ from zoneto.analytics.extract import ProjectFeatures
 from zoneto.api.llm_client import FakeLLMClient
 from zoneto.api.narrator import (
     _apply_confidence_overrides,
+    _format_community_benefits,
     _format_description_similarity,
     _parse_confidence,
     narrate_evaluation,
@@ -631,6 +632,120 @@ class TestProgrammaticCap:
             self._site_with_max_storeys(None), extracted, [], [], client
         )
         assert score == 50
+
+
+class TestFormatCommunityBenefits:
+    def _cb(self) -> dict:
+        return {
+            "n_comps": 8,
+            "median_monetary": 250_000.0,
+            "p25_monetary": 100_000.0,
+            "p75_monetary": 400_000.0,
+            "common_benefit_types": ["Cash", "Parkland dedication"],
+        }
+
+    def test_returns_empty_when_none(self) -> None:
+        """Given: community_benefits is None.
+        When: Formatting.
+        Then: Returns empty string."""
+        assert _format_community_benefits(None) == ""
+
+    def test_includes_n_comps(self) -> None:
+        """Given: community_benefits dict with n_comps=8.
+        When: Formatting.
+        Then: Output contains '8'."""
+        out = _format_community_benefits(self._cb())
+        assert "8" in out
+
+    def test_includes_median_formatted(self) -> None:
+        """Given: median_monetary=250_000.
+        When: Formatting.
+        Then: Output contains formatted dollar amount."""
+        out = _format_community_benefits(self._cb())
+        assert "250,000" in out
+
+    def test_includes_benefit_types(self) -> None:
+        """Given: common_benefit_types=['Cash', 'Parkland dedication'].
+        When: Formatting.
+        Then: Both types appear in output."""
+        out = _format_community_benefits(self._cb())
+        assert "Cash" in out
+        assert "Parkland" in out
+
+    def test_empty_benefit_types_does_not_crash(self) -> None:
+        """Given: common_benefit_types=[].
+        When: Formatting.
+        Then: Does not crash, returns non-empty string."""
+        cb = self._cb()
+        cb["common_benefit_types"] = []
+        out = _format_community_benefits(cb)
+        assert isinstance(out, str)
+        assert len(out) > 0
+
+
+class TestNarrateEvaluationCommunityBenefits:
+    def _minimal_site(self) -> dict:
+        return {
+            "zoning_class": "CR",
+            "permitted_use_category": "Commercial Residential (mixed)",
+            "zoning_max_storeys": None,
+            "zoning_max_height_m": None,
+            "zoning_max_units": None,
+            "zoning_max_density": None,
+            "in_heritage_register": 0,
+            "in_heritage_district": 0,
+            "in_mtsa": 0,
+            "in_secondary_plan": 0,
+            "secondary_plan_name": None,
+            "zoning_holding": 0,
+        }
+
+    def test_community_benefits_injected_into_prompt(self) -> None:
+        """Given: community_benefits dict with n_comps=5 and median 250_000.
+        When: narrate_evaluation called with community_benefits kwarg.
+        Then: LLM user message includes Section 37 context with dollar amounts."""
+        client = CapturingFakeLLMClient("Summary.\n\nCONFIDENCE: 72")
+        extracted = ProjectFeatures(None, None, "mixed_use", False)
+        cb = {
+            "n_comps": 5,
+            "median_monetary": 250_000.0,
+            "p25_monetary": 100_000.0,
+            "p75_monetary": 400_000.0,
+            "common_benefit_types": ["Cash", "Parkland"],
+        }
+        narrate_evaluation(
+            self._minimal_site(),
+            extracted,
+            [],
+            [],
+            client,
+            community_benefits=cb,
+        )
+        user_content = client.last_messages[0]["content"]
+        assert "250,000" in user_content
+        assert "5" in user_content
+
+    def test_community_benefits_none_does_not_affect_output(self) -> None:
+        """Given: community_benefits=None.
+        When: narrate_evaluation called.
+        Then: No crash; returns normal (summary, score) tuple."""
+        client = FakeLLMClient("Summary.\n\nCONFIDENCE: 72")
+        extracted = ProjectFeatures(None, None, "mixed_use", False)
+        summary, score = narrate_evaluation(
+            self._minimal_site(), extracted, [], [], client, community_benefits=None
+        )
+        assert score == 72
+
+    def test_backward_compat_no_community_benefits_kwarg(self) -> None:
+        """Given: narrate_evaluation called without community_benefits kwarg.
+        When: Called.
+        Then: Works as before (backward compatible)."""
+        client = FakeLLMClient("Backward compat.\n\nCONFIDENCE: 70")
+        extracted = ProjectFeatures(None, None, "mixed_use", False)
+        summary, score = narrate_evaluation(
+            self._minimal_site(), extracted, [], [], client
+        )
+        assert score == 70
 
 
 class TestApplyConfidenceOverrides:

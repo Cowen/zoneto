@@ -14,7 +14,11 @@ def _write_section37(path: Path) -> None:
         {
             "location": ["100 King St W", "200 Bloor St", "100 King St W"],
             "monetary_value": [500000.0, None, 750000.0],
-            "community_benefits": ["Cash contribution", "Parkland dedication", "Affordable Housing"],
+            "community_benefits": [
+                "Cash contribution",
+                "Parkland dedication",
+                "Affordable Housing",
+            ],
             "ward": ["5", "10", "5"],
             "council_date": ["2022-06-15", "2021-03-01", "2023-09-20"],
         }
@@ -50,9 +54,7 @@ class TestAddSection37Features:
         ref.mkdir()
         _write_section37(ref / "section37.parquet")
 
-        df = pl.DataFrame(
-            {"address": ["999 Unknown Ave"], "folderrsn": ["F003"]}
-        )
+        df = pl.DataFrame({"address": ["999 Unknown Ave"], "folderrsn": ["F003"]})
         result = _add_section37_features(df, tmp_path)
         assert result["s37_monetary_value"][0] is None
         assert result["s37_benefit_text"][0] is None
@@ -65,9 +67,7 @@ class TestAddSection37Features:
         ref.mkdir()
         _write_section37(ref / "section37.parquet")
 
-        df = pl.DataFrame(
-            {"address": ["100 King St W"], "folderrsn": ["F001"]}
-        )
+        df = pl.DataFrame({"address": ["100 King St W"], "folderrsn": ["F001"]})
         result = _add_section37_features(df, tmp_path)
         benefit_text = result["s37_benefit_text"][0]
         assert benefit_text is not None
@@ -78,9 +78,7 @@ class TestAddSection37Features:
         """Given: section37.parquet does not exist.
         When: _add_section37_features called.
         Then: Both S.37 columns are null for all rows."""
-        df = pl.DataFrame(
-            {"address": ["100 King St W"], "folderrsn": ["F001"]}
-        )
+        df = pl.DataFrame({"address": ["100 King St W"], "folderrsn": ["F001"]})
         result = _add_section37_features(df, tmp_path)
         assert "s37_monetary_value" in result.columns
         assert "s37_benefit_text" in result.columns

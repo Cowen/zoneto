@@ -233,9 +233,7 @@ def _fetch_section37(ref: Path) -> None:
 
     # Ensure monetary_value is Float64
     if "monetary_value" in df.columns:
-        df = df.with_columns(
-            pl.col("monetary_value").cast(pl.Float64, strict=False)
-        )
+        df = df.with_columns(pl.col("monetary_value").cast(pl.Float64, strict=False))
 
     # Normalize council_omb_date → council_date (simpler key for joins)
     if "council_omb_date" in df.columns and "council_date" not in df.columns:

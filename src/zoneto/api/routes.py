@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import datetime
 import re
 from pathlib import Path
 from typing import Any, Literal
 
 import httpx
+import polars as pl
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -284,6 +286,7 @@ class EvaluateResponse(BaseModel):
     confidence_score: int | None = None
     data_gaps: list[str] = []
     description_similarity: dict[str, Any] | None = None
+    community_benefits_context: dict[str, Any] | None = None
 
 
 class AskRequest(BaseModel):
@@ -291,6 +294,57 @@ class AskRequest(BaseModel):
     description: str
     question: str
     history: list[dict[str, str]] = []
+
+
+def _community_benefits_context(
+    data_dir: Path,
+    ward_number: str | None = None,
+    years: int = 5,
+    min_comps: int = 3,
+) -> dict[str, Any] | None:
+    """Aggregate Section 37 community benefits over a recent year window.
+
+    Filters by ward when provided. Returns None if section37.parquet is absent
+    or fewer than min_comps records match.
+    """
+    s37_path = data_dir / "reference" / "section37.parquet"
+    if not s37_path.exists():
+        return None
+
+    s37 = pl.read_parquet(s37_path)
+    required = {"council_date", "monetary_value", "community_benefits"}
+    if not required.issubset(s37.columns):
+        return None
+
+    year_cutoff = datetime.date.today().year - years
+    s37 = s37.filter(pl.col("council_date").dt.year() >= year_cutoff)
+
+    if ward_number is not None and "ward" in s37.columns:
+        s37 = s37.filter(pl.col("ward") == ward_number)
+
+    if len(s37) < min_comps:
+        return None
+
+    monetary = s37["monetary_value"].drop_nulls()
+    if len(monetary) == 0:
+        return None
+
+    benefit_counts: dict[str, int] = {}
+    for text in s37["community_benefits"].drop_nulls().to_list():
+        for part in str(text).split(";"):
+            part = part.strip()
+            if part:
+                benefit_counts[part] = benefit_counts.get(part, 0) + 1
+
+    common = sorted(benefit_counts, key=lambda k: benefit_counts[k], reverse=True)[:3]
+
+    return {
+        "n_comps": len(s37),
+        "median_monetary": float(monetary.median()),  # type: ignore[arg-type]
+        "p25_monetary": float(monetary.quantile(0.25)),  # type: ignore[arg-type]
+        "p75_monetary": float(monetary.quantile(0.75)),  # type: ignore[arg-type]
+        "common_benefit_types": common,
+    }
 
 
 def _geocode_address(address: str) -> tuple[float, float]:
@@ -420,6 +474,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         )
 
     data_gaps = _compute_data_gaps(site, extracted)
+    cb_context = _community_benefits_context(data_dir=data_dir)
     model_dir: Path = getattr(request.app.state, "model_dir", Path("models"))
     bert_model = getattr(request.app.state, "bert_model", None)
 
@@ -452,6 +507,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         llm_client,
         data_gaps=data_gaps,
         description_similarity=desc_sim,
+        community_benefits=cb_context,
     )
 
     return EvaluateResponse(
@@ -491,6 +547,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         suggestions=[v.suggested_remedy for v in violations if v.suggested_remedy],
         data_gaps=data_gaps,
         description_similarity=desc_sim,
+        community_benefits_context=cb_context,
     )
 
 

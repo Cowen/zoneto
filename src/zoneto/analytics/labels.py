@@ -212,7 +212,11 @@ def _add_section37_features(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
         return " ".join(s.lower().split())
 
     s37_locations = [_norm(loc) for loc in s37["location"].fill_null("").to_list()]
-    s37_monetary = s37["monetary_value"].to_list() if "monetary_value" in s37.columns else [None] * len(s37)
+    s37_monetary = (
+        s37["monetary_value"].to_list()
+        if "monetary_value" in s37.columns
+        else [None] * len(s37)
+    )
     s37_benefits = (
         s37["community_benefits"].fill_null("").to_list()
         if "community_benefits" in s37.columns

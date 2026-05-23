@@ -278,6 +278,21 @@ def _format_description_similarity(
     return " ".join(parts)
 
 
+def _format_community_benefits(cb: dict[str, Any] | None) -> str:
+    if not cb:
+        return ""
+    n = cb["n_comps"]
+    median = cb["median_monetary"]
+    p25 = cb["p25_monetary"]
+    p75 = cb["p75_monetary"]
+    types = ", ".join(cb.get("common_benefit_types") or []) or "various"
+    return (
+        f"Section 37 Community Benefits — based on {n} comparable Toronto rezonings:\n"
+        f"  Median contribution: ${median:,.0f}  (range: ${p25:,.0f}–${p75:,.0f})\n"
+        f"  Common benefits: {types}"
+    )
+
+
 def _format_data_gaps(data_gaps: list[str]) -> str:
     if not data_gaps:
         return ""
@@ -328,6 +343,7 @@ def narrate_evaluation(
     *,
     data_gaps: list[str] | None = None,
     description_similarity: dict[str, Any] | None = None,
+    community_benefits: dict[str, Any] | None = None,
 ) -> tuple[str, int | None]:
     """Generate a markdown compliance summary and confidence score.
 
@@ -344,6 +360,7 @@ def narrate_evaluation(
     sim_section = _format_description_similarity(
         description_similarity, site_zoning_class=site_zone
     )
+    cb_section = _format_community_benefits(community_benefits)
     user_content = f"""\
 ## Site context
 {_format_site(site)}
@@ -357,6 +374,13 @@ def narrate_evaluation(
 ## Relevant By-law 569-2013 sections (retrieved by semantic search)
 {_format_chunks(chunks)}
 {("" if not sim_section else ("\n## Comparable application outcomes\n" + sim_section))}
+{
+        (
+            ""
+            if not cb_section
+            else ("\n## Section 37 Community Benefits Context\n" + cb_section)
+        )
+    }
 {
         (
             ""
