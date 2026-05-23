@@ -66,6 +66,13 @@ _WARD_GEO_URL = (
     "/resource/9398da69-0622-4eb1-a125-4f8c7f1016a4"
     "/download/2023-wardprofiles-geographicareas.xlsx"
 )
+# Section 37 Community Benefits — Toronto Open Data CKAN
+_SECTION37_CSV_URL = (
+    "https://ckan0.cf.opendata.inter.prod-toronto.ca"
+    "/dataset/8c0b0109-73fc-4eb5-b849-337db81aadc1"
+    "/resource/d52af681-04b2-4b26-9c51-6682e59499b7"
+    "/download/secured-by-section-37.csv"
+)
 # TRCA Regulated Area — ArcGIS FeatureServer (6000+ polygon records, paginated)
 # Service confirmed via TRCA Open Data Portal (trca-camaps.opendata.arcgis.com)
 _TRCA_FEATURESERVER_URL = (
@@ -191,6 +198,52 @@ def _fetch_ward_profiles_csv(ref: Path) -> None:
     finally:
         census_xlsx.unlink(missing_ok=True)
         geo_xlsx.unlink(missing_ok=True)
+
+
+def _fetch_section37(ref: Path) -> None:
+    """Download Toronto Section 37 Community Benefits CSV and write as parquet.
+
+    Source schema: _id, Ward, Council/OMB Date, Monetary Value, ByLaw,
+    Location, Community Benefits. Normalizes column names to snake_case.
+    Writes to ref/section37.parquet.
+    """
+    import io  # noqa: PLC0415
+
+    import polars as pl  # noqa: PLC0415
+
+    with httpx.Client(follow_redirects=True, timeout=120) as client:
+        r = client.get(_SECTION37_CSV_URL)
+        r.raise_for_status()
+        content = r.content
+
+    df = pl.read_csv(
+        io.BytesIO(content),
+        infer_schema_length=1000,
+        null_values=["", "N/A"],
+    )
+
+    # Normalize column names: lowercase, spaces → underscore, strip special chars
+    rename: dict[str, str] = {}
+    for col in df.columns:
+        normalized = col.lower().replace("/", "_").replace(" ", "_").strip("_")
+        if normalized != col:
+            rename[col] = normalized
+    if rename:
+        df = df.rename(rename)
+
+    # Ensure monetary_value is Float64
+    if "monetary_value" in df.columns:
+        df = df.with_columns(
+            pl.col("monetary_value").cast(pl.Float64, strict=False)
+        )
+
+    # Normalize council_omb_date → council_date (simpler key for joins)
+    if "council_omb_date" in df.columns and "council_date" not in df.columns:
+        df = df.rename({"council_omb_date": "council_date"})
+
+    dest_path = ref / "section37.parquet"
+    df.write_parquet(dest_path)
+    logger.info("_fetch_section37: wrote %d rows to %s", len(df), dest_path)
 
 
 def _fetch_trca_regulated_areas(dest: Path) -> None:
@@ -362,6 +415,16 @@ def fetch_reference(data_dir: Path = Path("data")) -> None:
     ward_profiles_csv = ref / "ward_profiles.csv"
     if not ward_profiles_csv.exists():
         _fetch_ward_profiles_csv(ref)
+
+    # Section 37 community benefits CSV → parquet
+    section37_parquet = ref / "section37.parquet"
+    if not section37_parquet.exists():
+        try:
+            _fetch_section37(ref)
+        except Exception:
+            logger.warning(
+                "Section 37 data not available — s37_monetary_value will be null"
+            )
 
     # TRCA regulated areas GeoJSON (paginated ArcGIS FeatureServer)
     trca_geojson = ref / "trca_regulated_areas.geojson"
