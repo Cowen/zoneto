@@ -302,7 +302,9 @@ def _apply_confidence_overrides(
     Cap: proposed ≥ 3× zoning limit (storeys or units) → max 30.
     """
     permitted = (site.get("permitted_use_category") or "").lower()
-    if not violations and any(k in permitted for k in ("mixed", "commercial residential")):
+    if not violations and any(
+        k in permitted for k in ("mixed", "commercial residential")
+    ):
         score = max(score, 70)
 
     max_storeys = site.get("zoning_max_storeys") or 0
