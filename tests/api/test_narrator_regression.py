@@ -30,6 +30,7 @@ from zoneto.api.llm_client import AnthropicClient
 from zoneto.api.narrator import narrate_evaluation
 from zoneto.api.site_context import lookup_site_context
 
+# Real description for Council-approved 1613 St Clair West development 
 _DESCRIPTION = (
     "The developer intends to develop the subject lands with a 17-storey, 57 meter "
     "mixed-use building consisting of 258 units in 16,732 square meters of residential "
@@ -110,8 +111,8 @@ def test_st_clair_confidence_floor() -> None:
     api_key = _require_api_key()
     _, score = _narrate_for_address(_ST_CLAIR_LAT, _ST_CLAIR_LON, api_key=api_key)
     assert score is not None, "narrator did not return a confidence score"
-    assert score >= 55, (
-        f"1613 St Clair confidence {score} < 55 (approved OZ, expected >=55)"
+    assert score >= 70, (
+        f"1613 St Clair confidence {score} < 70 (approved OZ, expected >=70)"
     )
 
 
