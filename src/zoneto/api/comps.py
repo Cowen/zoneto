@@ -103,16 +103,6 @@ _OPTIONAL_COLS: list[tuple[str, str, str]] = [
         "proposed_use_category",
         "CAST(NULL AS VARCHAR) AS proposed_use_category",
     ),
-    (
-        "s37_monetary_value",
-        "s37_monetary_value",
-        "CAST(NULL AS DOUBLE) AS s37_monetary_value",
-    ),
-    (
-        "s37_benefit_text",
-        "s37_benefit_text",
-        "CAST(NULL AS VARCHAR) AS s37_benefit_text",
-    ),
 ]
 
 

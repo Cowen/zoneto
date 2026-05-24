@@ -556,7 +556,6 @@
       { key: 'dev_days_to_decision',  label: 'Timeline',   type: 'num' },
       { key: 'proposed_storeys',      label: 'Storeys',    type: 'num' },
       { key: 'proposed_units',        label: 'Units',      type: 'num' },
-      { key: 's37_monetary_value',    label: 'S.37 $',     type: 'num' },
     ];
     let _lastApplications = [];
     let _sortCol = null;
@@ -609,7 +608,6 @@
           <td>${timeline}</td>
           <td>${app.proposed_storeys ?? '—'}</td>
           <td>${app.proposed_units ?? '—'}</td>
-          <td data-tooltip="Section 37 community benefit contribution reported for this application">${app.s37_monetary_value != null ? '$' + Math.round(app.s37_monetary_value).toLocaleString() : '—'}</td>
         </tr>`;
       }).join('');
 

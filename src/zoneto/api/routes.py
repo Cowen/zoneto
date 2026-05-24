@@ -61,8 +61,6 @@ class CompApplication(BaseModel):
     ward_appeal_rate_3y: float | None = None
     has_community_meeting: int | None = None
     proposed_use_category: str | None = None
-    s37_monetary_value: float | None = None
-    s37_benefit_text: str | None = None
 
 
 class CompsResponse(BaseModel):

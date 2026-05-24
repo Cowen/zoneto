@@ -430,7 +430,7 @@ def fetch_reference(data_dir: Path = Path("data")) -> None:
             _fetch_section37(ref)
         except Exception:
             logger.warning(
-                "Section 37 data not available — s37_monetary_value will be null"
+                "Section 37 data not available for community benefits context"
             )
 
     # TRCA regulated areas GeoJSON (paginated ArcGIS FeatureServer)

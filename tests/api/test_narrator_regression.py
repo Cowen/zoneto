@@ -30,7 +30,7 @@ from zoneto.api.llm_client import AnthropicClient
 from zoneto.api.narrator import narrate_evaluation
 from zoneto.api.site_context import lookup_site_context
 
-# Real description for Council-approved 1613 St Clair West development 
+# Real description for Council-approved 1613 St Clair West development
 _DESCRIPTION = (
     "The developer intends to develop the subject lands with a 17-storey, 57 meter "
     "mixed-use building consisting of 258 units in 16,732 square meters of residential "
