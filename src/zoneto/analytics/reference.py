@@ -218,8 +218,9 @@ def _fetch_section37(ref: Path) -> None:
 
     df = pl.read_csv(
         io.BytesIO(content),
-        infer_schema_length=1000,
-        null_values=["", "N/A"],
+        infer_schema_length=10000,
+        null_values=["", "N/A", "None"],
+        schema_overrides={"Ward": pl.String},
     )
 
     # Normalize column names: lowercase, spaces → underscore, strip special chars
@@ -238,6 +239,14 @@ def _fetch_section37(ref: Path) -> None:
     # Normalize council_omb_date → council_date (simpler key for joins)
     if "council_omb_date" in df.columns and "council_date" not in df.columns:
         df = df.rename({"council_omb_date": "council_date"})
+
+    # Parse council_date to Date — source strings may include a time component
+    if "council_date" in df.columns:
+        df = df.with_columns(
+            pl.col("council_date")
+            .str.slice(0, 10)
+            .str.to_date(format="%Y-%m-%d", strict=False)
+        )
 
     dest_path = ref / "section37.parquet"
     df.write_parquet(dest_path)

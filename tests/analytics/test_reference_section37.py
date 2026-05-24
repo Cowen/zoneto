@@ -90,3 +90,50 @@ class TestFetchSection37:
 
         df = pl.read_parquet(tmp_path / "section37.parquet")
         assert len(df) == 3
+
+    def test_council_date_parsed_as_date_type(
+        self, tmp_path: Path, raw_csv_content: bytes
+    ) -> None:
+        """Given: CSV with ISO date strings in Council/OMB Date.
+        When: _fetch_section37 is called.
+        Then: council_date column is a Date type (not String)."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = mock_response
+        mock_response.content = raw_csv_content
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = mock_response
+
+        with patch("zoneto.analytics.reference.httpx.Client", return_value=mock_client):
+            _fetch_section37(tmp_path)
+
+        df = pl.read_parquet(tmp_path / "section37.parquet")
+        assert df["council_date"].dtype == pl.Date
+        assert df["council_date"][0] is not None
+
+    def test_ward_none_literal_parsed_as_null(self, tmp_path: Path) -> None:
+        """Given: CSV where some Ward values are the literal string 'None'.
+        When: _fetch_section37 is called.
+        Then: Those rows have null ward (not a parse error)."""
+        csv_content = (
+            "_id,Ward,Council/OMB Date,Monetary Value,"
+            "ByLaw,Location,Community Benefits\n"
+            '1,5,2022-06-15,500000.00,123-2022,"100 King St W","Cash"\n'
+            '2,None,2021-03-01,,"456-2021","200 Bloor St","Parkland"\n'
+            '3,10,2023-09-20,1200000.00,789-2023,"50 Bay St","Cash"\n'
+        ).encode()
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = mock_response
+        mock_response.content = csv_content
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = mock_response
+
+        with patch("zoneto.analytics.reference.httpx.Client", return_value=mock_client):
+            _fetch_section37(tmp_path)
+
+        df = pl.read_parquet(tmp_path / "section37.parquet")
+        assert len(df) == 3
+        assert df["ward"][1] is None
