@@ -11,6 +11,7 @@ from zoneto.api.narrator import (
     _apply_confidence_overrides,
     _format_community_benefits,
     _format_description_similarity,
+    _format_site,
     _parse_confidence,
     narrate_evaluation,
 )
@@ -142,14 +143,15 @@ class TestNarrateEvaluationDataGaps:
     def test_data_gaps_accepted_without_error(self) -> None:
         """Given: narrate_evaluation called with a non-empty data_gaps list.
         When: LLM returns a valid response.
-        Then: Returns (summary, score) without error."""
+        Then: Returns (summary, score) without error. Score may be floored above
+        the raw LLM value when the use is compatible and no structural violations."""
         client = FakeLLMClient("Summary noting gaps.\n\nCONFIDENCE: 45")
         extracted = ProjectFeatures(None, None, "residential", False)
         gaps = ["Actual lot area and frontage not available from open data."]
         summary, score = narrate_evaluation(
             self._minimal_site(), extracted, [], [], client, data_gaps=gaps
         )
-        assert score == 45
+        assert score is not None
         assert "Summary" in summary
 
     def test_empty_data_gaps_still_works(self) -> None:
@@ -983,6 +985,60 @@ class TestApplyConfidenceOverrides:
         )
         assert score == 80
 
+    def test_floor_applied_permitted_use_informational_violations_only(self) -> None:
+        """Given: recreational use in Residential zone, only informational violations
+        (e.g. zoning exception note), score 55.
+        When: applying overrides.
+        Then: Floor raises to 70 — use is as-of-right, structural path is clear."""
+        info_violation = Violation(
+            rule_id="zoning_exception",
+            section_ref="By-law 569-2013 — Exception No. 751",
+            observed="site has Exception No. 751",
+            allowed="review exception schedule",
+            severity=Severity.INFORMATIONAL,
+            suggested_remedy="Review exception",
+        )
+        score = _apply_confidence_overrides(
+            55,
+            [info_violation],
+            self._site(permitted_use_category="Residential", zoning_class="R"),
+            ProjectFeatures(None, None, "recreational", False),
+        )
+        assert score >= 70
+
+    def test_floor_not_applied_when_structural_violation_present(self) -> None:
+        """Given: recreational use in Residential zone but a NEEDS_REZONING violation
+        (e.g. storeys exceed limit).
+        When: applying overrides.
+        Then: Floor not applied — structural violation means it is not as-of-right."""
+        structural = Violation(
+            rule_id="storeys_exceed_max",
+            section_ref="By-law 569-2013",
+            observed="10 storeys proposed",
+            allowed="max 3 storeys",
+            severity=Severity.NEEDS_REZONING,
+            suggested_remedy="Reduce storeys",
+        )
+        score = _apply_confidence_overrides(
+            55,
+            [structural],
+            self._site(permitted_use_category="Residential", zoning_class="R"),
+            ProjectFeatures(None, None, "recreational", False),
+        )
+        assert score == 55
+
+    def test_floor_not_applied_when_use_not_permitted(self) -> None:
+        """Given: employment use in Residential zone (incompatible), no violations.
+        When: applying overrides.
+        Then: Floor not applied — use is not permitted in this zone."""
+        score = _apply_confidence_overrides(
+            50,
+            [],
+            self._site(permitted_use_category="Residential"),
+            ProjectFeatures(None, None, "employment", False),
+        )
+        assert score == 50
+
     def test_far_comparable_does_not_exempt_cap(self) -> None:
         """Given: height 5x limit + approved same-zone comparable at 95% similarity,
         but comparable is ~1.1km away (query at Boon Ave, comparable at St Clair).
@@ -1086,3 +1142,68 @@ class TestApplyConfidenceOverrides:
             sim,
         )
         assert score >= 55
+
+
+class TestFormatSiteUseCompatibility:
+    def _site(self, permitted_use_category: str) -> dict:
+        return {
+            "zoning_class": "R",
+            "permitted_use_category": permitted_use_category,
+            "zoning_max_storeys": None,
+            "zoning_max_height_m": None,
+            "zoning_max_units": None,
+            "zoning_max_density": None,
+            "in_heritage_register": 0,
+            "in_heritage_district": 0,
+            "in_mtsa": 0,
+            "in_secondary_plan": 0,
+            "secondary_plan_name": None,
+            "zoning_holding": 0,
+            "zoning_exception": 0,
+        }
+
+    def test_compatible_use_shows_permitted(self) -> None:
+        """Given: recreational in Residential zone (permitted per _ZONE_ALLOWED).
+        When: Formatting site context.
+        Then: Use compatibility line says 'permitted'.
+        """
+        out = _format_site(self._site("Residential"), proposed_use="recreational")
+        assert "permitted" in out.lower()
+        assert "recreational" in out
+
+    def test_incompatible_use_shows_not_permitted(self) -> None:
+        """Given: employment proposed in Residential zone (not permitted).
+        When: Formatting site context.
+        Then: Use compatibility line says 'NOT permitted'."""
+        out = _format_site(self._site("Residential"), proposed_use="employment")
+        assert "not permitted" in out.lower()
+        assert "employment" in out
+
+    def test_unknown_use_when_proposed_none(self) -> None:
+        """Given: proposed_use=None (nothing extracted from description).
+        When: Formatting site context.
+        Then: Use compatibility line says 'unknown'."""
+        out = _format_site(self._site("Residential"), proposed_use=None)
+        assert "unknown" in out.lower()
+
+    def test_unknown_use_when_zone_unrecognized(self) -> None:
+        """Given: known proposed use but unrecognized permitted_use_category.
+        When: Formatting site context.
+        Then: Use compatibility line says 'unknown' (can't determine from data)."""
+        out = _format_site(
+            self._site("Some Unrecognized Zone Category"), proposed_use="residential"
+        )
+        assert "unknown" in out.lower()
+
+    def test_use_compatibility_injected_into_narrator_prompt(self) -> None:
+        """Given: recreational use in Residential zone (compatible).
+        When: narrate_evaluation called.
+        Then: LLM user prompt includes 'permitted' for use compatibility — LLM
+        must not independently contradict what the rule engine determined."""
+        client = CapturingFakeLLMClient("Summary.\n\nCONFIDENCE: 65")
+        site = self._site("Residential")
+        extracted = ProjectFeatures(None, None, "recreational", False)
+        narrate_evaluation(site, extracted, [], [], client)
+        user_content = client.last_messages[0]["content"]
+        assert "permitted" in user_content.lower()
+        assert "recreational" in user_content

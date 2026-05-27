@@ -7,8 +7,9 @@ import re
 from typing import Any
 
 from zoneto.analytics.bylaw_index import Chunk
-from zoneto.analytics.compliance import Violation
+from zoneto.analytics.compliance import Severity, Violation
 from zoneto.analytics.extract import ProjectFeatures
+from zoneto.analytics.use_classifier import use_matches_zone
 from zoneto.api.llm_client import LLMClient
 
 _SYSTEM_PROMPT = """\
@@ -61,14 +62,17 @@ STRICT RULES you must always follow:
      Exception: same-zone OZ approved at ≥ 90% similarity → skip cap,
      proceed to Step 2 and apply approved comparable as +8 in Step 3.
    Step 2 — Base band from zone/violation profile (pick ONE):
-     A. Zero violations + compatible zone use → base band 70–80.
-        "Compatible" means the permitted_use_category matches the
-        proposal (e.g. mixed-use in a CR zone with "Commercial
-        Residential (mixed)" use category). Data gaps in specific
-        limits do NOT disqualify this — CR zones routinely have no
-        hard unit/height limits in public data.
-     B. Zero violations + mismatched or unclear zone use → 55–65.
-     C. Moderate violations (all < 3×) → 35–55.
+     CRITICAL: INFORMATIONAL violations (heritage register, MTSA flag, zoning
+     exception notes) are context — NOT compliance failures. They do NOT lower
+     the base band. Only NEEDS_VARIANCE and NEEDS_REZONING violations count.
+     A. Zero STRUCTURAL violations (NEEDS_VARIANCE / NEEDS_REZONING) + compatible
+        zone use → base band 70–80. "Compatible" means the Use compatibility line
+        in the site context shows "permitted". INFORMATIONAL violations are fine
+        here. Data gaps do NOT disqualify this — CR zones routinely have no hard
+        unit/height limits in public data.
+     B. Zero structural violations + mismatched or unclear zone use → 55–65.
+     C. Structural violations present (one or more NEEDS_VARIANCE or
+        NEEDS_REZONING) → 35–55.
    Step 3 — Adjust within the base band ONLY (max ±8 total):
      Up to +8: MTSA, secondary plan, or site-specific exception.
      Up to -8: comparable appeal rate ≥ 25%, or heritage district.
@@ -130,9 +134,19 @@ def _format_chunks(chunks: list[Chunk]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def _format_site(site: dict[str, Any]) -> str:
+def _format_site(site: dict[str, Any], proposed_use: str | None = None) -> str:
     zone = site.get("zoning_class") or "unknown"
     use_cat = site.get("permitted_use_category") or "unknown"
+    match = use_matches_zone(proposed_use, site.get("permitted_use_category"))
+    if match == 1:
+        use_compat = f"permitted ('{proposed_use}' is allowed in this zone)"
+    elif match == 0:
+        use_compat = (
+            f"NOT permitted ('{proposed_use}' violates zone use category"
+            " — see violations)"
+        )
+    else:
+        use_compat = "unknown (insufficient data to determine compatibility)"
     flags = []
     if site.get("in_heritage_register"):
         flags.append("Heritage Register")
@@ -159,6 +173,7 @@ def _format_site(site: dict[str, Any]) -> str:
         limits.append(f"max FSI {site['zoning_max_density']}")
     return (
         f"Zone: {zone} | Permitted use category: {use_cat}\n"
+        f"Use compatibility: {use_compat}\n"
         f"Limits: {', '.join(limits) or 'not available from structured data'}\n"
         f"Flags: {', '.join(flags) or 'none'}"
     )
@@ -381,7 +396,10 @@ def _apply_confidence_overrides(
     """Apply deterministic floor/cap rules after LLM scoring.
 
     Floors (applied first):
-      - No violations + mixed/commercial-residential use → min 70.
+      - Use is permitted in zone + no structural violations → min 70 (as-of-right path).
+        Informational violations (heritage, MTSA, exceptions) do not block this floor.
+      - No violations + mixed/commercial-residential category string → min 70 (fallback
+        for zone categories not in _ZONE_ALLOWED, caught by substring match).
       - Same-zone Council-approved comparable at ≥ 90% similarity → min 55.
 
     Cap (skipped when approved precedent exists):
@@ -389,6 +407,14 @@ def _apply_confidence_overrides(
         Exemption: if a same-zone approved comparable matches at ≥ 90%,
         the cap does not apply — the precedent overrides the ratio rule.
     """
+    structural = [v for v in violations if v.severity != Severity.INFORMATIONAL]
+    if (
+        use_matches_zone(extracted.proposed_use, site.get("permitted_use_category"))
+        == 1
+        and not structural
+    ):
+        score = max(score, 70)
+
     permitted = (site.get("permitted_use_category") or "").lower()
     if not violations and any(
         k in permitted for k in ("mixed", "commercial residential")
@@ -447,7 +473,7 @@ def narrate_evaluation(
     cb_section = _format_community_benefits(community_benefits)
     user_content = f"""\
 ## Site context
-{_format_site(site)}
+{_format_site(site, proposed_use=extracted.proposed_use)}
 
 ## Extracted project features
 {_format_extracted(extracted)}
@@ -495,15 +521,17 @@ Step 1: Check each violation ratio. If ANY exceeds 3×: set confidence 10–30, 
         Exception: if a same-zone OZ comparable appears with similarity ≥ 90%
         AND Council-approved status, skip the cap — proceed to Steps 2 and 3
         and apply the approved comparable as a +8 upward adjustment in Step 3.
-Step 2: Determine base band (70–80 for zero violations + compatible zone; 55–65 for
-        zero violations + mismatched zone; 35–55 for moderate violations).
+Step 2: Determine base band (70–80 for zero STRUCTURAL violations + compatible zone;
+        55–65 for zero structural violations + mismatched zone; 35–55 for structural
+        violations present). INFORMATIONAL violations never lower the band.
 Step 3: Adjust within the base band (±8 max) for MTSA/overlay/appeal rate.
         Appeal rate CANNOT push the score below the Step 2 floor.
 Remember: data gaps are caveats, NOT violations. Do not penalise for missing data.
 VERIFY before writing CONFIDENCE:
-  - If violations list is empty AND permitted_use_category shows a compatible use
-    (mixed, commercial residential, etc.): your score MUST be ≥ 70. If you wrote
-    below 70, re-apply Step 2A — the base band floor is 70, not lower.
+  - If Use compatibility says "permitted" AND there are no NEEDS_VARIANCE or
+    NEEDS_REZONING violations: your score MUST be ≥ 70. INFORMATIONAL violations
+    (heritage notes, MTSA flags, exception notes) do NOT count. If you wrote below
+    70, re-apply Step 2A — the base band floor is 70, not lower.
 
 End with a CONFIDENCE line as required by the system rules.
 """
@@ -538,7 +566,7 @@ def narrate_question(
     """
     context_block = f"""\
 ## Site context
-{_format_site(site)}
+{_format_site(site, proposed_use=extracted.proposed_use)}
 
 ## Extracted project features
 {_format_extracted(extracted)}

@@ -97,6 +97,44 @@ def test_classify_use_none_when_no_keywords() -> None:
     assert classify_use("Rezoning to permit increased height") is None
 
 
+@pytest.mark.parametrize(
+    "description,expected",
+    [
+        ("I want to build a park here.", "recreational"),
+        ("A new parkland dedication along the waterfront.", "recreational"),
+        ("Proposed playground equipment installation.", "recreational"),
+        ("New community garden on the rear lot.", "recreational"),
+        ("A recreation centre with courts and pool.", "recreational"),
+        ("A recreational facility for youth sports.", "recreational"),
+    ],
+)
+def test_classify_use_recreational(description: str, expected: str) -> None:
+    assert classify_use(description) == expected
+
+
+def test_park_no_false_positive_from_parking() -> None:
+    """Given: Description mentioning parking but no park.
+    When: Classifying use.
+    Then: Not classified as recreational (parking != park)."""
+    result = classify_use("A 6-storey residential building with 50 parking spaces.")
+    assert result != "recreational"
+
+
+@pytest.mark.parametrize(
+    "description,expected",
+    [
+        ("A new public library branch.", "institutional"),
+        ("A child care facility with 60 spaces.", "institutional"),
+        ("A childcare centre on the main floor.", "institutional"),
+        ("A museum of natural history.", "institutional"),
+        ("A new daycare for 40 children.", "institutional"),
+        ("A day care facility for toddlers.", "institutional"),
+    ],
+)
+def test_classify_use_institutional_extended(description: str, expected: str) -> None:
+    assert classify_use(description) == expected
+
+
 # ---------------------------------------------------------------------------
 # use_matches_zone
 # ---------------------------------------------------------------------------
@@ -111,7 +149,8 @@ def test_classify_use_none_when_no_keywords() -> None:
         ("mixed_use", "Residential", 1),
         ("commercial", "Residential", 0),
         ("employment", "Residential", 0),
-        ("institutional", "Residential", 0),
+        ("institutional", "Residential", 1),
+        ("recreational", "Residential", 1),
         # commercial residential (mixed) category
         ("residential", "Commercial Residential (mixed)", 1),
         ("commercial", "Commercial Residential (mixed)", 1),
@@ -122,11 +161,21 @@ def test_classify_use_none_when_no_keywords() -> None:
         ("commercial", "Commercial Residential Employment (mixed)", 1),
         ("employment", "Commercial Residential Employment (mixed)", 1),
         ("mixed_use", "Commercial Residential Employment (mixed)", 1),
-        ("institutional", "Commercial Residential Employment (mixed)", 0),
+        ("institutional", "Commercial Residential Employment (mixed)", 1),
+        ("recreational", "Residential Apartment", 1),
+        ("recreational", "Open Space", 1),
+        ("recreational", "Employment Industrial", 1),
+        ("recreational", "Utility / Transportation", 1),
+        ("institutional", "Utility / Transportation", 1),
+        ("residential", "Utility / Transportation", 0),
+        ("commercial", "Utility / Transportation", 0),
         # commercial-only category
         ("commercial", "Commercial", 1),
         ("mixed_use", "Commercial", 1),
+        ("recreational", "Commercial", 1),
+        ("institutional", "Commercial", 1),
         ("residential", "Commercial", 0),
+        ("employment", "Commercial", 0),
         # employment industrial
         ("employment", "Employment Industrial", 1),
         ("residential", "Employment Industrial", 0),

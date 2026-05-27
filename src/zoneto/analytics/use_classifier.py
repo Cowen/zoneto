@@ -11,6 +11,9 @@ import re
 
 # Explicit mixed-use phrases always win — even when only one single-category
 # keyword is present, "live/work lofts above retail" is unambiguously mixed.
+# "park" must be matched as a whole word — "parking" is a substring false positive.
+_PARK_RE = re.compile(r"(?i)\bpark\b")
+
 _MIXED_USE_TRIGGERS: tuple[str, ...] = (
     "mixed use",
     "mixed-use",
@@ -69,6 +72,25 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
         "long term care",
         "community centre",
         "community center",
+        "library",
+        "child care",
+        "childcare",
+        "day care",
+        "daycare",
+        "museum",
+    ),
+    "recreational": (
+        "parkland",
+        "green space",
+        "greenspace",
+        "playground",
+        "recreation centre",
+        "recreation center",
+        "recreational facility",
+        "recreational use",
+        "community garden",
+        "sports field",
+        "athletic field",
     ),
 }
 
@@ -82,19 +104,19 @@ _NEGATION_RE = re.compile(
 # Permitted GEN_ZONE categories (strings produced by site_context._map_gen_zone)
 # mapped to the set of proposed-use buckets that are allowed as-of-right.
 _ZONE_ALLOWED: dict[str, frozenset[str]] = {
-    "Residential": frozenset({"residential", "mixed_use"}),
-    "Residential Apartment": frozenset({"residential", "mixed_use"}),
+    "Residential": frozenset({"residential", "mixed_use", "recreational", "institutional"}),
+    "Residential Apartment": frozenset({"residential", "mixed_use", "recreational", "institutional"}),
     "Commercial Residential (mixed)": frozenset(
-        {"residential", "commercial", "mixed_use"}
+        {"residential", "commercial", "mixed_use", "recreational", "institutional"}
     ),
     "Commercial Residential Employment (mixed)": frozenset(
-        {"residential", "commercial", "employment", "mixed_use"}
+        {"residential", "commercial", "employment", "mixed_use", "recreational", "institutional"}
     ),
-    "Commercial": frozenset({"commercial", "mixed_use"}),
-    "Employment Industrial": frozenset({"employment"}),
-    "Institutional": frozenset({"institutional"}),
-    "Open Space": frozenset(),
-    "Utility / Transportation": frozenset(),
+    "Commercial": frozenset({"commercial", "mixed_use", "recreational", "institutional"}),
+    "Employment Industrial": frozenset({"employment", "recreational"}),
+    "Institutional": frozenset({"institutional", "recreational"}),
+    "Open Space": frozenset({"recreational"}),
+    "Utility / Transportation": frozenset({"recreational", "institutional"}),
 }
 
 
@@ -116,10 +138,12 @@ def classify_use(description: str | None) -> str | None:
     text = _NEGATION_RE.sub(" ", text)
 
     matches: dict[str, int] = {}
+    if _PARK_RE.search(text):
+        matches["recreational"] = 1
     for category, keywords in _KEYWORDS.items():
         hits = sum(1 for kw in keywords if kw in text)
         if hits:
-            matches[category] = hits
+            matches[category] = matches.get(category, 0) + hits
 
     if not matches:
         return None
