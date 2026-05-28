@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime
+import math
 from pathlib import Path
 from typing import Any
 
@@ -273,3 +275,75 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
 
     con.close()
     return result
+
+
+def nearby_applications(
+    lat: float,
+    lon: float,
+    enriched_path: Path,
+    *,
+    radius_m: float = 500.0,
+    years: int = 5,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Return development applications within radius_m of (lat, lon).
+
+    Reads the enriched dev_applications parquet (which has lat/lon from spatial
+    enrichment). Uses a bounding-box pre-filter then computes planar distance
+    in metres for sorting and final filtering (same approximation as comps.py).
+
+    Returns at most `limit` records sorted by ascending distance, from the
+    last `years` years. Returns [] when enriched_path does not exist.
+    """
+    if not enriched_path.exists():
+        return []
+
+    year_cutoff = datetime.date.today().year - years
+    lat_delta = radius_m / 111_111.0
+    lon_delta = radius_m / (111_111.0 * math.cos(math.radians(lat)))
+    lat_min, lat_max = lat - lat_delta, lat + lat_delta
+    lon_min, lon_max = lon - lon_delta, lon + lon_delta
+
+    escaped = str(enriched_path).replace("'", "''")
+    distance_m_expr = (
+        f"sqrt(power((lat - {lat}) * 111111.0, 2)"
+        f" + power((lon - {lon}) * 111111.0 * cos(radians({lat})), 2))"
+    )
+
+    con = duckdb.connect()
+    try:
+        existing_cols: set[str] = set(
+            con.execute(f"DESCRIBE SELECT * FROM read_parquet('{escaped}') LIMIT 0")
+            .pl()["column_name"]
+            .to_list()
+        )
+        is_active_expr = (
+            "CAST(is_active AS BOOLEAN)"
+            if "is_active" in existing_cols
+            else "CAST(NULL AS BOOLEAN)"
+        )
+        sql = f"""
+            SELECT
+                CAST(folderrsn AS VARCHAR) AS folderrsn,
+                application_type,
+                status,
+                COALESCE(CAST(street_num AS VARCHAR), '') || ' ' ||
+                    COALESCE(street_name, '') AS street_address,
+                date_submitted,
+                description,
+                {is_active_expr} AS is_active,
+                {distance_m_expr} AS distance_m
+            FROM read_parquet('{escaped}')
+            WHERE lat IS NOT NULL
+              AND lon IS NOT NULL
+              AND year_submitted IS NOT NULL
+              AND year_submitted >= {year_cutoff}
+              AND lat BETWEEN {lat_min} AND {lat_max}
+              AND lon BETWEEN {lon_min} AND {lon_max}
+              AND {distance_m_expr} <= {radius_m}
+            ORDER BY distance_m ASC
+            LIMIT {limit}
+        """
+        return con.execute(sql).pl().to_dicts()
+    finally:
+        con.close()

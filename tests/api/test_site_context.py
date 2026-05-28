@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from zoneto.api.app import create_app
-from zoneto.api.site_context import lookup_site_context
+from zoneto.api.site_context import lookup_site_context, nearby_applications
 
 # --- fixtures ---
 
@@ -499,3 +500,158 @@ def test_site_context_endpoint_exposes_new_zoning_keys(
         "zoning_max_height_m",
     ):
         assert key in body, f"Missing key {key} in /site-context response"
+
+
+# --- nearby_applications tests ---
+
+
+@pytest.fixture
+def nearby_enriched_parquet(tmp_path: Path) -> Path:
+    """Enriched parquet with known spatial distribution for nearby_applications tests.
+
+    Centre point: (43.650, -79.380)
+    N1 (active, recent, 50m away): (43.6504, -79.380)   -- ~44m north
+    N2 (closed, recent, 100m away): (43.651, -79.380)   -- ~111m north
+    N3 (active, recent, 1km away): (43.659, -79.380)    -- ~1000m north
+    N4 (active, old, 50m away): (43.6504, -79.380)      -- same location, 10yr old
+    """
+    current_year = datetime.date.today().year
+    path = tmp_path / "enriched" / "dev_applications.parquet"
+    path.parent.mkdir(parents=True)
+    df = pl.DataFrame(
+        {
+            "folderrsn": ["N1", "N2", "N3", "N4"],
+            "application_type": ["OZ", "SA", "OZ", "OZ"],
+            "status": ["Under Review", "Closed", "Under Review", "Under Review"],
+            "street_num": ["100", "200", "300", "400"],
+            "street_name": ["King St", "Queen St", "Bloor St", "Bay St"],
+            "date_submitted": [
+                f"{current_year - 1}-06-01T00:00:00",
+                f"{current_year - 1}-06-01T00:00:00",
+                f"{current_year - 1}-06-01T00:00:00",
+                f"{current_year - 10}-06-01T00:00:00",
+            ],
+            "year_submitted": pl.Series(
+                [
+                    current_year - 1,
+                    current_year - 1,
+                    current_year - 1,
+                    current_year - 10,
+                ],
+                dtype=pl.Int32,
+            ),
+            "lat": [43.6504, 43.651, 43.659, 43.6504],
+            "lon": [-79.380, -79.380, -79.380, -79.380],
+            "is_active": pl.Series([1, 0, 1, 1], dtype=pl.Int8),
+            "description": ["OZ desc", "SA desc", "OZ north", "OZ old"],
+        }
+    )
+    df.write_parquet(path)
+    return path
+
+
+def test_nearby_applications_returns_within_radius(
+    nearby_enriched_parquet: Path,
+) -> None:
+    """Given: enriched parquet with rows at known distances from centre.
+    When: nearby_applications called with 500m radius.
+    Then: rows within 500m are returned; the 1km-away row is excluded."""
+    results = nearby_applications(
+        43.650, -79.380, nearby_enriched_parquet, radius_m=500.0, years=10
+    )
+    rsns = {r["folderrsn"] for r in results}
+    assert "N1" in rsns
+    assert "N2" in rsns
+    assert "N3" not in rsns  # ~1000m away
+
+
+def test_nearby_applications_excludes_old_rows(nearby_enriched_parquet: Path) -> None:
+    """Given: enriched parquet with a 10-year-old row near the centre.
+    When: nearby_applications called with years=5.
+    Then: the old row is excluded."""
+    results = nearby_applications(
+        43.650, -79.380, nearby_enriched_parquet, radius_m=500.0, years=5
+    )
+    rsns = {r["folderrsn"] for r in results}
+    assert "N4" not in rsns
+
+
+def test_nearby_applications_distance_m_is_correct(
+    nearby_enriched_parquet: Path,
+) -> None:
+    """Given: N1 is at (43.6504, -79.380), centre at (43.650, -79.380).
+    When: nearby_applications called.
+    Then: distance_m for N1 is approximately 44m (0.0004 deg * 111111)."""
+    results = nearby_applications(
+        43.650, -79.380, nearby_enriched_parquet, radius_m=500.0, years=10
+    )
+    n1 = next(r for r in results if r["folderrsn"] == "N1")
+    expected_m = 0.0004 * 111_111.0
+    assert n1["distance_m"] == pytest.approx(expected_m, abs=5.0)
+
+
+def test_nearby_applications_sorted_by_distance(nearby_enriched_parquet: Path) -> None:
+    """Given: N1 (~44m) and N2 (~111m) both within radius.
+    When: nearby_applications called.
+    Then: N1 comes before N2 in results."""
+    results = nearby_applications(
+        43.650, -79.380, nearby_enriched_parquet, radius_m=500.0, years=10
+    )
+    rsns = [r["folderrsn"] for r in results]
+    assert rsns.index("N1") < rsns.index("N2")
+
+
+def test_nearby_applications_is_active_flag(nearby_enriched_parquet: Path) -> None:
+    """Given: N1 is active (is_active=1), N2 is closed (is_active=0).
+    When: nearby_applications called.
+    Then: is_active flag is correctly surfaced."""
+    results = nearby_applications(
+        43.650, -79.380, nearby_enriched_parquet, radius_m=500.0, years=10
+    )
+    by_rsn = {r["folderrsn"]: r for r in results}
+    assert by_rsn["N1"]["is_active"] is True
+    assert by_rsn["N2"]["is_active"] is False
+
+
+def test_nearby_applications_missing_file_returns_empty(tmp_path: Path) -> None:
+    """Given: enriched parquet does not exist.
+    When: nearby_applications called.
+    Then: returns empty list without error."""
+    results = nearby_applications(
+        43.650, -79.380, tmp_path / "enriched" / "dev_applications.parquet"
+    )
+    assert results == []
+
+
+def test_nearby_applications_limit_respected(nearby_enriched_parquet: Path) -> None:
+    """Given: multiple rows within radius.
+    When: nearby_applications called with limit=1.
+    Then: at most 1 result returned."""
+    results = nearby_applications(
+        43.650, -79.380, nearby_enriched_parquet, radius_m=500.0, years=10, limit=1
+    )
+    assert len(results) <= 1
+
+
+def test_nearby_applications_returns_expected_fields(
+    nearby_enriched_parquet: Path,
+) -> None:
+    """Given: nearby row exists.
+    When: nearby_applications called.
+    Then: result contains required fields."""
+    results = nearby_applications(
+        43.650, -79.380, nearby_enriched_parquet, radius_m=500.0, years=10
+    )
+    assert results
+    row = results[0]
+    for field in (
+        "folderrsn",
+        "application_type",
+        "status",
+        "street_address",
+        "date_submitted",
+        "description",
+        "is_active",
+        "distance_m",
+    ):
+        assert field in row, f"Missing field: {field}"

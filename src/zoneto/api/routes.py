@@ -22,7 +22,7 @@ from zoneto.api.desc_similarity import (
     score_description_similarity_bert,
 )
 from zoneto.api.narrator import narrate_evaluation, narrate_question
-from zoneto.api.site_context import lookup_site_context
+from zoneto.api.site_context import lookup_site_context, nearby_applications
 
 router = APIRouter()
 
@@ -252,6 +252,17 @@ def score(request: Request, body: ScoreRequest, explain: bool = False) -> ScoreR
 # --- evaluate / ask ---
 
 
+class NearbyApplication(BaseModel):
+    folderrsn: str | None = None
+    application_type: str | None = None
+    status: str | None = None
+    street_address: str | None = None
+    date_submitted: str | None = None
+    description: str | None = None
+    is_active: bool | None = None
+    distance_m: float | None = None
+
+
 class ViolationResult(BaseModel):
     rule_id: str
     section_ref: str
@@ -287,6 +298,7 @@ class EvaluateResponse(BaseModel):
     data_gaps: list[str] = []
     description_similarity: dict[str, Any] | None = None
     community_benefits_context: dict[str, Any] | None = None
+    nearby_active_applications: list[NearbyApplication] = []
 
 
 class AskRequest(BaseModel):
@@ -475,6 +487,8 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
 
     data_gaps = _compute_data_gaps(site, extracted)
     cb_context = _community_benefits_context(data_dir=data_dir)
+    enriched_path = data_dir / "enriched" / "dev_applications.parquet"
+    nearby = nearby_applications(lat, lon, enriched_path, radius_m=500.0, years=5)
     model_dir: Path = getattr(request.app.state, "model_dir", Path("models"))
     bert_model = getattr(request.app.state, "bert_model", None)
 
@@ -548,6 +562,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         data_gaps=data_gaps,
         description_similarity=desc_sim,
         community_benefits_context=cb_context,
+        nearby_active_applications=[NearbyApplication(**r) for r in nearby],
     )
 
 

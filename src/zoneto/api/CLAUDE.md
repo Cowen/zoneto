@@ -6,7 +6,11 @@ BERT: if `desc_bert_embeddings.npy` exists, loads `SentenceTransformer("BAAI/bge
 
 ## Site Context (`site_context.py`)
 
+_Last verified: 2026-05-27_
+
 Spatial point-in-polygon against zoning, heritage, secondary-plan, MTSA via DuckDB `ST_Read`. **Zoning fallback:** `ST_Within` miss (off-parcel geocodes) → retries `ST_DWithin(point, geom, 0.002)` (~200m) nearest-first. Heritage/secondary-plan/MTSA remain strict `ST_Within` — those flags must not bleed across boundaries.
+
+`nearby_applications(lat, lon, enriched_path, *, radius_m=500, years=5, limit=20)` — queries `data/enriched/dev_applications.parquet` for applications within `radius_m` metres using a bounding-box pre-filter and planar distance. Returns `[]` when enriched_path absent (graceful). `is_active` column treated as optional (NULL when absent). Results sorted ascending by `distance_m`. Fields: `folderrsn, application_type, status, street_address, date_submitted, description, is_active, distance_m`.
 
 ## Description Similarity (`desc_similarity.py`)
 
@@ -26,6 +30,8 @@ Cross-zone: outcome line suppressed when best comparable's zone ≠ site zone �
 
 ## Evaluate Endpoint (`routes.py`)
 
-`POST /evaluate` — geocode → site context → feature extraction → rule check → bylaw retrieval → description similarity → narration. BERT scorer used when `app.state.bert_model` set; otherwise TF-IDF+SVD. Response schema: `EvaluateResponse` in `routes.py`.
+`POST /evaluate` — geocode → site context → feature extraction → rule check → bylaw retrieval → description similarity → narration → nearby applications. BERT scorer used when `app.state.bert_model` set; otherwise TF-IDF+SVD. Response schema: `EvaluateResponse` in `routes.py`.
 
 `_compute_data_gaps()` adds height-overlay caveat (when `zoning_max_storeys` and `zoning_max_height_m` both None and zone is known) and building-type caveat (when `building_type` is None). Same list passed to narrator and returned in response.
+
+`EvaluateResponse.nearby_active_applications` — list of `NearbyApplication` (see `routes.py`) within 500m of the geocoded point, last 5 years, from enriched dev_applications. Empty list when enriched data absent. **Source is dev_applications only** (OZ/SA/CD/SB/PL); COA not included until `aic_applications` is fetched via `just aic --full` and integrated.

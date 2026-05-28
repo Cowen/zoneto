@@ -104,15 +104,28 @@ _NEGATION_RE = re.compile(
 # Permitted GEN_ZONE categories (strings produced by site_context._map_gen_zone)
 # mapped to the set of proposed-use buckets that are allowed as-of-right.
 _ZONE_ALLOWED: dict[str, frozenset[str]] = {
-    "Residential": frozenset({"residential", "mixed_use", "recreational", "institutional"}),
-    "Residential Apartment": frozenset({"residential", "mixed_use", "recreational", "institutional"}),
+    "Residential": frozenset(
+        {"residential", "mixed_use", "recreational", "institutional"}
+    ),
+    "Residential Apartment": frozenset(
+        {"residential", "mixed_use", "recreational", "institutional"}
+    ),
     "Commercial Residential (mixed)": frozenset(
         {"residential", "commercial", "mixed_use", "recreational", "institutional"}
     ),
     "Commercial Residential Employment (mixed)": frozenset(
-        {"residential", "commercial", "employment", "mixed_use", "recreational", "institutional"}
+        {
+            "residential",
+            "commercial",
+            "employment",
+            "mixed_use",
+            "recreational",
+            "institutional",
+        }
     ),
-    "Commercial": frozenset({"commercial", "mixed_use", "recreational", "institutional"}),
+    "Commercial": frozenset(
+        {"commercial", "mixed_use", "recreational", "institutional"}
+    ),
     "Employment Industrial": frozenset({"employment", "recreational"}),
     "Institutional": frozenset({"institutional", "recreational"}),
     "Open Space": frozenset({"recreational"}),
