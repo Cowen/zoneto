@@ -1144,6 +1144,78 @@ class TestApplyConfidenceOverrides:
         assert score >= 55
 
 
+class TestNarrateEvaluationDescription:
+    def _minimal_site(self) -> dict:
+        return {
+            "zoning_class": "RM",
+            "permitted_use_category": "Residential",
+            "zoning_max_storeys": None,
+            "zoning_max_height_m": None,
+            "zoning_max_units": None,
+            "zoning_max_density": None,
+            "in_heritage_register": 0,
+            "in_heritage_district": 0,
+            "in_mtsa": 0,
+            "in_secondary_plan": 0,
+            "secondary_plan_name": None,
+            "zoning_holding": 0,
+        }
+
+    def test_raw_description_appears_in_narrator_prompt(self) -> None:
+        """Given: narrate_evaluation called with a rich description.
+        When: LLM user message is assembled.
+        Then: The full description text appears verbatim so the LLM can reason
+        about details (parking, laneway access, accessibility) that feature
+        extraction does not capture."""
+        client = CapturingFakeLLMClient("Summary.\n\nCONFIDENCE: 60")
+        extracted = ProjectFeatures(4, 16, "residential", False, building_type="apartment")
+        description = (
+            "To construct a new four-storey 16-unit apartment building with a "
+            "front porch with stairs, a side (west) pedestrian ramp, and rear "
+            "and side (east) second, third and fourth storey balconies. Also, "
+            "to construct a new side (east) one-storey detached ancillary building "
+            "(garbage bin storage and mechanical room). There will be a total of "
+            "12 vehicular parking spaces and 13 long-term bicycle parking spaces "
+            "provided within a one-level below-grade garage with rear (south) "
+            "access from the laneway."
+        )
+        narrate_evaluation(
+            self._minimal_site(),
+            extracted,
+            [],
+            [],
+            client,
+            description=description,
+        )
+        user_content = client.last_messages[0]["content"]
+        assert "12 vehicular parking spaces" in user_content
+        assert "pedestrian ramp" in user_content
+        assert "laneway" in user_content
+
+    def test_no_description_kwarg_still_works(self) -> None:
+        """Given: narrate_evaluation called without description kwarg.
+        When: Called.
+        Then: Backward compatible — no error, normal return."""
+        client = FakeLLMClient("Backward compat.\n\nCONFIDENCE: 70")
+        extracted = ProjectFeatures(None, None, "residential", False)
+        summary, score = narrate_evaluation(
+            self._minimal_site(), extracted, [], [], client
+        )
+        assert score == 70
+
+    def test_none_description_does_not_inject_section(self) -> None:
+        """Given: narrate_evaluation called with description=None.
+        When: LLM user message assembled.
+        Then: No '## Project description' section appears (nothing to show)."""
+        client = CapturingFakeLLMClient("Summary.\n\nCONFIDENCE: 70")
+        extracted = ProjectFeatures(None, None, "residential", False)
+        narrate_evaluation(
+            self._minimal_site(), extracted, [], [], client, description=None
+        )
+        user_content = client.last_messages[0]["content"]
+        assert "## Project description" not in user_content
+
+
 class TestFormatSiteUseCompatibility:
     def _site(self, permitted_use_category: str) -> dict:
         return {

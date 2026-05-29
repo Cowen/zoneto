@@ -411,9 +411,10 @@ def _retrieve_chunks(
 
     # 0. Direct exception lookup — guarantees the exact exception schedule
     # surfaces first when the site has a known exception number. Score=1.0.
+    # Capped at 2 so exception text doesn't crowd out zone/description chunks.
     exception_chunks: list[Chunk] = []
     if exception_no and zones:
-        exception_chunks = bylaw_index.lookup_exception(zones[0], exception_no)
+        exception_chunks = bylaw_index.lookup_exception(zones[0], exception_no)[:2]
 
     # 1. Zone-specific query — anchors context to the site's zone chapter.
     zone_query = (
@@ -519,6 +520,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         violations,
         chunks,
         llm_client,
+        description=body.description,
         data_gaps=data_gaps,
         description_similarity=desc_sim,
         community_benefits=cb_context,

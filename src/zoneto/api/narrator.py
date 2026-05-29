@@ -451,6 +451,7 @@ def narrate_evaluation(
     chunks: list[Chunk],
     llm_client: LLMClient,
     *,
+    description: str | None = None,
     data_gaps: list[str] | None = None,
     description_similarity: dict[str, Any] | None = None,
     community_benefits: dict[str, Any] | None = None,
@@ -471,12 +472,15 @@ def narrate_evaluation(
         description_similarity, site_zoning_class=site_zone
     )
     cb_section = _format_community_benefits(community_benefits)
+    desc_section = (
+        f"\n## Project description\n{description}" if description else ""
+    )
     user_content = f"""\
 ## Site context
 {_format_site(site, proposed_use=extracted.proposed_use)}
 
 ## Extracted project features
-{_format_extracted(extracted)}
+{_format_extracted(extracted)}{desc_section}
 
 ## Compliance violations (authoritative — do not contradict)
 {_format_violations(violations)}
