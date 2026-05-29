@@ -1,3 +1,5 @@
+set dotenv-load
+
 default:
 	@just --list
 
@@ -46,23 +48,8 @@ serve:
 
 # Evaluate an address + project description against zoning rules
 # Usage: just evaluate "123 Main St, Toronto" "12-storey mixed-use with 200 units"
-[script('python3')]
 evaluate address description:
-    import json, urllib.request, sys
-    address = """{{address}}"""
-    description = """{{description}}"""
-    body = json.dumps({"address": address, "description": description}).encode()
-    req = urllib.request.Request(
-        "http://localhost:8000/evaluate",
-        data=body,
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        resp = urllib.request.urlopen(req)
-        print(json.dumps(json.loads(resp.read()), indent=2))
-    except urllib.error.HTTPError as e:
-        print(f"HTTP {e.code}: {e.read().decode()}", file=sys.stderr)
-        sys.exit(1)
+    uv run zoneto evaluate "{{address}}" "{{description}}" | jq .
 
 # Build the Docker image for the serving layer
 # Run `just bylaw-index` first to bake the bylaw index into the image.

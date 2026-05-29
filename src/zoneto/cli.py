@@ -490,3 +490,159 @@ def serve(
             data_dir=data_dir, model_dir=model_dir, static_dir=static_dir
         )
         uvicorn.run(application, host=host, port=port)
+
+
+@app.command()
+def evaluate(
+    address: Annotated[str, typer.Argument(help="Street address to evaluate.")],
+    description: Annotated[str, typer.Argument(help="Project description.")],
+    data_dir: Annotated[
+        Path,
+        typer.Option(help="Data directory."),
+    ] = DATA_DIR,
+    model_dir: Annotated[
+        Path,
+        typer.Option(help="Model directory."),
+    ] = Path("models"),
+) -> None:
+    """Evaluate a project description against zoning rules for an address."""
+    import json
+    import os
+
+    from fastapi import HTTPException
+
+    from zoneto.analytics.compliance import check_compliance
+    from zoneto.analytics.extract import extract_project_features
+    from zoneto.api.desc_similarity import (
+        score_description_similarity,
+        score_description_similarity_bert,
+    )
+    from zoneto.api.narrator import narrate_evaluation
+    from zoneto.api.routes import (
+        _community_benefits_context,
+        _compute_data_gaps,
+        _geocode_address,
+        _retrieve_chunks,
+    )
+    from zoneto.api.site_context import lookup_site_context, nearby_applications
+
+    ref_dir = data_dir / "reference"
+
+    try:
+        lat, lon = _geocode_address(address)
+    except HTTPException as exc:
+        console.print(f"[red]✗ Geocoding failed: {exc.detail}[/red]")
+        raise typer.Exit(code=1)
+
+    bylaw_index = None
+    bylaw_index_dir = data_dir / "bylaw_index"
+    if (bylaw_index_dir / "chunks.parquet").exists():
+        bylaw_index = BylawIndex(bylaw_index_dir)
+
+    bert_model = None
+    bert_embeddings_path = data_dir / "enriched" / "desc_bert_embeddings.npy"
+    if bert_embeddings_path.exists():
+        if bylaw_index is not None:
+            bert_model = bylaw_index.model
+        else:
+            from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+
+            bert_model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+
+    llm_client = None
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        from zoneto.api.llm_client import make_llm_client  # noqa: PLC0415
+
+        llm_client = make_llm_client()
+
+    if llm_client is None:
+        console.print("[red]✗ ANTHROPIC_API_KEY not set[/red]")
+        raise typer.Exit(code=1)
+
+    site = lookup_site_context(lat, lon, ref_dir)
+    extracted = extract_project_features(description)
+    violations = check_compliance(extracted, site)
+
+    chunks = []
+    if bylaw_index is not None:
+        chunks = _retrieve_chunks(bylaw_index, site, description, extracted.proposed_use, k=6)
+
+    data_gaps = _compute_data_gaps(site, extracted)
+    cb_context = _community_benefits_context(data_dir=data_dir)
+    enriched_path = data_dir / "enriched" / "dev_applications.parquet"
+    nearby = nearby_applications(lat, lon, enriched_path, radius_m=500.0, years=5)
+
+    if bert_model is not None:
+        desc_sim = score_description_similarity_bert(
+            description,
+            data_dir=data_dir,
+            model=bert_model,
+            zoning_class=site.get("zoning_class"),
+            lat=lat,
+            lon=lon,
+            min_dist_m=300.0,
+        )
+    else:
+        desc_sim = score_description_similarity(
+            description,
+            data_dir=data_dir,
+            model_dir=model_dir,
+            zoning_class=site.get("zoning_class"),
+            lat=lat,
+            lon=lon,
+            min_dist_m=300.0,
+        )
+
+    summary_md, confidence_score = narrate_evaluation(
+        site,
+        extracted,
+        violations,
+        chunks,
+        llm_client,
+        data_gaps=data_gaps,
+        description_similarity=desc_sim,
+        community_benefits=cb_context,
+    )
+
+    result: dict[str, object] = {
+        "lat": lat,
+        "lon": lon,
+        "site_context": site,
+        "extracted": {
+            "proposed_storeys": extracted.proposed_storeys,
+            "proposed_units": extracted.proposed_units,
+            "proposed_use": extracted.proposed_use,
+            "has_ground_floor_retail": extracted.has_ground_floor_retail,
+            "building_type": extracted.building_type,
+        },
+        "violations": [
+            {
+                "rule_id": v.rule_id,
+                "section_ref": v.section_ref,
+                "observed": v.observed,
+                "allowed": v.allowed,
+                "severity": v.severity.value,
+                "suggested_remedy": v.suggested_remedy,
+            }
+            for v in violations
+        ],
+        "relevant_sections": [
+            {
+                "section_number": c.section_number,
+                "section_title": c.section_title,
+                "source_file": c.source_file,
+                "excerpt": c.text[:400],
+                "score": round(c.score, 4),
+            }
+            for c in chunks
+        ],
+        "summary_md": summary_md,
+        "confidence_score": confidence_score,
+        "suggestions": [v.suggested_remedy for v in violations if v.suggested_remedy],
+        "data_gaps": data_gaps,
+        "description_similarity": desc_sim,
+        "community_benefits_context": cb_context,
+        "nearby_active_applications": nearby,
+    }
+
+    print(json.dumps(result, indent=2, default=str))
