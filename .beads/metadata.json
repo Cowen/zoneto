@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "zoneto",
-  "project_id": "976dbc5c-9ec7-4d78-9e11-a35e5e2f7c74"
-}
