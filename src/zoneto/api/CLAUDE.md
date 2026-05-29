@@ -20,6 +20,10 @@ BERT scorer preferred; TF-IDF+SVD fallback. Both accept `zoning_class` for zone-
 
 ## Narrator (`narrator.py`)
 
+_Last verified: 2026-05-29_
+
+`narrate_evaluation(..., description=None)` — when `description` is provided, injects a `## Project description` section (raw proposal text verbatim) right after `## Extracted project features`. Lets the LLM reason about details regex extraction misses (parking, laneway access, accessibility).
+
 Confidence: Step 1 extreme violation check (≥3× limit → cap 10–30); Step 2 base band (70–80 no violations + compatible use, 55–65 mismatched, 35–55 moderate); Step 3 ±8 (MTSA/exception up; high appeal/heritage down).
 
 **Deterministic overrides (applied after LLM parse):**
@@ -30,7 +34,9 @@ Cross-zone: outcome line suppressed when best comparable's zone ≠ site zone �
 
 ## Evaluate Endpoint (`routes.py`)
 
-`POST /evaluate` — geocode → site context → feature extraction → rule check → bylaw retrieval → description similarity → narration → nearby applications. BERT scorer used when `app.state.bert_model` set; otherwise TF-IDF+SVD. Response schema: `EvaluateResponse` in `routes.py`.
+`POST /evaluate` — geocode → site context → feature extraction → rule check → bylaw retrieval → description similarity → narration → nearby applications. BERT scorer used when `app.state.bert_model` set; otherwise TF-IDF+SVD. Response schema: `EvaluateResponse` in `routes.py`. Passes `description=body.description` to the narrator so raw proposal text reaches the LLM.
+
+`_retrieve_chunks()` merges exception → zone → description chunks. `exception_chunks` capped at `[:2]` so site-specific exception text doesn't crowd out zone and description-based bylaw sections.
 
 `_compute_data_gaps()` adds height-overlay caveat (when `zoning_max_storeys` and `zoning_max_height_m` both None and zone is known) and building-type caveat (when `building_type` is None). Same list passed to narrator and returned in response.
 
