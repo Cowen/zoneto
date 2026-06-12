@@ -1,0 +1,107 @@
+[
+  {
+    "id": "r-zone-height",
+    "query": "maximum height for a house in the residential R zone",
+    "zones": ["R"],
+    "expected_sections": ["10.10.40.10", "10.5.40.10"],
+    "note": "Core height limit for R zone detached/semi-detached houses"
+  },
+  {
+    "id": "rd-zone-height",
+    "query": "height limit for detached house in RD zone",
+    "zones": ["RD"],
+    "expected_sections": ["10.20.40.10", "10.5.40.10"],
+    "note": "Core height limit for RD zone"
+  },
+  {
+    "id": "ra-zone-height",
+    "query": "how tall can a residential apartment building be in the RA zone",
+    "zones": ["RA"],
+    "expected_sections": ["15.10.40.10", "15.5.40.10"],
+    "note": "Height regulation for RA apartment zone"
+  },
+  {
+    "id": "height-exemptions-existing-building",
+    "query": "height exemption lawfully existing building greater than permitted maximum",
+    "zones": null,
+    "expected_sections": ["10.5.40.11", "15.5.40.11", "10.10.40.11"],
+    "note": "Height grandfathering for existing buildings that exceed the zone limit"
+  },
+  {
+    "id": "cr-zone-permitted-uses",
+    "query": "permitted uses in commercial residential CR zone retail residential",
+    "zones": ["CR"],
+    "expected_sections": ["40.10.20.10", "40.10.20.20"],
+    "note": "What uses are allowed in a CR zone (key for mixed-use OZ applications)"
+  },
+  {
+    "id": "ra-zone-setbacks",
+    "query": "rear yard front yard setback requirements for apartment building",
+    "zones": ["RA"],
+    "expected_sections": ["15.10.40.70", "15.5.40.71", "15.5.40.70"],
+    "note": "Setback rules for apartment buildings"
+  },
+  {
+    "id": "cr-zone-floor-area",
+    "query": "floor space index FSI maximum permitted CR zone zone label",
+    "zones": ["CR"],
+    "expected_sections": ["40.10.40.40", "40.5.40.40", "40.10.40.41"],
+    "note": "FSI/floor area limits encoded in CR zone label (e.g. CR 3.0)"
+  },
+  {
+    "id": "laneway-suite-height",
+    "query": "maximum height for a laneway suite",
+    "zones": null,
+    "expected_sections": ["150.8.60.40"],
+    "note": "Specific use regulations for laneway suite height"
+  },
+  {
+    "id": "secondary-suite-floor-area",
+    "query": "maximum floor area for secondary suite basement apartment",
+    "zones": null,
+    "expected_sections": ["150.10.40.40"],
+    "note": "Secondary suite floor area restrictions"
+  },
+  {
+    "id": "garden-suite-setbacks",
+    "query": "garden suite setback from rear lot line and main building",
+    "zones": null,
+    "expected_sections": ["150.7.60.20"],
+    "note": "Garden suite setback rules at the rear of a lot"
+  },
+  {
+    "id": "short-term-rental",
+    "query": "short-term rental Airbnb permitted principal residence",
+    "zones": null,
+    "expected_sections": ["150.13.1", "150.13.20.1"],
+    "note": "Short-term rental rules (principal residence requirement)"
+  },
+  {
+    "id": "parking-location",
+    "query": "required parking spaces must be on same lot as use residential zone",
+    "zones": null,
+    "expected_sections": ["10.5.80.10", "15.5.80.10", "10.10.80.40"],
+    "note": "Parking must be on the same lot as the use it serves"
+  },
+  {
+    "id": "townhouse-lot-coverage",
+    "query": "maximum lot coverage for townhouse rowhouse RT zone",
+    "zones": ["RT"],
+    "expected_sections": ["10.60.30.40", "10.5.30.40"],
+    "note": "Lot coverage limit for RT (townhouse) zone"
+  },
+  {
+    "id": "apartment-separation",
+    "query": "minimum separation distance between apartment buildings on the same lot",
+    "zones": ["RA"],
+    "expected_sections": ["15.10.40.80", "15.5.40.81", "15.5.150.1"],
+    "note": "Separation requirements between multiple buildings on a site"
+  },
+  {
+    "id": "rm-lot-area",
+    "query": "minimum lot area for RM multiple residential zone",
+    "zones": ["RM"],
+    "expected_sections": ["10.80.30.10", "10.5.30.1"],
+    "note": "Lot area requirement for RM zone (multiple residential)"
+  }
+]

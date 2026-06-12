@@ -26,6 +26,10 @@ olt:
 bylaw-index:
     uv run zoneto bylaw-index
 
+# Evaluate bylaw retrieval quality (recall@3 and recall@5 against labelled queries)
+bylaw-eval:
+    uv run python scripts/bylaw_eval.py
+
 # Enrich data
 enrich:
     uv run zoneto enrich
