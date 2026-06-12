@@ -565,7 +565,9 @@ def evaluate(
 
     chunks = []
     if bylaw_index is not None:
-        chunks = _retrieve_chunks(bylaw_index, site, description, extracted.proposed_use, k=6)
+        chunks = _retrieve_chunks(
+            bylaw_index, site, description, extracted.proposed_use, k=6
+        )
 
     data_gaps = _compute_data_gaps(site, extracted)
     cb_context = _community_benefits_context(data_dir=data_dir)

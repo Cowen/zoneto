@@ -1168,7 +1168,9 @@ class TestNarrateEvaluationDescription:
         about details (parking, laneway access, accessibility) that feature
         extraction does not capture."""
         client = CapturingFakeLLMClient("Summary.\n\nCONFIDENCE: 60")
-        extracted = ProjectFeatures(4, 16, "residential", False, building_type="apartment")
+        extracted = ProjectFeatures(
+            4, 16, "residential", False, building_type="apartment"
+        )
         description = (
             "To construct a new four-storey 16-unit apartment building with a "
             "front porch with stairs, a side (west) pedestrian ramp, and rear "

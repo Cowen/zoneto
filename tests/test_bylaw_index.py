@@ -589,7 +589,8 @@ class TestChunkDataclass:
             score=0.0,
             parent_context="Chapter 10 Residential > 10.20.40 Height Requirements",
         )
-        assert chunk.parent_context == "Chapter 10 Residential > 10.20.40 Height Requirements"
+        expected_ctx = "Chapter 10 Residential > 10.20.40 Height Requirements"
+        assert chunk.parent_context == expected_ctx
 
 
 class TestZoneFiltering:
@@ -809,9 +810,8 @@ class TestSubsectionSplitting:
             )
 
     def test_lettered_items_split_oversized_subsection(self) -> None:
-        """Given: A single (1) subsection that itself exceeds 1500 chars with (A)-(E) items.
-        When: Splitting.
-        Then: Letter items are used as sub-split boundaries."""
+        """Given: Oversized (1) subsection with (A)-(E) items.
+        When: Splitting. Then: Letter items are used as sub-split boundaries."""
         item = "Detailed lettered provision text. " * 20  # ~680 chars
         body = (
             "  (1) General Provisions.\n"
@@ -834,7 +834,7 @@ class TestSubsectionSplitting:
         """Given: A long section with no numbered subsection markers.
         When: Splitting.
         Then: Falls back to paragraph-based splitting."""
-        paragraph = "Plain paragraph text without subsection markers. " * 35  # ~1750 chars
+        paragraph = "Plain paragraph text without subsection markers. " * 35  # long
         text = (
             f"10.10 General Zone R\n\n{paragraph}\n\n{paragraph}\n"
         )
