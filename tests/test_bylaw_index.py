@@ -558,6 +558,39 @@ class TestChunkDataclass:
         assert chunk.score == 0.95
         assert isinstance(chunk.score, float)
 
+    def test_chunk_parent_context_defaults_to_empty_string(self) -> None:
+        """Given: A Chunk created without parent_context.
+        When: Accessing parent_context.
+        Then: Defaults to empty string."""
+        chunk = Chunk(
+            chunk_id=1,
+            chapter="10",
+            section_number="10.10",
+            section_title="Zone R",
+            source_file="test.txt",
+            zones=["R"],
+            text="Residential zone.",
+            score=0.0,
+        )
+        assert chunk.parent_context == ""
+
+    def test_chunk_parent_context_can_be_set(self) -> None:
+        """Given: A Chunk created with an explicit parent_context.
+        When: Accessing parent_context.
+        Then: Returns the provided value."""
+        chunk = Chunk(
+            chunk_id=1,
+            chapter="10",
+            section_number="10.20.40",
+            section_title="Height Requirements",
+            source_file="test.txt",
+            zones=["RM"],
+            text="10.20.40 Height Requirements\n\nThe maximum height is 12 storeys.",
+            score=0.0,
+            parent_context="Chapter 10 Residential > 10.20.40 Height Requirements",
+        )
+        assert chunk.parent_context == "Chapter 10 Residential > 10.20.40 Height Requirements"
+
 
 class TestZoneFiltering:
     """Tests for zone-based filtering in search."""
@@ -597,3 +630,215 @@ class TestZoneFiltering:
             # Both should return results
             assert len(results_with_filter) > 0
             assert len(results_no_filter) > 0
+
+
+class TestParentContext:
+    """Tests for hierarchical context tracking and contextual encoding."""
+
+    def test_chapter_title_propagates_to_section_chunks(self) -> None:
+        """Given: Bylaw text with a Chapter header followed by sections.
+        When: Splitting into chunks.
+        Then: Sections within that chapter carry the chapter title as parent_context."""
+        text = (
+            "Chapter 10 Residential\n\n"
+            "10.20.40 Height Requirements\n\n"
+            "The maximum height of a building in this zone is 12 storeys, "
+            "measured from established grade to the highest point of the roof. "
+            "This limit applies to all principal buildings and structures in "
+            "the zone, except as otherwise permitted under this by-law.\n"
+        )
+        chunks = split_into_chunks(text, source_file="test.txt", chapter="10")
+        height_chunks = [c for c in chunks if "10.20.40" in c.section_number]
+        assert height_chunks, "Expected chunk for section 10.20.40"
+        assert height_chunks[0].parent_context == "Chapter 10 Residential"
+
+    def test_chapter_chunk_itself_has_no_parent_context(self) -> None:
+        """Given: A Chapter header with enough body text to survive the 100-char filter.
+        When: Splitting into chunks.
+        Then: The chapter chunk has empty parent_context (no ancestor above it)."""
+        text = (
+            "Chapter 10 Residential\n\n"
+            "This chapter contains residential zone regulations for all zone "
+            "categories including R, RD, RS, RT, and RM zones, applicable to "
+            "all lands within the City of Toronto that are zoned residential.\n"
+        )
+        chunks = split_into_chunks(text, source_file="test.txt", chapter="10")
+        chapter_chunks = [c for c in chunks if "Residential" in c.section_title]
+        assert chapter_chunks, "Expected a chapter chunk"
+        assert chapter_chunks[0].parent_context == ""
+
+    def test_sections_before_any_chapter_have_empty_parent_context(self) -> None:
+        """Given: Sections appearing before a Chapter header.
+        When: Splitting into chunks.
+        Then: Those sections have empty parent_context."""
+        text = (
+            "1.10 Definitions\n\n"
+            "These definitions apply throughout this by-law and are to be used "
+            "in the interpretation of all provisions, including zone-specific "
+            "standards and general regulations applicable to all properties.\n\n"
+            "Chapter 10 Residential\n\n"
+            "10.10 Zone R\n\n"
+            "Residential zone regulations for low-density housing types including "
+            "detached houses, semi-detached houses, and townhouses.\n"
+        )
+        chunks = split_into_chunks(text, source_file="test.txt", chapter="1")
+        defn_chunks = [c for c in chunks if "1.10" in c.section_number]
+        assert defn_chunks
+        assert defn_chunks[0].parent_context == ""
+
+    def test_sub_chunks_get_breadcrumb_parent_context(self) -> None:
+        """Given: A long section (>1500 chars) under a Chapter.
+        When: Splitting produces sub-chunks.
+        Then: Sub-chunks carry 'Chapter X > section_number title' as parent_context."""
+        long_body = "This is a regulation sentence. " * 60  # ~1860 chars
+        text = (
+            "Chapter 10 Residential\n\n"
+            f"10.20.40 Height Requirements\n\n{long_body}\n\n{long_body}\n"
+        )
+        chunks = split_into_chunks(text, source_file="test.txt", chapter="10")
+        sub_chunks = [c for c in chunks if c.section_number == "10.20.40"]
+        assert len(sub_chunks) >= 2, "Expected multiple sub-chunks from long section"
+        for c in sub_chunks:
+            assert "Chapter 10 Residential" in c.parent_context
+            assert "10.20.40" in c.parent_context
+
+    def test_build_persists_parent_context_column(self) -> None:
+        """Given: Bylaw file with chapter and section.
+        When: BylawIndex.build() is called.
+        Then: chunks.parquet includes a parent_context column."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bylaw_dir = Path(tmpdir) / "bylaw"
+            index_dir = Path(tmpdir) / "index"
+            bylaw_dir.mkdir()
+            index_dir.mkdir()
+
+            sample_text = (
+                "Chapter 10 Residential\n\n"
+                "10.10 Zone R\n\n"
+                "Residential zone. Permitted uses include detached houses, "
+                "semi-detached houses, townhouses, and accessory structures "
+                "subject to the requirements set out in this chapter.\n"
+            )
+            (bylaw_dir / "test.txt").write_text(sample_text)
+
+            with patch("zoneto.analytics.bylaw_index.SentenceTransformer") as mock_st:
+                mock_st.return_value = MockModel()
+                BylawIndex.build(bylaw_dir, index_dir)
+
+            df = pl.read_parquet(index_dir / "chunks.parquet")
+            assert "parent_context" in df.columns
+
+    def test_search_returns_parent_context_from_parquet(self) -> None:
+        """Given: Index built with parent_context in parquet.
+        When: Searching.
+        Then: Returned chunks have parent_context populated."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            chunks_data = {
+                "chunk_id": [0],
+                "chapter": ["10"],
+                "section_number": ["10.20.40"],
+                "section_title": ["Height Requirements"],
+                "source_file": ["part1.txt"],
+                "zones": [["RM"]],
+                "text": ["10.20.40 Height Requirements\n\nMax 12 storeys."],
+                "parent_context": ["Chapter 10 Residential"],
+            }
+            pl.DataFrame(chunks_data).write_parquet(index_dir / "chunks.parquet")
+            model = MockModel()
+            np.save(index_dir / "embeddings.npy", model.encode(chunks_data["text"]))
+
+            with patch("zoneto.analytics.bylaw_index.SentenceTransformer") as m:
+                m.return_value = MockModel()
+                index = BylawIndex(index_dir)
+
+            results = index.search("height", k=1)
+            assert results[0].parent_context == "Chapter 10 Residential"
+
+    def test_search_gracefully_handles_missing_parent_context_column(self) -> None:
+        """Given: Old-format parquet without parent_context column.
+        When: Searching.
+        Then: Returns chunks with empty parent_context (backward-compatible)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_dir = Path(tmpdir)
+            chunks_data = {
+                "chunk_id": [0],
+                "chapter": ["10"],
+                "section_number": ["10.10"],
+                "section_title": ["Zone R"],
+                "source_file": ["part1.txt"],
+                "zones": [["R"]],
+                "text": ["Residential zone regulations."],
+            }
+            pl.DataFrame(chunks_data).write_parquet(index_dir / "chunks.parquet")
+            model = MockModel()
+            np.save(index_dir / "embeddings.npy", model.encode(chunks_data["text"]))
+
+            with patch("zoneto.analytics.bylaw_index.SentenceTransformer") as m:
+                m.return_value = MockModel()
+                index = BylawIndex(index_dir)
+
+            results = index.search("residential", k=1)
+            assert results[0].parent_context == ""
+
+
+class TestSubsectionSplitting:
+    """Tests for subsection-aware and paragraph splitting."""
+
+    def test_numbered_subsections_split_at_boundaries(self) -> None:
+        """Given: A long section body with indented (1), (2), (3) subsections.
+        When: The combined body exceeds 1500 chars.
+        Then: Chunks are split at subsection boundaries, not mid-subsection."""
+        # Each subsection ~700 chars — three together exceed 1500
+        sub = "Detailed rule content here. " * 25  # ~700 chars
+        body = (
+            f"  (1) Permitted Uses.\n      {sub}\n\n"
+            f"  (2) Height Limits.\n      {sub}\n\n"
+            f"  (3) Setback Rules.\n      {sub}\n"
+        )
+        text = f"10.20.40 Development Standards\n\n{body}"
+        chunks = split_into_chunks(text, source_file="test.txt", chapter="10")
+
+        assert len(chunks) >= 2
+        # Subsections 1 and 3 (furthest apart) should not appear in the same chunk
+        for chunk in chunks:
+            has_sub1 = "Permitted Uses" in chunk.text
+            has_sub3 = "Setback Rules" in chunk.text
+            assert not (has_sub1 and has_sub3), (
+                "Subsections 1 and 3 should be in separate chunks"
+            )
+
+    def test_lettered_items_split_oversized_subsection(self) -> None:
+        """Given: A single (1) subsection that itself exceeds 1500 chars with (A)-(E) items.
+        When: Splitting.
+        Then: Letter items are used as sub-split boundaries."""
+        item = "Detailed lettered provision text. " * 20  # ~680 chars
+        body = (
+            "  (1) General Provisions.\n"
+            f"      (A) First provision. {item}\n\n"
+            f"      (B) Second provision. {item}\n\n"
+            f"      (C) Third provision. {item}\n"
+        )
+        text = f"10.20.40 General Standards\n\n{body}"
+        chunks = split_into_chunks(text, source_file="test.txt", chapter="10")
+
+        assert len(chunks) >= 2
+        for chunk in chunks:
+            has_a = "First provision" in chunk.text
+            has_c = "Third provision" in chunk.text
+            assert not (has_a and has_c), (
+                "Lettered items A and C should be in separate chunks"
+            )
+
+    def test_paragraph_splitting_fallback_when_no_subsections(self) -> None:
+        """Given: A long section with no numbered subsection markers.
+        When: Splitting.
+        Then: Falls back to paragraph-based splitting."""
+        paragraph = "Plain paragraph text without subsection markers. " * 35  # ~1750 chars
+        text = (
+            f"10.10 General Zone R\n\n{paragraph}\n\n{paragraph}\n"
+        )
+        chunks = split_into_chunks(text, source_file="test.txt", chapter="10")
+        assert len(chunks) >= 2
+        for chunk in chunks:
+            assert len(chunk.text) <= 2200  # reasonable upper bound

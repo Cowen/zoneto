@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -25,13 +25,15 @@ class Chunk:
     zones: list[str]
     text: str
     score: float
+    parent_context: str = field(default="")
 
 
 def split_into_chunks(text: str, source_file: str, chapter: str) -> list[Chunk]:
     """Split bylaw text into section-level chunks with metadata.
 
     Splits on section headers (e.g., "10.20.40"), then wraps long chunks
-    at paragraph breaks with 200-char overlap. Filters out chunks < 100 chars.
+    at subsection or paragraph breaks with sentence-aligned overlap.
+    Filters out chunks < 100 chars.
 
     Args:
         text: Full bylaw text from a file.
@@ -72,6 +74,9 @@ def split_into_chunks(text: str, source_file: str, chapter: str) -> list[Chunk]:
             )
         return chunks
 
+    # Track the most recent chapter header seen so sub-chunks inherit ancestry.
+    current_chapter_title = ""
+
     # Process each section
     for i, match in enumerate(section_matches):
         section_header = match.group(0)
@@ -90,6 +95,18 @@ def split_into_chunks(text: str, source_file: str, chapter: str) -> list[Chunk]:
         section_num_match = re.search(r"(\d+\.?)+", section_header)
         section_number = section_num_match.group(0) if section_num_match else ""
 
+        # Detect chapter headers and update ancestry tracker.
+        is_chapter = bool(re.match(r"^Chapter\s+\d+", section_header.strip()))
+        if is_chapter:
+            current_chapter_title = section_header.strip()
+
+        # For non-chapter sections, the parent context is the chapter title.
+        # For sub-chunks from long sections, it also includes the section identity.
+        section_parent_ctx = current_chapter_title if not is_chapter else ""
+        sub_chunk_parent_ctx = _build_parent_ctx(
+            current_chapter_title, section_number, section_title
+        )
+
         # Include the header line in the chunk text so retrieval has the full context.
         # Short section bodies are common (e.g., single-line rules); including the
         # header prevents them from falling below the min-length filter.
@@ -102,7 +119,7 @@ def split_into_chunks(text: str, source_file: str, chapter: str) -> list[Chunk]:
         # Extract zone references
         zones = _extract_zones(section_text)
 
-        # If section is longer than ~1500 chars, split at paragraph breaks
+        # If section is longer than ~1500 chars, split at subsection/paragraph breaks
         if len(section_text) > 1500:
             sub_chunks = _split_long_section(
                 section_body, section_number, section_title, zones
@@ -121,6 +138,7 @@ def split_into_chunks(text: str, source_file: str, chapter: str) -> list[Chunk]:
                             zones=zones,
                             text=full_sub.strip(),
                             score=0.0,
+                            parent_context=sub_chunk_parent_ctx,
                         )
                     )
         else:
@@ -136,57 +154,119 @@ def split_into_chunks(text: str, source_file: str, chapter: str) -> list[Chunk]:
                         zones=zones,
                         text=section_text.strip(),
                         score=0.0,
+                        parent_context=section_parent_ctx,
                     )
                 )
 
     return chunks
 
 
+def _build_parent_ctx(
+    chapter_title: str, section_number: str, section_title: str
+) -> str:
+    """Combine chapter and section identity into a breadcrumb string for encoding."""
+    section_part = f"{section_number} {section_title}".strip()
+    if chapter_title and section_part:
+        return f"{chapter_title} > {section_part}"
+    return chapter_title or section_part
+
+
 def _split_long_section(
     text: str, section_number: str, section_title: str, zones: list[str]
 ) -> list[str]:
-    """Split a long section at paragraph breaks with 200-char overlap.
+    """Split a long section at subsection or paragraph breaks.
+
+    Strategy (in order):
+    1. Split at numbered subsection boundaries: "  (1) ...", "  (2) ..."
+       If ≥2 parts found, accumulate into ≤1500-char chunks with no overlap
+       (boundaries are semantic, so overlap would duplicate rules).
+       Sub-parts still > 1500 chars are further split at lettered items "(A)".
+    2. Fall back to paragraph splitting with sentence-boundary overlap.
 
     Args:
-        text: The section text to split.
+        text: The section body text to split.
         section_number: (unused, for context).
         section_title: (unused, for context).
         zones: (unused, for context).
 
     Returns:
-        List of text chunks with 200-char overlap.
+        List of text strings, each ≤1500 chars where possible.
     """
-    # Split on double newlines (paragraphs)
-    paragraphs = re.split(r"\n\n+", text)
+    # Step 1: numbered subsection boundaries — "  (1) ...", "  (2) ..."
+    num_parts = re.split(r"(?=^\s{2,}\(\d+\)\s)", text, flags=re.MULTILINE)
+    num_parts = [p for p in num_parts if p.strip()]
 
-    chunks = []
+    if len(num_parts) >= 2:
+        chunks: list[str] = []
+        current = ""
+        for part in num_parts:
+            test = current + part if current else part
+            if len(test) > 1500 and current:
+                chunks.append(current)
+                current = part
+            else:
+                current = test
+        if current:
+            chunks.append(current)
+
+        # Further split any oversized chunk at lettered items "(A)", "(B)", ...
+        result: list[str] = []
+        for chunk in chunks:
+            if len(chunk) > 1500:
+                result.extend(_split_at_letters_or_paragraphs(chunk))
+            else:
+                result.append(chunk)
+        return result
+
+    # Step 2: paragraph splitting with sentence-boundary overlap
+    return _split_at_paragraphs(text)
+
+
+def _split_at_letters_or_paragraphs(text: str) -> list[str]:
+    """Split at lettered sub-items "(A)", "(B)", ... or fall back to paragraphs."""
+    letter_parts = re.split(r"(?=^\s{4,}\([A-Z]\)\s)", text, flags=re.MULTILINE)
+    letter_parts = [p for p in letter_parts if p.strip()]
+
+    if len(letter_parts) >= 2:
+        chunks: list[str] = []
+        current = ""
+        for part in letter_parts:
+            test = current + part if current else part
+            if len(test) > 1500 and current:
+                chunks.append(current)
+                current = part
+            else:
+                current = test
+        if current:
+            chunks.append(current)
+        return chunks
+
+    return _split_at_paragraphs(text)
+
+
+def _split_at_paragraphs(text: str) -> list[str]:
+    """Split text at paragraph breaks with sentence-boundary overlap."""
+    paragraphs = re.split(r"\n\n+", text)
+    chunks: list[str] = []
     current_chunk = ""
-    overlap = ""
 
     for paragraph in paragraphs:
         paragraph = paragraph.strip()
         if not paragraph:
             continue
 
-        # Add paragraph to current chunk
-        if current_chunk:
-            test_chunk = current_chunk + "\n\n" + paragraph
-        else:
-            test_chunk = paragraph
+        test_chunk = current_chunk + "\n\n" + paragraph if current_chunk else paragraph
 
-        # If adding this paragraph would exceed the limit, save current and start new
         if len(test_chunk) > 1500 and current_chunk:
             chunks.append(current_chunk)
-            # Keep last 200 chars for overlap
-            overlap = (
-                current_chunk[-200:] if len(current_chunk) > 200 else current_chunk
-            )
-            test_para = overlap + "\n\n" + paragraph if overlap else paragraph
-            current_chunk = test_para
+            # Roll back to the last sentence boundary rather than cutting mid-sentence.
+            tail = current_chunk[-400:] if len(current_chunk) > 400 else current_chunk
+            boundaries = [m.end() for m in re.finditer(r"[.!?]\s+", tail)]
+            overlap = tail[boundaries[-1] :] if boundaries else tail[-200:]
+            current_chunk = overlap + "\n\n" + paragraph if overlap else paragraph
         else:
             current_chunk = test_chunk
 
-    # Add remaining text
     if current_chunk:
         chunks.append(current_chunk)
 
@@ -315,7 +395,7 @@ class BylawIndex:
         for i, chunk in enumerate(all_chunks):
             chunk.chunk_id = i
 
-        # Create DataFrame
+        # Create DataFrame — parent_context persisted so it survives round-trips
         chunks_data = {
             "chunk_id": [c.chunk_id for c in all_chunks],
             "chapter": [c.chapter for c in all_chunks],
@@ -324,17 +404,23 @@ class BylawIndex:
             "source_file": [c.source_file for c in all_chunks],
             "zones": [c.zones for c in all_chunks],
             "text": [c.text for c in all_chunks],
+            "parent_context": [c.parent_context for c in all_chunks],
         }
         chunks_df = pl.DataFrame(chunks_data)
         chunks_df.write_parquet(index_dir / "chunks.parquet")
 
-        # Encode all chunks — show_progress_bar renders a tqdm bar to stderr
+        # Encode all chunks — show_progress_bar renders a tqdm bar to stderr.
+        # Prepend parent_context to the encoding text so the embedding captures
+        # chapter/section ancestry; the stored Chunk.text remains unchanged for display.
         _log(
             f"  Encoding {len(all_chunks):,} chunks with BAAI/bge-small-en-v1.5"
             " (CPU — takes 2–8 min)..."
         )
         model = SentenceTransformer("BAAI/bge-small-en-v1.5")
-        texts = [c.text for c in all_chunks]
+        texts = [
+            f"{c.parent_context}\n\n{c.text}" if c.parent_context else c.text
+            for c in all_chunks
+        ]
         embeddings = model.encode(
             texts, convert_to_numpy=True, show_progress_bar=True
         ).astype(np.float32)
@@ -393,6 +479,7 @@ class BylawIndex:
                 zones=list(row["zones"]),
                 text=row["text"],
                 score=float(similarities[idx]),
+                parent_context=row.get("parent_context") or "",
             )
             results.append(chunk)
 
@@ -427,6 +514,7 @@ class BylawIndex:
                     zones=list(row["zones"]),
                     text=row["text"],
                     score=1.0,
+                    parent_context=row.get("parent_context") or "",
                 )
             )
         return results
