@@ -22,7 +22,10 @@ just serve       # FastAPI on port 8000
 just pipeline    # enrich -> train -> score in sequence
 just regression  # CI-safe regression tests (synthetic data)
 just regression-integration  # real enriched data — not CI-safe
+just narrator-eval  # narrator confidence calibration vs golden cases (LLM calls)
 ```
+
+`just test` excludes `-m integration` (pre-commit safe, no network); `just test-all` runs everything.
 
 **COA freshness caveat:** The `coa` source always shows data concentrated in 2022 — this is the complete CKAN picture (city only publishes closed CSVs for 2022–2023). A 2022-heavy distribution is not a sign of stale data.
 

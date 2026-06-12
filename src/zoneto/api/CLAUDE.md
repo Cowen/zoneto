@@ -32,6 +32,8 @@ Confidence: Step 1 extreme violation check (≥3× limit → cap 10–30); Step 
 
 Cross-zone: outcome line suppressed when best comparable's zone ≠ site zone — prevents cross-zone bleed. Data gaps do NOT deduct from confidence score.
 
+**Narrator eval:** `just narrator-eval` runs 8 golden cases (real applications with AIC-verified outcomes, `tests/fixtures/narrator_eval_cases.json`) through the full pipeline with per-case mechanism traces; `tests/api/test_narrator_regression.py` is the pytest twin (CI-safe override tests + `-m integration` LLM band tests). The 68 Wellesley case is advisory — it pins the documented limitation that confidence measures compliance-path viability, not approval probability.
+
 ## Evaluate Endpoint (`routes.py`)
 
 `POST /evaluate` — geocode → site context → feature extraction → rule check → bylaw retrieval → description similarity → narration → nearby applications. BERT scorer used when `app.state.bert_model` set; otherwise TF-IDF+SVD. Response schema: `EvaluateResponse` in `routes.py`. Passes `description=body.description` to the narrator so raw proposal text reaches the LLM.

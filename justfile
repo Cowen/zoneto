@@ -30,6 +30,11 @@ bylaw-index:
 bylaw-eval:
     uv run python scripts/bylaw_eval.py
 
+# Evaluate narrator confidence calibration against golden cases
+# (requires ANTHROPIC_API_KEY + data/reference; one LLM call per case)
+narrator-eval *ARGS:
+    uv run python scripts/narrator_eval.py {{ARGS}}
+
 # Enrich data
 enrich:
     uv run zoneto enrich
@@ -81,7 +86,12 @@ pipeline:
     just train
     just score
 
+# CI-safe test suite (no network, no API keys) — run by the pre-commit hook
 test:
+    uv run pytest -qq -m "not integration"
+
+# Full suite including integration tests (requires data/ + ANTHROPIC_API_KEY)
+test-all:
     uv run pytest -qq
 
 # Run performance regression tests (CI-safe, synthetic data)

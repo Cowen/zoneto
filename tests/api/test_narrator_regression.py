@@ -1,23 +1,34 @@
 """Narrator confidence calibration regression tests.
 
-Integration tests require:
+Driven by the golden-case fixture tests/fixtures/narrator_eval_cases.json:
+real Toronto planning applications with known outcomes (verified against the
+city's AIC ArcGIS FeatureServer), each exercising a distinct confidence
+mechanism (floor-70 as-of-right, precedent floor-55, cap-30 extreme,
+LLM-dominated mid band). `just narrator-eval` runs the same cases with
+per-case diagnostics.
+
+Two tiers:
+
+CI-safe (no marker, runs in `just test` / pre-commit): replays each case's
+snapshotted site context (ci.site) and hand-built similarity stub through
+extract -> check_compliance -> the deterministic confidence overrides, with a
+fake LLM. No network, no API key, no data/ dependency.
+
+Integration (-m integration) requires:
   - ANTHROPIC_API_KEY environment variable set
   - GIS reference data at data/reference/
   - Enriched dev_applications.parquet at data/enriched/ (for similarity)
+Each case is narrated by the real LLM exactly once per session (memoized),
+so the whole tier costs len(cases) LLM calls. Note the cache assumes a
+single-process pytest run (no xdist), which is how the justfile invokes it.
 
-These tests verify that the narrator assigns calibrated confidence scores
-to real Toronto planning applications with known outcomes.
-
-1613 St Clair Ave W (folderrsn 5124543, Council-approved OZ 2022):
-  Confidence >= 55. The approved same-zone comparable at 100% similarity
-  exempts the >=3x height cap. Programmatic floor lifts to 55.
-
-321 Boon Ave: residential R-zone, no approved same-zone comparable.
-  Confidence <= 35. Programmatic cap fires (57m/13m = 4.4x, no exemption).
+The pipeline helper `_narration_for` mirrors scripts/narrator_eval.py::
+_narrate_case; keep them in sync.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -25,36 +36,101 @@ import pytest
 
 from zoneto.analytics.compliance import check_compliance
 from zoneto.analytics.extract import extract_project_features
-from zoneto.api.desc_similarity import score_description_similarity
-from zoneto.api.llm_client import AnthropicClient
-from zoneto.api.narrator import narrate_evaluation
-from zoneto.api.site_context import lookup_site_context
+from zoneto.api.llm_client import FakeLLMClient
+from zoneto.api.narrator import _apply_confidence_overrides, narrate_evaluation
 
-# Real description for Council-approved 1613 St Clair West development
-_DESCRIPTION = (
-    "The developer intends to develop the subject lands with a 17-storey, 57 meter "
-    "mixed-use building consisting of 258 units in 16,732 square meters of residential "
-    "floor area and 1,404 square meters of non-residential floor area. Non-residential "
-    "floor area would be comprised of 57 square metres of community space, 271 square "
-    "metres of retail, and 1,076 square metres of medical office. A total of 575.4 "
-    "square meters of indoor amenity area and 721 square meters of outdoor "
-    "amenity area is proposed. A Site Plan Control application has also been "
-    "submitted in support of the proposal and has been circulated concurrently. "
-    "The proposal has been revised to provide medical office space and community "
-    "space noted above, simplified floor plates, relocation of parking to provide "
-    "nine vehicle parking spaces above grade and 92 parking spaces below grade."
-)
+_FIXTURE_PATH = Path(__file__).parents[1] / "fixtures" / "narrator_eval_cases.json"
+_FIXTURE = json.loads(_FIXTURE_PATH.read_text())
+_CASES = {c["id"]: c for c in _FIXTURE["cases"]}
+_CASE_IDS = list(_CASES)
+_ORDERINGS = _FIXTURE["orderings"]
 
 _REF_DIR = Path("data/reference")
 _DATA_DIR = Path("data")
 _MODEL_DIR = Path("models")
+_ENRICHED_PATH = _DATA_DIR / "enriched" / "dev_applications.parquet"
 
-# Known coordinates from enriched dev_applications (EPSG:4326, reprojected)
-_ST_CLAIR_LAT = 43.67290477633479
-_ST_CLAIR_LON = -79.45543595876516
 
-_BOON_LAT = 43.66384
-_BOON_LON = -79.45013
+# ---------------------------------------------------------------------------
+# CI-safe tier — deterministic overrides against snapshotted site contexts
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("case_id", _CASE_IDS)
+def test_deterministic_overrides(case_id: str) -> None:
+    """Given a golden case's snapshotted site context and similarity stub,
+    when the confidence overrides are probed from both extremes (5 and 95),
+    then exactly the floors/caps recorded in expected_overrides bind.
+    """
+    case = _CASES[case_id]
+    ci = case["ci"]
+    expected = ci["expected_overrides"]
+    extracted = extract_project_features(case["description"])
+    violations = check_compliance(extracted, ci["site"])
+
+    low = _apply_confidence_overrides(
+        5, violations, ci["site"], extracted, ci["sim_stub"]
+    )
+    high = _apply_confidence_overrides(
+        95, violations, ci["site"], extracted, ci["sim_stub"]
+    )
+
+    label = case["label"]
+    if expected["cap_30"]:
+        assert high <= 30, f"{label}: cap-30 did not bind (95 -> {high})"
+    elif expected["floor_70"]:
+        assert low == 70, f"{label}: floor-70 did not bind (5 -> {low})"
+        assert high == 95, f"{label}: unexpected cap (95 -> {high})"
+    elif expected["precedent_floor_55"]:
+        assert low == 55, f"{label}: precedent floor-55 did not bind (5 -> {low})"
+        # high == 95 also proves the cap-30 was exempted by the precedent
+        assert high == 95, f"{label}: cap not exempted by precedent (95 -> {high})"
+    else:
+        assert (low, high) == (5, 95), (
+            f"{label}: expected passthrough, got (5 -> {low}, 95 -> {high})"
+        )
+
+
+@pytest.mark.parametrize("case_id", _CASE_IDS)
+def test_narrate_end_to_end_mocked(case_id: str) -> None:
+    """Given a golden case and a fake LLM answering CONFIDENCE: 50,
+    when narrate_evaluation runs (prompt assembly, parse, overrides),
+    then the returned score reflects the case's expected floors/caps.
+    """
+    case = _CASES[case_id]
+    ci = case["ci"]
+    expected = ci["expected_overrides"]
+    extracted = extract_project_features(case["description"])
+    violations = check_compliance(extracted, ci["site"])
+
+    client = FakeLLMClient("Summary.\n\nCONFIDENCE: 50")
+    summary, score = narrate_evaluation(
+        ci["site"],
+        extracted,
+        violations,
+        [],
+        client,
+        description=case["description"],
+        description_similarity=ci["sim_stub"],
+    )
+
+    assert summary, "narrator returned an empty summary"
+    assert score is not None
+    if expected["cap_30"]:
+        assert score == 30
+    elif expected["floor_70"]:
+        assert score == 70
+    elif expected["precedent_floor_55"]:
+        assert score == 55
+    else:
+        assert score == 50
+
+
+# ---------------------------------------------------------------------------
+# Integration tier — real LLM, real GIS reference data, real similarity corpus
+# ---------------------------------------------------------------------------
+
+_NARRATION_CACHE: dict[str, tuple[str, int | None]] = {}
 
 
 def _require_api_key() -> str:
@@ -64,86 +140,100 @@ def _require_api_key() -> str:
     return key
 
 
-def _require_ref_dir() -> None:
+def _require_data() -> None:
     if not _REF_DIR.exists():
         pytest.skip(f"GIS reference data not found: {_REF_DIR}")
+    if not _ENRICHED_PATH.exists():
+        pytest.skip(f"enriched data not found: {_ENRICHED_PATH}")
 
 
-def _narrate_for_address(
-    lat: float,
-    lon: float,
-    *,
-    api_key: str,
-) -> tuple[str, int | None]:
-    """Given/When/Then helper: run the full evaluate pipeline for a coordinate pair."""
-    site = lookup_site_context(lat, lon, _REF_DIR)
-    extracted = extract_project_features(_DESCRIPTION)
-    violations = check_compliance(extracted, site)
+def _narration_for(case_id: str, api_key: str) -> tuple[str, int | None]:
+    """Run the full evaluate pipeline for a golden case, memoized per session.
 
-    sim = score_description_similarity(
-        _DESCRIPTION,
-        data_dir=_DATA_DIR,
-        model_dir=_MODEL_DIR,
-        zoning_class=site.get("zoning_class"),
-        lat=lat,
-        lon=lon,
-        radius_m=2000.0,
-    )
+    Mirrors scripts/narrator_eval.py::_narrate_case.
+    """
+    if case_id not in _NARRATION_CACHE:
+        from zoneto.api.desc_similarity import score_description_similarity
+        from zoneto.api.llm_client import AnthropicClient
+        from zoneto.api.site_context import lookup_site_context
 
-    llm = AnthropicClient(api_key=api_key)
-    return narrate_evaluation(
-        site,
-        extracted,
-        violations,
-        chunks=[],
-        llm_client=llm,
-        description_similarity=sim,
+        case = _CASES[case_id]
+        site = lookup_site_context(case["lat"], case["lon"], _REF_DIR)
+        extracted = extract_project_features(case["description"])
+        violations = check_compliance(extracted, site)
+        sim = score_description_similarity(
+            case["description"],
+            data_dir=_DATA_DIR,
+            model_dir=_MODEL_DIR,
+            zoning_class=site.get("zoning_class"),
+            lat=case["lat"],
+            lon=case["lon"],
+            radius_m=2000.0,
+        )
+        llm = AnthropicClient(api_key=api_key)
+        _NARRATION_CACHE[case_id] = narrate_evaluation(
+            site,
+            extracted,
+            violations,
+            chunks=[],
+            llm_client=llm,
+            description=case["description"],
+            description_similarity=sim,
+        )
+    return _NARRATION_CACHE[case_id]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("case_id", _CASE_IDS)
+def test_confidence_in_band(case_id: str) -> None:
+    """Given a golden case with a verified real-world outcome, when narrated
+    by the real LLM, then confidence lands in the case's expected band.
+    Advisory cases pin documented behavior (see the fixture's notes field).
+    """
+    _require_data()
+    api_key = _require_api_key()
+    case = _CASES[case_id]
+    _, score = _narration_for(case_id, api_key)
+    lo = case["expected_confidence"]["min"]
+    hi = case["expected_confidence"]["max"]
+    assert score is not None, f"{case['label']}: narrator returned no confidence"
+    assert lo <= score <= hi, (
+        f"{case['label']}: confidence {score} outside [{lo}, {hi}] "
+        f"({case['mechanism']}) — run `just narrator-eval` for details"
     )
 
 
 @pytest.mark.integration
-def test_st_clair_confidence_floor() -> None:
-    """Given a Council-approved OZ at 1613 St Clair (same-zone comparable at 100%
-    similarity), when we narrate the original description, then confidence >= 55.
-    The approved-precedent escape hatch exempts the height cap and floors at 55.
+@pytest.mark.parametrize("case_id", _CASE_IDS)
+def test_summary_well_formed(case_id: str) -> None:
+    """Given any golden case, when narrated, then the summary is non-empty,
+    bounded in length, and the CONFIDENCE line was consumed by parsing.
     """
-    _require_ref_dir()
+    _require_data()
     api_key = _require_api_key()
-    _, score = _narrate_for_address(_ST_CLAIR_LAT, _ST_CLAIR_LON, api_key=api_key)
-    assert score is not None, "narrator did not return a confidence score"
-    assert score >= 55, (
-        f"1613 St Clair confidence {score} < 55 (approved OZ, expected >=55)"
-    )
+    summary, _ = _narration_for(case_id, api_key)
+    assert summary.strip(), "empty summary"
+    assert len(summary) < 4000, f"summary unexpectedly long ({len(summary)} chars)"
+    assert "CONFIDENCE:" not in summary, "CONFIDENCE line leaked into the summary"
 
 
 @pytest.mark.integration
-def test_boon_ave_confidence_cap() -> None:
-    """Given a residential R-zone at 321 Boon Ave, when we narrate the same
-    extreme mixed-use proposal, then confidence should be <= 35 (height cap fires).
+@pytest.mark.parametrize(
+    "ordering",
+    _ORDERINGS,
+    ids=[f"{o['higher']}>{o['lower']}" for o in _ORDERINGS],
+)
+def test_orderings(ordering: dict) -> None:
+    """Given two golden cases with a known relative ranking, when both are
+    narrated, then the higher case strictly outscores the lower one.
+    Uses the per-session cache — no extra LLM calls.
     """
-    _require_ref_dir()
+    _require_data()
     api_key = _require_api_key()
-    _, score = _narrate_for_address(_BOON_LAT, _BOON_LON, api_key=api_key)
-    assert score is not None, "narrator did not return a confidence score"
-    assert score <= 35, (
-        f"321 Boon Ave confidence {score} > 35 (extreme violations, expected <=35)"
-    )
-
-
-@pytest.mark.integration
-def test_st_clair_outscores_boon() -> None:
-    """Given the same description, when narrated at 1613 St Clair vs 321 Boon Ave,
-    then St Clair should score strictly higher (approved precedent exempts the cap;
-    Boon has none so it remains capped at <=30).
-    """
-    _require_ref_dir()
-    api_key = _require_api_key()
-    _, st_clair_score = _narrate_for_address(
-        _ST_CLAIR_LAT, _ST_CLAIR_LON, api_key=api_key
-    )
-    _, boon_score = _narrate_for_address(_BOON_LAT, _BOON_LON, api_key=api_key)
-    assert st_clair_score is not None, "St Clair narrator did not return a score"
-    assert boon_score is not None, "Boon Ave narrator did not return a score"
-    assert st_clair_score > boon_score, (
-        f"St Clair ({st_clair_score}) should outscore Boon Ave ({boon_score})"
+    _, hi_score = _narration_for(ordering["higher"], api_key)
+    _, lo_score = _narration_for(ordering["lower"], api_key)
+    assert hi_score is not None and lo_score is not None
+    assert hi_score > lo_score, (
+        f"{ordering['higher']} ({hi_score}) should outscore "
+        f"{ordering['lower']} ({lo_score}) — {ordering['note']}"
     )

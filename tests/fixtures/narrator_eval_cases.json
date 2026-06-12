@@ -1,0 +1,526 @@
+{
+  "_meta": {
+    "created": "2026-06-12",
+    "notes": "Golden cases for narrator confidence regression. Outcomes verified against the live Toronto AIC ArcGIS FeatureServer on the date above. Every real case's description also exists in data/enriched/dev_applications.parquet, so integration-time TF-IDF similarity returns the case itself as a ~100% comparable: for approved cases this deterministically triggers the precedent floor-55; for refused cases (dev_approved=0) it does not. ci.site blocks are snapshots of lookup_site_context() output so the CI tier needs no data/reference or duckdb. Run `just narrator-eval` for per-case detail. Band derivation: floors/caps are deterministic one-sided anchors; the ceiling of 88 for non-capped cases is the system prompt's Step-2A maximum (base band max 80 + max within-band adjustment of +8). Cap-30 cases use a lower bound of 10, the floor of the prompt's extreme-violation band. Bands calibrated against ~6 live runs on 2026-06-12; observed ranges are recorded per case in notes."
+  },
+  "cases": [
+    {
+      "id": "st-clair-1613",
+      "label": "1613 St Clair Ave W — 17st/258u mixed-use OZ, Council-approved 2022",
+      "folderrsn": "5124543",
+      "lat": 43.67290477633479,
+      "lon": -79.45543595876516,
+      "description": "The developer intends to develop the subject lands with a 17-storey, 57 meter mixed-use building consisting of 258 units in 16,732 square meters of residential floor area and 1,404 square meters of non-residential floor area. Non-residential floor area would be comprised of 57square metres of community space, 271 square metres of retail, and 1,076 square metres of medical office. A total of 575.4 square meters of indoor amenity area and 721 square meters of outdoor amenity area is proposed. A Site Plan Control application has also been submitted in support of the proposal and has been circulated concurrently. The proposal has been revised to provide medical office space and community space noted above, simplified floor plates, relocation of parking to provide nine vehicle parking spaces above grade and 92 parking spaces below grade. ",
+      "outcome": {
+        "decision": "approved",
+        "body": "City Council (OZ, Council Approved)",
+        "year": 2022,
+        "appealed": false,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live query)",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query?where=FOLDERRSN=5124543&outFields=*&f=json",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "precedent-floor-55 + cap-30 exemption",
+      "expected_confidence": {
+        "min": 55,
+        "max": 88
+      },
+      "advisory": false,
+      "ci": {
+        "site": {
+          "zoning_class": "R",
+          "zoning_max_units": null,
+          "zoning_max_density": 0.6,
+          "zoning_max_storeys": null,
+          "zoning_max_height_m": 11.0,
+          "permitted_use_category": "Residential",
+          "zoning_min_frontage_m": null,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 0,
+          "zoning_exception_no": null,
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": {
+          "n_similar": 1,
+          "appeal_rate": 0.0,
+          "query_lat": 43.67290477633479,
+          "query_lon": -79.45543595876516,
+          "top_matches": [
+            {
+              "folderrsn": "5124543",
+              "application_type": "OZ",
+              "similarity": 1.0,
+              "dev_approved": 1,
+              "dev_appealed": 0,
+              "zoning_class": "R",
+              "lat": 43.67290477633479,
+              "lon": -79.45543595876516
+            }
+          ]
+        },
+        "expected_overrides": {
+          "floor_70": false,
+          "precedent_floor_55": true,
+          "cap_30": false
+        }
+      },
+      "notes": "57m proposed vs 11m zone limit (5.2x) would trigger the cap-30, but the same-zone Council-approved comparable at 100% similarity within 250m exempts it and floors confidence at 55. The height violation is structural, so the floor-70 does not apply. In integration runs the TF-IDF self-match against the enriched parquet provides the precedent. Observed over 6 calibration runs (2026-06-12): 55-78 (55 = precedent floor binding)."
+    },
+    {
+      "id": "boon-321-synthetic",
+      "label": "321 Boon Ave (synthetic) — St Clair description, no nearby precedent",
+      "folderrsn": null,
+      "lat": 43.66384,
+      "lon": -79.45013,
+      "description": "The developer intends to develop the subject lands with a 17-storey, 57 meter mixed-use building consisting of 258 units in 16,732 square meters of residential floor area and 1,404 square meters of non-residential floor area. Non-residential floor area would be comprised of 57square metres of community space, 271 square metres of retail, and 1,076 square metres of medical office. A total of 575.4 square meters of indoor amenity area and 721 square meters of outdoor amenity area is proposed. A Site Plan Control application has also been submitted in support of the proposal and has been circulated concurrently. The proposal has been revised to provide medical office space and community space noted above, simplified floor plates, relocation of parking to provide nine vehicle parking spaces above grade and 92 parking spaces below grade. ",
+      "outcome": {
+        "decision": null,
+        "body": null,
+        "year": null,
+        "appealed": null,
+        "verification": {
+          "source": "synthetic — no real application at this site",
+          "url": null,
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "cap-30; 250m distance gate rejects the St Clair precedent",
+      "expected_confidence": {
+        "min": 10,
+        "max": 30
+      },
+      "advisory": false,
+      "ci": {
+        "site": {
+          "zoning_class": "R",
+          "zoning_max_units": null,
+          "zoning_max_density": 0.6,
+          "zoning_max_storeys": null,
+          "zoning_max_height_m": 13.0,
+          "permitted_use_category": "Residential",
+          "zoning_min_frontage_m": null,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 1,
+          "zoning_exception_no": "751",
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": {
+          "n_similar": 1,
+          "appeal_rate": 0.0,
+          "query_lat": 43.66384,
+          "query_lon": -79.45013,
+          "top_matches": [
+            {
+              "folderrsn": "5124543",
+              "application_type": "OZ",
+              "similarity": 1.0,
+              "dev_approved": 1,
+              "dev_appealed": 0,
+              "zoning_class": "R",
+              "lat": 43.67290477633479,
+              "lon": -79.45543595876516
+            }
+          ]
+        },
+        "expected_overrides": {
+          "floor_70": false,
+          "precedent_floor_55": false,
+          "cap_30": true
+        }
+      },
+      "notes": "Same extreme description placed in an R zone with a 13m height limit (57/13 = 4.4x). The St Clair approval is ~1.1 km away, beyond the 250m same-site radius, so the precedent exemption must NOT fire and the cap-30 binds. Observed over 6 calibration runs (2026-06-12): 30 every run (cap binds)."
+    },
+    {
+      "id": "weston-1552",
+      "label": "1552 Weston Rd — 8-storey affordable housing SA, approved not appealed",
+      "folderrsn": "5052675",
+      "lat": 43.69233417292582,
+      "lon": -79.50653440850571,
+      "description": "Proposed development for an 8 storey affordable housing residential building at 1550 Weston Road,  containing a total of  50 residential uses and amenity spaces. Severed via consent application.",
+      "outcome": {
+        "decision": "approved",
+        "body": "Staff (SA, Final Approval Completed)",
+        "year": 2022,
+        "appealed": false,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live query)",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query?where=FOLDERRSN=5052675&outFields=*&f=json",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "floor-70 as-of-right",
+      "expected_confidence": {
+        "min": 70,
+        "max": 88
+      },
+      "advisory": false,
+      "ci": {
+        "site": {
+          "zoning_class": "RA",
+          "zoning_max_units": null,
+          "zoning_max_density": null,
+          "zoning_max_storeys": 8,
+          "zoning_max_height_m": 24.0,
+          "permitted_use_category": "Residential Apartment",
+          "zoning_min_frontage_m": null,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 1,
+          "zoning_exception_no": "445",
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": null,
+        "expected_overrides": {
+          "floor_70": true,
+          "precedent_floor_55": false,
+          "cap_30": false
+        }
+      },
+      "notes": "8 storeys proposed vs RA zone max 8 — within limits, residential use permitted in Residential Apartment, zero structural violations. The as-of-right floor-70 binds deterministically. Observed over 5 calibration runs (2026-06-12): 75-82."
+    },
+    {
+      "id": "fallingbrook-100",
+      "label": "100 Fallingbrook Rd — 2-storey school addition SA, approved (NOAC)",
+      "folderrsn": "5350220",
+      "lat": 43.677328116119035,
+      "lon": -79.27877234449986,
+      "description": "914 square metre two storey addition to an existing 2 storey elementary school.",
+      "outcome": {
+        "decision": "approved",
+        "body": "Staff (SA, NOAC Issued)",
+        "year": 2023,
+        "appealed": false,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live query)",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query?where=FOLDERRSN=5350220&outFields=*&f=json",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "floor-70 (institutional permitted in Residential)",
+      "expected_confidence": {
+        "min": 70,
+        "max": 88
+      },
+      "advisory": false,
+      "ci": {
+        "site": {
+          "zoning_class": "RS",
+          "zoning_max_units": null,
+          "zoning_max_density": null,
+          "zoning_max_storeys": 2,
+          "zoning_max_height_m": 9.0,
+          "permitted_use_category": "Residential",
+          "zoning_min_frontage_m": 12.0,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 1,
+          "zoning_exception_no": "61",
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": null,
+        "expected_overrides": {
+          "floor_70": true,
+          "precedent_floor_55": false,
+          "cap_30": false
+        }
+      },
+      "notes": "2-storey elementary school addition in an RS zone with a 2-storey limit. classify_use → institutional, which Residential permits; zero structural violations, so floor-70 binds. Observed over 5 calibration runs (2026-06-12): 78-88."
+    },
+    {
+      "id": "livingston-408",
+      "label": "408 Livingston Rd — 35st/442u residential tower OZ, refused 2025",
+      "folderrsn": "5608193",
+      "lat": 43.752747105931626,
+      "lon": -79.20284634523262,
+      "description": "Propose to construct a 35-storey residential building containing 442 new dwelling units, a total of 30,888 sq. m of gross floor area (GFA), which results in a total Floor Space Index (FSI) of 5.4",
+      "outcome": {
+        "decision": "refused",
+        "body": "City Council (OZ, Refused)",
+        "year": 2025,
+        "appealed": false,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live query)",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query?where=FOLDERRSN=5608193&outFields=*&f=json",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "refused: structural use mismatch in UT zone, LLM mid/low band",
+      "expected_confidence": {
+        "min": 10,
+        "max": 55
+      },
+      "advisory": false,
+      "ci": {
+        "site": {
+          "zoning_class": "UT",
+          "zoning_max_units": null,
+          "zoning_max_density": null,
+          "zoning_max_storeys": null,
+          "zoning_max_height_m": null,
+          "permitted_use_category": "Utility / Transportation",
+          "zoning_min_frontage_m": null,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 0,
+          "zoning_exception_no": null,
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": null,
+        "expected_overrides": {
+          "floor_70": false,
+          "precedent_floor_55": false,
+          "cap_30": false
+        }
+      },
+      "notes": "Residential tower in a Utility/Transportation zone — use_not_permitted structural violation, no encoded height/unit limits so no cap. No deterministic override applies; the LLM Step-2C band (35-55) minus adjustments governs. Self-match precedent cannot fire (dev_approved=0). Widest band in the suite — the only LLM-dominated case. Observed over 5 calibration runs (2026-06-12): 15-45 — high variance, hence the wide band."
+    },
+    {
+      "id": "sheppard-4155",
+      "label": "4155 Sheppard Ave E — 46-storey OZ in RD zone (max 2), refused",
+      "folderrsn": "5366205",
+      "lat": 43.782625464310485,
+      "lon": -79.28115891671413,
+      "description": "Combined Official Plan and Zoning By-law Amendment application to permit a 46-storey mixed-use building containing 726 residential units, 1,226.63 sq.m. of indoor amenity space, 951.48 sq.m. of outdoor amenity space, and 520.66 sq.m. of commercial space resulting in a total gross floor area of 44,467.05 sq.m., or a FSI of 11.72. A total 232 vehicular parking spaces, and 550 bicycle parking spaces are proposed. Appealed to OLT",
+      "outcome": {
+        "decision": "refused",
+        "body": "City Council (OZ, Refused)",
+        "year": 2023,
+        "appealed": false,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live query)",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query?where=FOLDERRSN=5366205&outFields=*&f=json",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "cap-30 on real refused data (23x storey ratio)",
+      "expected_confidence": {
+        "min": 10,
+        "max": 30
+      },
+      "advisory": false,
+      "ci": {
+        "site": {
+          "zoning_class": "RD",
+          "zoning_max_units": null,
+          "zoning_max_density": null,
+          "zoning_max_storeys": 2,
+          "zoning_max_height_m": 9.0,
+          "permitted_use_category": "Residential",
+          "zoning_min_frontage_m": null,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 1,
+          "zoning_exception_no": "271",
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": "Agincourt",
+          "in_secondary_plan": 1,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": null,
+        "expected_overrides": {
+          "floor_70": false,
+          "precedent_floor_55": false,
+          "cap_30": true
+        }
+      },
+      "notes": "46 storeys proposed vs RD zone max 2 (23x). The cap-30 binds; no approved precedent exists (self-match has dev_approved=0). Refusal correlates with the deterministic cap — the assertable refused case. Observed over 5 calibration runs (2026-06-12): 18-30."
+    },
+    {
+      "id": "wellesley-68",
+      "label": "68 Wellesley St E — 28st mixed-use OZ, refused + OLT appeal dismissed",
+      "folderrsn": "5391282",
+      "lat": 43.66393235122535,
+      "lon": -79.38085868178271,
+      "description": "Combined Official Plan & Zoning By-law Amendment for a 28 storey, mixed-use building with a total of 17,523.3 m2 of gross floor area, comprised of 16,903.4 m2 of residential GFA and 619.9 m2 of non-residential GFA. Approximately 258 residential dwelling units are proposed.",
+      "outcome": {
+        "decision": "refused",
+        "body": "City Council refused 2024; OLT dismissed the appeal 2025",
+        "year": 2024,
+        "appealed": true,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live query, STATUS_DESC='OMB Refused'); City refusal report toronto.ca/legdocs/mmis/2024/te/bgrd/backgroundfile-244693.pdf; OLT dismissal reported at chrismoise.ca/victory_at_the_olt_68_wellesley_street_east",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query?where=FOLDERRSN=5391282&outFields=*&f=json",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "KNOWN LIMITATION: floor-70 fires despite real-world refusal",
+      "expected_confidence": {
+        "min": 70,
+        "max": 88
+      },
+      "advisory": true,
+      "ci": {
+        "site": {
+          "zoning_class": "CR",
+          "zoning_max_units": null,
+          "zoning_max_density": null,
+          "zoning_max_storeys": null,
+          "zoning_max_height_m": 18.0,
+          "permitted_use_category": "Commercial Residential (mixed)",
+          "zoning_min_frontage_m": null,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 1,
+          "zoning_exception_no": "2144",
+          "zoning_pct_res": 3.0,
+          "zoning_pct_comm": 1.7,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": null,
+        "expected_overrides": {
+          "floor_70": true,
+          "precedent_floor_55": false,
+          "cap_30": false
+        }
+      },
+      "notes": "ADVISORY — documents a known limitation, do not 'fix' by asserting low. The CR zone has no encoded height/unit limits, mixed_use is permitted, so the rule engine sees zero structural violations and the floor-70 binds — yet the real application was refused and the OLT upheld the refusal (site-specific Church Street character policies, shadow impact on Barbara Hall Park). Confidence measures compliance-path viability from structured open data, not approval probability; area-specific OP policies are not in that data. If this case starts scoring low, the floor-70 contract changed — investigate before re-banding. Observed over 5 calibration runs (2026-06-12): 70 every run (floor binds exactly)."
+    },
+    {
+      "id": "dorney-43",
+      "label": "43 Dorney Crt — TCHC Lawrence Heights Ph 2 OZ, 29st, Council-approved",
+      "folderrsn": "5738511",
+      "lat": 43.71882291166493,
+      "lon": -79.442750124557,
+      "description": "OPA & Rezoning Application proposes Phase 2 of the TCHC Lawrence Heights revitilization, including new and reconfigured public streets, public parks and community uses, and residential development ranging from 6 to 29 storeys in height. Phase 2 includes the replacement of 213 Phase 2 social housing units, 64 replacement units from Phase 4, and the creation of 180 new TCHC affordable units and 961 market units (total of 1,748 dewlling units).",
+      "outcome": {
+        "decision": "approved",
+        "body": "City Council (OZ, Council Approved)",
+        "year": 2025,
+        "appealed": false,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live query)",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query?where=FOLDERRSN=5738511&outFields=*&f=json",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "precedent-floor-55 via self-match (use mismatch in OR zone)",
+      "expected_confidence": {
+        "min": 55,
+        "max": 88
+      },
+      "advisory": false,
+      "ci": {
+        "site": {
+          "zoning_class": "OR",
+          "zoning_max_units": null,
+          "zoning_max_density": null,
+          "zoning_max_storeys": null,
+          "zoning_max_height_m": null,
+          "permitted_use_category": "Open Space",
+          "zoning_min_frontage_m": null,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 0,
+          "zoning_exception_no": null,
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": "Lawrence-Allen",
+          "in_secondary_plan": 1,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": null,
+        "expected_overrides": {
+          "floor_70": false,
+          "precedent_floor_55": false,
+          "cap_30": false
+        }
+      },
+      "notes": "Residential proposed in an Open Space zone — use_not_permitted structural violation, so no floor-70. In integration runs the TF-IDF self-match (Council-approved, same OR zone, same site) floors at 55. No sim stub in CI, so the CI tier expects pure passthrough here. Observed over 5 calibration runs (2026-06-12): 78-82."
+    }
+  ],
+  "orderings": [
+    {
+      "higher": "st-clair-1613",
+      "lower": "boon-321-synthetic",
+      "note": "approved precedent exempts the cap; Boon fails the 250m gate"
+    },
+    {
+      "higher": "weston-1552",
+      "lower": "livingston-408",
+      "note": "as-of-right floor-70 vs refused use-mismatch"
+    }
+  ]
+}
