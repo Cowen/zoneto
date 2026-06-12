@@ -34,6 +34,24 @@ _PROHIBITED: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+# Conservative storeys -> metres conversion for proposals that state height only
+# in storeys. Toronto residential floor-to-floor is typically 3.0-3.3m; 3.0 keeps
+# the inference a lower bound so it never overstates a violation.
+STOREY_HEIGHT_M = 3.0
+
+
+def effective_height_m(extracted: ProjectFeatures) -> float | None:
+    """Stated height in metres, else a conservative inference from storeys.
+
+    Returns None when neither a height nor a storey count was extracted.
+    """
+    if extracted.proposed_height_m is not None:
+        return extracted.proposed_height_m
+    if extracted.proposed_storeys is not None:
+        return extracted.proposed_storeys * STOREY_HEIGHT_M
+    return None
+
+
 class Severity(Enum):
     """How much the rule violation deviates from as-of-right permissions."""
 
@@ -79,7 +97,9 @@ def check_compliance(
     violations.extend(_check_prohibited_uses(extracted))
     violations.extend(_check_storeys(extracted, site))
     violations.extend(_check_height_m(extracted, site))
+    violations.extend(_check_height_inferred(extracted, site))
     violations.extend(_check_units(extracted, site))
+    violations.extend(_check_fsi(extracted, site))
     violations.extend(_check_unit_limit_advisory(extracted, site))
     violations.extend(_check_use(extracted, site))
     violations.extend(_check_heritage(site))
@@ -201,6 +221,52 @@ def _check_height_m(
     ]
 
 
+def _check_height_inferred(
+    extracted: ProjectFeatures, site: dict[str, Any]
+) -> list[Violation]:
+    """Check the height limit against a storeys-derived height estimate.
+
+    Many descriptions state height only in storeys ("a 73-storey tower") while
+    the zone encodes only a metre limit — leaving the proposal invisible to
+    _check_height_m. Only fires when no explicit height was stated AND the zone
+    has no storey limit (otherwise _check_storeys already covers the dimension),
+    and only when the estimate exceeds the limit by >25% — beyond both the
+    minor-variance threshold and the slack in the 3m/storey assumption.
+    """
+    max_height = site.get("zoning_max_height_m")
+    if max_height is None:
+        return []
+    if extracted.proposed_height_m is not None:
+        return []
+    if site.get("zoning_max_storeys") is not None:
+        return []
+    storeys = extracted.proposed_storeys
+    if storeys is None:
+        return []
+    inferred = storeys * STOREY_HEIGHT_M
+    if inferred <= max_height * 1.25:
+        return []
+
+    return [
+        Violation(
+            rule_id="height_exceeds_max_inferred",
+            section_ref="By-law 569-2013 — zone-specific height overlay (HT_HEIGHT)",
+            observed=(
+                f"≈{inferred:g}m proposed (inferred from {storeys} storeys "
+                f"at {STOREY_HEIGHT_M:g}m/storey)"
+            ),
+            allowed=f"max {max_height}m",
+            severity=Severity.NEEDS_REZONING,
+            suggested_remedy=(
+                f"At a conservative {STOREY_HEIGHT_M:g}m per storey, {storeys} "
+                f"storeys is well past the {max_height}m zone limit. File an "
+                "Official Plan Amendment / Rezoning (OZ) application, or state "
+                "the proposed height in metres if the estimate is wrong."
+            ),
+        )
+    ]
+
+
 def _check_units(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
     max_units = site.get("zoning_max_units")
     proposed = extracted.proposed_units
@@ -222,6 +288,43 @@ def _check_units(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Viola
                 "permitted density. Note: the UNITS field in the by-law may "
                 "be further constrained by FSI (density) limits."
             ),
+        )
+    ]
+
+
+def _check_fsi(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
+    max_density = site.get("zoning_max_density")
+    proposed = extracted.proposed_fsi
+    if proposed is None or max_density is None:
+        return []
+    if proposed <= max_density:
+        return []
+
+    excess_pct = (proposed - max_density) / max_density
+    if excess_pct <= 0.10:
+        severity = Severity.NEEDS_VARIANCE
+        remedy = (
+            f"Reduce gross floor area to FSI {max_density} to be as-of-right, "
+            "or apply to the Committee of Adjustment for a minor variance "
+            "(up to 10% deviation is typically considered minor)."
+        )
+    else:
+        severity = Severity.NEEDS_REZONING
+        remedy = (
+            f"Reduce gross floor area to FSI {max_density} to be as-of-right, "
+            "or file an Official Plan Amendment / Rezoning (OZ) application to "
+            "increase the permitted density. Comparable OZ approvals nearby "
+            "can inform feasibility."
+        )
+
+    return [
+        Violation(
+            rule_id="fsi_exceeds_max",
+            section_ref="By-law 569-2013 — zone-specific density (DENSITY/FSI)",
+            observed=f"FSI {proposed:g} proposed",
+            allowed=f"max FSI {max_density:g}",
+            severity=severity,
+            suggested_remedy=remedy,
         )
     ]
 

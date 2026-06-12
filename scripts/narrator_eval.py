@@ -33,12 +33,20 @@ import re
 import sys
 from pathlib import Path
 
-from zoneto.analytics.compliance import Severity, check_compliance
+from zoneto.analytics.compliance import (
+    Severity,
+    check_compliance,
+    effective_height_m,
+)
 from zoneto.analytics.extract import extract_project_features
 from zoneto.analytics.use_classifier import use_matches_zone
 from zoneto.api.desc_similarity import score_description_similarity
 from zoneto.api.llm_client import AnthropicClient
-from zoneto.api.narrator import _has_approved_precedent, narrate_evaluation
+from zoneto.api.narrator import (
+    _has_approved_precedent,
+    _limits_verified,
+    narrate_evaluation,
+)
 from zoneto.api.site_context import lookup_site_context
 
 _SECTION_RE = re.compile(r"§[\d][\d.()]*")
@@ -109,21 +117,28 @@ def _mechanism_trace(result: dict) -> str:
         == 1
         and not structural
     ):
-        parts.append("floor-70 (as-of-right)")
+        if _limits_verified(extracted, site):
+            parts.append("floor-70 (as-of-right)")
+        else:
+            parts.append("floor-55 (compatible use, limits unverified)")
     if _has_approved_precedent(result["sim"], site.get("zoning_class")):
         parts.append("precedent floor-55")
         precedent = True
     else:
         precedent = False
-    for attr, key in (
-        ("proposed_storeys", "zoning_max_storeys"),
-        ("proposed_units", "zoning_max_units"),
-        ("proposed_height_m", "zoning_max_height_m"),
+    inferred = extracted.proposed_height_m is None
+    for name, prop, limit in (
+        ("storeys", extracted.proposed_storeys, site.get("zoning_max_storeys")),
+        ("units", extracted.proposed_units, site.get("zoning_max_units")),
+        (
+            "height_m (inferred)" if inferred else "height_m",
+            effective_height_m(extracted),
+            site.get("zoning_max_height_m"),
+        ),
+        ("fsi", extracted.proposed_fsi, site.get("zoning_max_density")),
     ):
-        prop = getattr(extracted, attr) or 0
-        limit = site.get(key) or 0
-        if limit and prop / limit >= 3.0:
-            label = f"{attr.removeprefix('proposed_')} {prop}/{limit}"
+        if prop and limit and prop / limit >= 3.0:
+            label = f"{name} {prop:g}/{limit:g}"
             if precedent:
                 parts.append(f"cap-30 exempted by precedent ({label})")
             else:

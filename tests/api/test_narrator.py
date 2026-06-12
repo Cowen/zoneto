@@ -352,11 +352,12 @@ class TestNarrateEvaluationDescriptionSimilarity:
         }
 
     def test_description_similarity_none_does_not_affect_output(self) -> None:
-        """Given: description_similarity=None, no violations, compatible zone.
-        When: narrate_evaluation called with LLM returning CONFIDENCE: 55.
-        Then: Score is floored to 70 (programmatic floor for zero-violation
-        compatible-zone proposals prevents LLM temperature from breaking Step 2A)."""
-        client = FakeLLMClient("Summary.\n\nCONFIDENCE: 55")
+        """Given: description_similarity=None, no violations, compatible zone,
+        but no encoded limits to verify the proposal against.
+        When: narrate_evaluation called with LLM returning CONFIDENCE: 40.
+        Then: Score is floored to 55, not 70 — zero violations with all-null
+        limits means nothing was checkable, not as-of-right."""
+        client = FakeLLMClient("Summary.\n\nCONFIDENCE: 40")
         extracted = ProjectFeatures(None, None, "mixed_use", False)
         summary, score = narrate_evaluation(
             self._minimal_site(),
@@ -366,7 +367,7 @@ class TestNarrateEvaluationDescriptionSimilarity:
             client,
             description_similarity=None,
         )
-        assert score == 70
+        assert score == 55
 
     def test_description_similarity_injected_into_prompt(self) -> None:
         """Given: description_similarity with appeal_rate=0.0 and n_similar=20.
@@ -789,12 +790,26 @@ class TestApplyConfidenceOverrides:
             suggested_remedy="reduce",
         )
 
-    def test_floor_applied_no_violations_mixed_use(self) -> None:
-        """Given: no violations, permitted_use_category contains 'mixed'.
-        When: score is 60.
-        Then: Floor raises score to 70."""
+    def test_floor_55_no_violations_mixed_use_limits_unverified(self) -> None:
+        """Given: no violations, permitted_use_category contains 'mixed', but
+        no encoded limits to verify the proposal against.
+        When: score is 40.
+        Then: Floor raises score to 55 only — not 70, since nothing was checkable."""
         score = _apply_confidence_overrides(
-            60, [], self._site("mixed use residential"), self._extracted()
+            40, [], self._site("mixed use residential"), self._extracted()
+        )
+        assert score == 55
+
+    def test_floor_70_no_violations_mixed_use_limits_verified(self) -> None:
+        """Given: no violations, 'mixed' category, AND a storey count within the
+        zone's encoded storey limit.
+        When: score is 60.
+        Then: Floor raises score to 70 — a real limit was verified."""
+        score = _apply_confidence_overrides(
+            60,
+            [],
+            self._site("mixed use residential", zoning_max_storeys=10),
+            self._extracted(storeys=8),
         )
         assert score == 70
 
@@ -987,9 +1002,10 @@ class TestApplyConfidenceOverrides:
 
     def test_floor_applied_permitted_use_informational_violations_only(self) -> None:
         """Given: recreational use in Residential zone, only informational violations
-        (e.g. zoning exception note), score 55.
+        (e.g. zoning exception note), a storey count within the encoded limit, score 55.
         When: applying overrides.
-        Then: Floor raises to 70 — use is as-of-right, structural path is clear."""
+        Then: Floor raises to 70 — use is as-of-right and a limit was verified;
+        informational violations do not block the floor."""
         info_violation = Violation(
             rule_id="zoning_exception",
             section_ref="By-law 569-2013 — Exception No. 751",
@@ -1001,10 +1017,65 @@ class TestApplyConfidenceOverrides:
         score = _apply_confidence_overrides(
             55,
             [info_violation],
+            self._site(
+                permitted_use_category="Residential",
+                zoning_class="R",
+                zoning_max_storeys=3,
+            ),
+            ProjectFeatures(2, None, "recreational", False),
+        )
+        assert score >= 70
+
+    def test_floor_55_when_no_limit_verifiable(self) -> None:
+        """Given: recreational use in Residential zone, zero violations, but
+        all zone limits null (nothing to verify the proposal against).
+        When: applying overrides with score 30.
+        Then: Floor raises to 55 only — compatible use with unknowable limits
+        is not the as-of-right path."""
+        score = _apply_confidence_overrides(
+            30,
+            [],
             self._site(permitted_use_category="Residential", zoning_class="R"),
             ProjectFeatures(None, None, "recreational", False),
         )
-        assert score >= 70
+        assert score == 55
+
+    def test_cap_applied_via_inferred_height(self) -> None:
+        """Given: 28 storeys stated (no metres), zone encodes an 18m height limit
+        and no storey limit (the 68 Wellesley shape).
+        When: score is 72.
+        Then: Inferred height (28 x 3m = 84m, 4.7x) triggers the cap-30."""
+        score = _apply_confidence_overrides(
+            72,
+            [],
+            self._site(zoning_max_height_m=18.0, zoning_class="CR"),
+            self._extracted(storeys=28),
+        )
+        assert score == 30
+
+    def test_cap_not_applied_via_inferred_height_below_3x(self) -> None:
+        """Given: 8 storeys stated (no metres), 24m height limit (8x3=24, 1.0x).
+        When: score is 75.
+        Then: No cap — the inferred height is within the limit."""
+        score = _apply_confidence_overrides(
+            75,
+            [],
+            self._site(zoning_max_height_m=24.0, zoning_class="RA"),
+            self._extracted(storeys=8),
+        )
+        assert score == 75
+
+    def test_cap_applied_when_fsi_exceeds_3x(self) -> None:
+        """Given: stated FSI 5.4 against a zone density limit of 0.85 (6.4x).
+        When: score is 70.
+        Then: FSI joins the cap trio — score capped to 30."""
+        site = self._site(zoning_class="RM")
+        site["zoning_max_density"] = 0.85
+        extracted = ProjectFeatures(
+            None, None, "residential", False, proposed_fsi=5.4
+        )
+        score = _apply_confidence_overrides(70, [], site, extracted)
+        assert score == 30
 
     def test_floor_not_applied_when_structural_violation_present(self) -> None:
         """Given: recreational use in Residential zone but a NEEDS_REZONING violation

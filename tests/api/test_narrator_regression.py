@@ -85,6 +85,13 @@ def test_deterministic_overrides(case_id: str) -> None:
         assert low == 55, f"{label}: precedent floor-55 did not bind (5 -> {low})"
         # high == 95 also proves the cap-30 was exempted by the precedent
         assert high == 95, f"{label}: cap not exempted by precedent (95 -> {high})"
+    elif expected.get("unknown_limits_floor_55"):
+        # Compatible use, zero structural violations, but no encoded limit could
+        # be verified against the proposal — floors at 55, not 70.
+        assert low == 55, (
+            f"{label}: unknown-limits floor-55 did not bind (5 -> {low})"
+        )
+        assert high == 95, f"{label}: unexpected cap (95 -> {high})"
     else:
         assert (low, high) == (5, 95), (
             f"{label}: expected passthrough, got (5 -> {low}, 95 -> {high})"
@@ -120,7 +127,7 @@ def test_narrate_end_to_end_mocked(case_id: str) -> None:
         assert score == 30
     elif expected["floor_70"]:
         assert score == 70
-    elif expected["precedent_floor_55"]:
+    elif expected["precedent_floor_55"] or expected.get("unknown_limits_floor_55"):
         assert score == 55
     else:
         assert score == 50

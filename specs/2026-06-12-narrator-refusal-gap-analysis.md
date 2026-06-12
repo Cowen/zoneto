@@ -219,6 +219,53 @@ blast radius (training labels) — do not bundle it with narrator work.
 
 ---
 
+## Follow-up (same day): Proposals 1–3 Implemented and Proven Out
+
+Proposals 1–3 were implemented immediately after this analysis and validated
+against the eval suite and the refused-set triage.
+
+**What landed:**
+
+1. *Floor-70 demotion* (`narrator.py::_limits_verified`): the as-of-right
+   floor-70 now fires only when at least one encoded limit (storeys, height —
+   stated or inferred, units, FSI) was actually checked against an extracted
+   value; compatible-use proposals with unverifiable limits floor at 55. The
+   system prompt's Step 2 gained a matching "limits unknown → 55–65" band.
+2. *Storeys→metres inference* (`compliance.py::effective_height_m`, 3.0m/storey):
+   a new `height_exceeds_max_inferred` check fires when no explicit height was
+   stated, the zone has no storey limit, and the estimate exceeds the metre
+   limit by >25%; the cap-30 ratio uses the inferred height too.
+3. *FSI checking* (`extract.py::proposed_fsi` + `compliance.py::_check_fsi`):
+   stated FSI ("FSI of 5.4", "32.27 times the lot area") is extracted and
+   checked against `zoning_max_density`; FSI joins the cap-30 ratio trio.
+
+**Refused-set triage, before → after** (`just narrator-triage --llm`, n=17):
+
+| Metric | Before | After |
+|---|---|---|
+| Refused scoring >= 70 | **8/17 (47%)** | **0/17** |
+| Refused scoring >= 55 | 9/17 | 6/17 (all in the honest 55–64 "limits unknown" band, plus the precedent case) |
+| Median / max LLM score | 55 / 73 | **30 / 64** |
+| Buckets | floor-70: 8, cap-30: 3, passthrough: 5, precedent: 1 | cap-30: 7, floor-55-unverified: 5, passthrough: 4, precedent: 1 |
+
+The inference converted four additional refusals into deterministic caps
+(68 Wellesley 28st vs 18m, 372-378 Yonge 73st vs 46m, 328 Dupont 13st vs 13m,
+782 King W 18st vs its E-zone height limit). No approved case regressed:
+weston-1552 and fallingbrook-100 keep floor-70 (limits encoded and respected),
+st-clair-1613 and dorney-43 keep their precedent floors — 13/13 bands and 3/3
+orderings green post-change.
+
+**Golden-case movement:** wellesley-68, yonge-374, and dupont-328 were
+re-banded from advisory [70, 88] to **assertable [10, 30]** — three documented
+limitations became regression-tested correct behavior. The finch pair demoted
+to floor-55; it remains compressed (revised 78–80 vs original 60–78, advisory)
+because neither text states an FSI — separating it needs unit-density
+inference (units vs lot area), which stays on the proposal list. yonge-374 now
+passes for the height reason, not the heritage reason; the heritage and
+secondary-plan blind spots (gaps #5–6 above) remain open.
+
+---
+
 ## Artifacts From This Batch
 
 - `scripts/narrator_refused_triage.py` + `just narrator-triage` — rerun after

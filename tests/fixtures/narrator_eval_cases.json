@@ -1,7 +1,7 @@
 {
   "_meta": {
     "created": "2026-06-12",
-    "notes": "Golden cases for narrator confidence regression. Outcomes verified against the live Toronto AIC ArcGIS FeatureServer on the date above. Every real case's description also exists in data/enriched/dev_applications.parquet, so integration-time TF-IDF similarity returns the case itself as a ~100% comparable: for approved cases this deterministically triggers the precedent floor-55; for refused cases (dev_approved=0) it does not. ci.site blocks are snapshots of lookup_site_context() output so the CI tier needs no data/reference or duckdb. Run `just narrator-eval` for per-case detail. Band derivation: floors/caps are deterministic one-sided anchors; the ceiling of 88 for non-capped cases is the system prompt's Step-2A maximum (base band max 80 + max within-band adjustment of +8). Cap-30 cases use a lower bound of 10, the floor of the prompt's extreme-violation band. Bands calibrated against ~6 live runs on 2026-06-12; observed ranges are recorded per case in notes. 2026-06-12 refused/revised triage batch (yonge-374, dupont-328, mendota-2, finch-57-revised, finch-57-original): cases selected from scripts/narrator_refused_triage.py over all unique refused applications; refusal reasons researched in specs/2026-06-12-narrator-refusal-gap-analysis.md. NOTE: the AIC layer schema changed by 2026-06 — the GET verification URLs recorded for the original 8 cases now return 400; use POST with where=FOLDERRSN IN (...) and the STATUS_DESC field instead."
+    "notes": "Golden cases for narrator confidence regression. Outcomes verified against the live Toronto AIC ArcGIS FeatureServer on the date above. Every real case's description also exists in data/enriched/dev_applications.parquet, so integration-time TF-IDF similarity returns the case itself as a ~100% comparable: for approved cases this deterministically triggers the precedent floor-55; for refused cases (dev_approved=0) it does not. ci.site blocks are snapshots of lookup_site_context() output so the CI tier needs no data/reference or duckdb. Run `just narrator-eval` for per-case detail. Band derivation: floors/caps are deterministic one-sided anchors; the ceiling of 88 for non-capped cases is the system prompt's Step-2A maximum (base band max 80 + max within-band adjustment of +8). Cap-30 cases use a lower bound of 10, the floor of the prompt's extreme-violation band. Bands calibrated against ~6 live runs on 2026-06-12; observed ranges are recorded per case in notes. 2026-06-12 refused/revised triage batch (yonge-374, dupont-328, mendota-2, finch-57-revised, finch-57-original): cases selected from scripts/narrator_refused_triage.py over all unique refused applications; refusal reasons researched in specs/2026-06-12-narrator-refusal-gap-analysis.md. NOTE: the AIC layer schema changed by 2026-06 — the GET verification URLs recorded for the original 8 cases now return 400; use POST with where=FOLDERRSN IN (...) and the STATUS_DESC field instead. 2026-06-12 scoring change (gap-analysis proposals 1-3: floor-70 demotion to 55 on unverified limits, storeys-to-metres inference at 3m/storey, FSI checking): wellesley-68, yonge-374, dupont-328 re-banded from advisory [70,88] to assertable [10,30]; finch pair re-banded to floor-55 bands."
   },
   "cases": [
     {
@@ -75,7 +75,8 @@
         "expected_overrides": {
           "floor_70": false,
           "precedent_floor_55": true,
-          "cap_30": false
+          "cap_30": false,
+          "unknown_limits_floor_55": false
         }
       },
       "notes": "57m proposed vs 11m zone limit (5.2x) would trigger the cap-30, but the same-zone Council-approved comparable at 100% similarity within 250m exempts it and floors confidence at 55. The height violation is structural, so the floor-70 does not apply. In integration runs the TF-IDF self-match against the enriched parquet provides the precedent. Observed over 6 calibration runs (2026-06-12): 55-78 (55 = precedent floor binding)."
@@ -151,7 +152,8 @@
         "expected_overrides": {
           "floor_70": false,
           "precedent_floor_55": false,
-          "cap_30": true
+          "cap_30": true,
+          "unknown_limits_floor_55": false
         }
       },
       "notes": "Same extreme description placed in an R zone with a 13m height limit (57/13 = 4.4x). The St Clair approval is ~1.1 km away, beyond the 250m same-site radius, so the precedent exemption must NOT fire and the cap-30 binds. Observed over 6 calibration runs (2026-06-12): 30 every run (cap binds)."
@@ -210,7 +212,8 @@
         "expected_overrides": {
           "floor_70": true,
           "precedent_floor_55": false,
-          "cap_30": false
+          "cap_30": false,
+          "unknown_limits_floor_55": false
         }
       },
       "notes": "8 storeys proposed vs RA zone max 8 — within limits, residential use permitted in Residential Apartment, zero structural violations. The as-of-right floor-70 binds deterministically. Observed over 5 calibration runs (2026-06-12): 75-82."
@@ -269,7 +272,8 @@
         "expected_overrides": {
           "floor_70": true,
           "precedent_floor_55": false,
-          "cap_30": false
+          "cap_30": false,
+          "unknown_limits_floor_55": false
         }
       },
       "notes": "2-storey elementary school addition in an RS zone with a 2-storey limit. classify_use → institutional, which Residential permits; zero structural violations, so floor-70 binds. Observed over 5 calibration runs (2026-06-12): 78-88."
@@ -328,7 +332,8 @@
         "expected_overrides": {
           "floor_70": false,
           "precedent_floor_55": false,
-          "cap_30": false
+          "cap_30": false,
+          "unknown_limits_floor_55": false
         }
       },
       "notes": "Residential tower in a Utility/Transportation zone — use_not_permitted structural violation, no encoded height/unit limits so no cap. No deterministic override applies; the LLM Step-2C band (35-55) minus adjustments governs. Self-match precedent cannot fire (dev_approved=0). Widest band in the suite — the only LLM-dominated case. Observed over 5 calibration runs (2026-06-12): 15-45 — high variance, hence the wide band."
@@ -387,7 +392,8 @@
         "expected_overrides": {
           "floor_70": false,
           "precedent_floor_55": false,
-          "cap_30": true
+          "cap_30": true,
+          "unknown_limits_floor_55": false
         }
       },
       "notes": "46 storeys proposed vs RD zone max 2 (23x). The cap-30 binds; no approved precedent exists (self-match has dev_approved=0). Refusal correlates with the deterministic cap — the assertable refused case. Observed over 5 calibration runs (2026-06-12): 18-30."
@@ -410,12 +416,12 @@
           "verified_date": "2026-06-12"
         }
       },
-      "mechanism": "KNOWN LIMITATION: floor-70 fires despite real-world refusal",
+      "mechanism": "cap-30 via inferred height (28st ≈ 84m vs 18m limit, 4.7x)",
       "expected_confidence": {
-        "min": 70,
-        "max": 88
+        "min": 10,
+        "max": 30
       },
-      "advisory": true,
+      "advisory": false,
       "ci": {
         "site": {
           "zoning_class": "CR",
@@ -444,12 +450,13 @@
         },
         "sim_stub": null,
         "expected_overrides": {
-          "floor_70": true,
+          "floor_70": false,
           "precedent_floor_55": false,
-          "cap_30": false
+          "cap_30": true,
+          "unknown_limits_floor_55": false
         }
       },
-      "notes": "ADVISORY — documents a known limitation, do not 'fix' by asserting low. The CR zone has no encoded height/unit limits, mixed_use is permitted, so the rule engine sees zero structural violations and the floor-70 binds — yet the real application was refused and the OLT upheld the refusal (site-specific Church Street character policies, shadow impact on Barbara Hall Park). Confidence measures compliance-path viability from structured open data, not approval probability; area-specific OP policies are not in that data. If this case starts scoring low, the floor-70 contract changed — investigate before re-banding. Observed over 5 calibration runs (2026-06-12): 70 every run (floor binds exactly)."
+      "notes": "Formerly THE advisory case: the CR zone encodes an 18m height limit but the description states height only in storeys (28), so pre-2026-06 scoring saw zero structural violations and the floor-70 pinned a refused application at 70. The storeys-to-metres inference (3m/storey) added in the refusal gap-analysis batch now yields ≈84m vs 18m (4.7x): structural violation + cap-30, matching the real outcome (Council refused 2024, OLT dismissed the appeal 2025). The underlying OP blind spot (Church St character policies, Barbara Hall Park shadow) is still real — it is now documented by finch-57-original instead. Re-banded 2026-06-12 after the scoring change. Observed over 5 calibration runs post-change (2026-06-12): 22-28."
     },
     {
       "id": "dorney-43",
@@ -505,7 +512,8 @@
         "expected_overrides": {
           "floor_70": false,
           "precedent_floor_55": false,
-          "cap_30": false
+          "cap_30": false,
+          "unknown_limits_floor_55": false
         }
       },
       "notes": "Residential proposed in an Open Space zone — use_not_permitted structural violation, so no floor-70. In integration runs the TF-IDF self-match (Council-approved, same OR zone, same site) floors at 55. No sim stub in CI, so the CI tier expects pure passthrough here. Observed over 5 calibration runs (2026-06-12): 78-82."
@@ -528,12 +536,12 @@
           "verified_date": "2026-06-12"
         }
       },
-      "mechanism": "KNOWN LIMITATION: floor-70 fires despite heritage-driven refusal",
+      "mechanism": "cap-30 via inferred height (73st ≈ 219m vs 46m limit, 4.8x)",
       "expected_confidence": {
-        "min": 70,
-        "max": 88
+        "min": 10,
+        "max": 30
       },
-      "advisory": true,
+      "advisory": false,
       "ci": {
         "site": {
           "zoning_class": "CR",
@@ -562,12 +570,13 @@
         },
         "sim_stub": null,
         "expected_overrides": {
-          "floor_70": true,
+          "floor_70": false,
           "precedent_floor_55": false,
-          "cap_30": false
+          "cap_30": true,
+          "unknown_limits_floor_55": false
         }
       },
-      "notes": "ADVISORY — documents two stacked limitations. (1) The CR zone DOES have an encoded 46m height limit, but the description states height only in storeys (73) and extraction does no storeys-to-metres inference, so check_compliance sees zero structural violations and the floor-70 binds. (2) The refusal driver is heritage (designated facades on-site), but in_heritage_register=0 at this geocode and heritage flags are informational-only — they can never block the floor-70. If either gap is fixed this case should drop out of the 70+ band; re-band it then. Refused/revised triage batch (2026-06-12). Observed over 5 calibration runs (2026-06-12): 70-75 (floor-70 binding)."
+      "notes": "Was advisory (floor-70 despite heritage-driven refusal) at creation; the storeys-to-metres inference now converts 73 storeys against the CR zone's 46m limit into a cap-30, matching the refusal. The heritage blind spot itself (in_heritage_register=0 at this geocode; heritage flags informational-only) is still unfixed — this case now passes for the height reason, not the heritage reason; the refusal report's actual grounds were heritage scale/form/massing. Re-banded 2026-06-12 after the scoring change. Observed over 5 calibration runs post-change (2026-06-12): 22-30."
     },
     {
       "id": "dupont-328",
@@ -587,12 +596,12 @@
           "verified_date": "2026-06-12"
         }
       },
-      "mechanism": "KNOWN LIMITATION: floor-70 fires despite secondary-plan-driven refusal",
+      "mechanism": "cap-30 via inferred height (13st ≈ 39m vs 13m limit, 3.0x)",
       "expected_confidence": {
-        "min": 70,
-        "max": 88
+        "min": 10,
+        "max": 30
       },
-      "advisory": true,
+      "advisory": false,
       "ci": {
         "site": {
           "zoning_class": "R",
@@ -621,12 +630,13 @@
         },
         "sim_stub": null,
         "expected_overrides": {
-          "floor_70": true,
+          "floor_70": false,
           "precedent_floor_55": false,
-          "cap_30": false
+          "cap_30": true,
+          "unknown_limits_floor_55": false
         }
       },
-      "notes": "ADVISORY — three stacked limitations. (1) 13.0m height limit encoded but '13 storeys' is never converted to metres, so zero structural violations and floor-70 binds. (2) The binding constraint was the Dupont Street Secondary Plan (20m rail-corridor setback, corridor height cap), but in_secondary_plan=0 here — the secondary-plans layer does not cover this corridor study area. (3) in_heritage_district=1 is informational-only (worth at most -8 within band). FSI limit 1.0 also present and unchecked. Refused/revised triage batch (2026-06-12). Observed over 5 calibration runs (2026-06-12): 70 every run (floor binds exactly)."
+      "notes": "Was advisory (floor-70 despite secondary-plan-driven refusal); the storeys-to-metres inference now converts 13 storeys against the R zone's 13m limit into exactly 3.0x — cap-30, matching the refusal. Still-unfixed blind spots this case documented: in_secondary_plan=0 here (the Dupont Street Secondary Plan corridor is missing from the secondary-plans layer) and the 20m rail-corridor setback is unmodeled. Re-banded 2026-06-12 after the scoring change. Observed over 5 calibration runs post-change (2026-06-12): 25-28."
     },
     {
       "id": "mendota-2",
@@ -682,7 +692,8 @@
         "expected_overrides": {
           "floor_70": false,
           "precedent_floor_55": false,
-          "cap_30": false
+          "cap_30": false,
+          "unknown_limits_floor_55": false
         }
       },
       "notes": "Self-storage facility in a Residential Multiple zone — use_not_permitted structural violation, no cap (no storey limit; units limit 4 but no unit count extracted). No deterministic override; LLM Step-2C governs, like livingston-408 but use-driven on the proposal side rather than the zone side. The narrator's one refused case it gets right for the right reason. Refused/revised triage batch (2026-06-12). Observed over 5 calibration runs (2026-06-12): 25-40."
@@ -705,9 +716,9 @@
           "verified_date": "2026-06-12"
         }
       },
-      "mechanism": "floor-70 (zero structural violations) + approved self-precedent",
+      "mechanism": "floor-55 (limits unverified) + approved self-precedent",
       "expected_confidence": {
-        "min": 70,
+        "min": 55,
         "max": 88
       },
       "advisory": false,
@@ -756,12 +767,13 @@
           ]
         },
         "expected_overrides": {
-          "floor_70": true,
-          "precedent_floor_55": false,
-          "cap_30": false
+          "floor_70": false,
+          "precedent_floor_55": true,
+          "cap_30": false,
+          "unknown_limits_floor_55": false
         }
       },
-      "notes": "The approved half of the revised-then-approved pair. RM zone encodes no storey/height/unit limits (only FSI 0.85, which is never violation-checked), so floor-70 binds; the approved self-match at 100% similarity additionally provides the precedent floor-55, which floor-70 supersedes in the probe. Outcome calibrated correctly (approved, scores 70+), though partly for the wrong reason — see finch-57-original. Refused/revised triage batch (2026-06-12). Observed over 5 calibration runs (2026-06-12): 78-82."
+      "notes": "The approved half of the revised-then-approved pair. RM zone encodes no storey/height/unit limits and no FSI is stated in the text, so no limit can be verified — under post-2026-06 scoring the as-of-right floor demotes to 55 (was 70), and the approved self-match precedent independently floors at 55. Outcome approved, so the LLM's Step-2B band (55-65) plus precedent uplift should land mid-to-high. Re-banded 2026-06-12 after the scoring change. Observed over 5 calibration runs post-change (2026-06-12): 78-80."
     },
     {
       "id": "finch-57-original",
@@ -781,10 +793,10 @@
           "verified_date": "2026-06-12"
         }
       },
-      "mechanism": "KNOWN LIMITATION: original and revised score identically (floor-70 both)",
+      "mechanism": "KNOWN LIMITATION: floor-55 (limits unverified) — pair still compressed",
       "expected_confidence": {
-        "min": 70,
-        "max": 88
+        "min": 40,
+        "max": 80
       },
       "advisory": true,
       "ci": {
@@ -815,12 +827,13 @@
         },
         "sim_stub": null,
         "expected_overrides": {
-          "floor_70": true,
+          "floor_70": false,
           "precedent_floor_55": false,
-          "cap_30": false
+          "cap_30": false,
+          "unknown_limits_floor_55": true
         }
       },
-      "notes": "ADVISORY — pins the pair-compression limitation: the narrator cannot separate a refused-shape original from its approved revision. The revision that won OMB approval (-40% units, building-type change, setbacks, coverage) is invisible to the rule engine because the RM zone encodes no unit/storey/height limits and FSI 0.85 is never checked (70 units at 4 storeys on a 925 sqm-min lot is far past 0.85 FSI). Both halves of the pair floor at 70, so no ordering between them is asserted. If FSI checking or unit-density inference lands, this case should drop below finch-57-revised; add the ordering then. Refused/revised triage batch (2026-06-12). Observed over 5 calibration runs (2026-06-12): 75-78 — tied finch-57-revised once (78 vs 78), confirming no within-pair ordering can be asserted."
+      "notes": "ADVISORY — pins the pair-compression limitation: the narrator still cannot separate the refused-shape original from its approved revision. Post-2026-06 scoring demotes both halves from floor-70 to floor-55 (RM zone, no verifiable limits; FSI 0.85 encoded but neither text states an FSI to check). The revision that won OMB approval (-40% units, building-type change, setbacks, coverage) remains invisible to the rule engine. If unit-density inference (units vs lot area) lands, this case should drop below finch-57-revised; add the within-pair ordering then. Re-banded 2026-06-12 after the scoring change. Observed over 5 calibration runs post-change (2026-06-12): 60-78 — still overlaps finch-57-revised (78-80), so the pair stays unordered; the LLM now sometimes applies the unknown-limits band (60) but often mirrors the revised score."
     }
   ],
   "orderings": [

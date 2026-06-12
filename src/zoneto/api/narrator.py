@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from zoneto.analytics.bylaw_index import Chunk
-from zoneto.analytics.compliance import Severity, Violation
+from zoneto.analytics.compliance import Severity, Violation, effective_height_m
 from zoneto.analytics.extract import ProjectFeatures
 from zoneto.analytics.use_classifier import use_matches_zone
 from zoneto.api.llm_client import LLMClient
@@ -48,6 +48,8 @@ STRICT RULES you must always follow:
      value ≥ 3× the zone limit (e.g. 17 storeys proposed, 3 allowed =
      5.7×; or 258 units proposed, 4 allowed = 64×), you MUST set
      confidence ≤ 30. Set confidence 10–30 based on violation severity.
+     Violations whose observed value is inferred (height estimated at
+     3m/storey) and FSI/density violations count for this check too.
      Exception — approved same-zone precedent: if the comparable
      application outcomes include a same-zone OZ that is Council-approved
      with similarity ≥ 90%, the cap does NOT apply. Proceed to Step 2.
@@ -66,12 +68,18 @@ STRICT RULES you must always follow:
      exception notes) are context — NOT compliance failures. They do NOT lower
      the base band. Only NEEDS_VARIANCE and NEEDS_REZONING violations count.
      A. Zero STRUCTURAL violations (NEEDS_VARIANCE / NEEDS_REZONING) + compatible
-        zone use → base band 70–80. "Compatible" means the Use compatibility line
-        in the site context shows "permitted". INFORMATIONAL violations are fine
-        here. Data gaps do NOT disqualify this — CR zones routinely have no hard
-        unit/height limits in public data.
-     B. Zero structural violations + mismatched or unclear zone use → 55–65.
-     C. Structural violations present (one or more NEEDS_VARIANCE or
+        zone use + at least one numeric limit VERIFIED → base band 70–80.
+        "Compatible" means the Use compatibility line shows "permitted".
+        "Verified" means the Limits line states a numeric limit (storeys,
+        height, units, or FSI) that an extracted project feature respects.
+        INFORMATIONAL violations are fine here.
+     B. Zero structural violations + compatible use, but NO numeric limit could
+        be checked against the proposal (Limits line says "not available from
+        structured data", or no comparable feature was extracted) → 55–65.
+        Zero violations here means "nothing was checkable", not "as-of-right" —
+        state the missing limits as a data gap in the prose.
+     C. Zero structural violations + mismatched or unclear zone use → 55–65.
+     D. Structural violations present (one or more NEEDS_VARIANCE or
         NEEDS_REZONING) → 35–55.
    Step 3 — Adjust within the base band ONLY (max ±8 total):
      Up to +8: MTSA, secondary plan, or site-specific exception.
@@ -386,6 +394,23 @@ def _has_approved_precedent(
     return False
 
 
+def _limits_verified(extracted: ProjectFeatures, site: dict[str, Any]) -> bool:
+    """True when at least one encoded zoning limit was checked against the proposal.
+
+    Zero violations only means "as-of-right" when something was actually
+    verified: an extracted value (storeys, height — stated or storeys-inferred,
+    units, FSI) paired with an encoded limit. A zone polygon with all-null
+    limits verifies nothing, no matter what the proposal says.
+    """
+    pairs = (
+        (extracted.proposed_storeys, site.get("zoning_max_storeys")),
+        (effective_height_m(extracted), site.get("zoning_max_height_m")),
+        (extracted.proposed_units, site.get("zoning_max_units")),
+        (extracted.proposed_fsi, site.get("zoning_max_density")),
+    )
+    return any(prop is not None and limit for prop, limit in pairs)
+
+
 def _apply_confidence_overrides(
     score: int,
     violations: list[Violation],
@@ -396,30 +421,35 @@ def _apply_confidence_overrides(
     """Apply deterministic floor/cap rules after LLM scoring.
 
     Floors (applied first):
-      - Use is permitted in zone + no structural violations → min 70 (as-of-right path).
-        Informational violations (heritage, MTSA, exceptions) do not block this floor.
-      - No violations + mixed/commercial-residential category string → min 70 (fallback
-        for zone categories not in _ZONE_ALLOWED, caught by substring match).
+      - Use is permitted in zone + no structural violations → min 70 when at
+        least one encoded limit was verified against the proposal (as-of-right
+        path); min 55 when no limit could be verified (compatible use, limits
+        unknown — refusal drivers may be invisible). Informational violations
+        (heritage, MTSA, exceptions) do not block these floors.
+      - No violations + mixed/commercial-residential category string → same
+        70/55 floor (fallback for zone categories not in _ZONE_ALLOWED).
       - Same-zone Council-approved comparable at ≥ 90% similarity → min 55.
 
     Cap (skipped when approved precedent exists):
-      - Proposed ≥ 3× zoning limit (storeys, units, or height) → max 30.
+      - Proposed ≥ 3× zoning limit (storeys, units, height, or FSI) → max 30.
+        Height uses the stated metres or a 3m/storey inference from storeys.
         Exemption: if a same-zone approved comparable matches at ≥ 90%,
         the cap does not apply — the precedent overrides the ratio rule.
     """
     structural = [v for v in violations if v.severity != Severity.INFORMATIONAL]
+    as_of_right_floor = 70 if _limits_verified(extracted, site) else 55
     if (
         use_matches_zone(extracted.proposed_use, site.get("permitted_use_category"))
         == 1
         and not structural
     ):
-        score = max(score, 70)
+        score = max(score, as_of_right_floor)
 
     permitted = (site.get("permitted_use_category") or "").lower()
     if not violations and any(
         k in permitted for k in ("mixed", "commercial residential")
     ):
-        score = max(score, 70)
+        score = max(score, as_of_right_floor)
 
     has_precedent = _has_approved_precedent(
         description_similarity, site.get("zoning_class")
@@ -430,13 +460,16 @@ def _apply_confidence_overrides(
     max_storeys = site.get("zoning_max_storeys") or 0
     max_units = site.get("zoning_max_units") or 0
     max_height = site.get("zoning_max_height_m") or 0
+    max_fsi = site.get("zoning_max_density") or 0
     prop_storeys = extracted.proposed_storeys or 0
     prop_units = extracted.proposed_units or 0
-    prop_height = extracted.proposed_height_m or 0
+    prop_height = effective_height_m(extracted) or 0
+    prop_fsi = extracted.proposed_fsi or 0
     extreme = (
         (max_storeys and prop_storeys / max_storeys >= 3.0)
         or (max_units and prop_units / max_units >= 3.0)
         or (max_height and prop_height / max_height >= 3.0)
+        or (max_fsi and prop_fsi / max_fsi >= 3.0)
     )
     if extreme and not has_precedent:
         score = min(score, 30)
@@ -521,21 +554,25 @@ Do not repeat the violations verbatim — explain them in plain language.
 Do not invent information not present in the context above.
 
 BEFORE writing CONFIDENCE, follow the three-step rule from the system prompt:
-Step 1: Check each violation ratio. If ANY exceeds 3×: set confidence 10–30, stop.
+Step 1: Check each violation ratio (including inferred-height and FSI violations).
+        If ANY exceeds 3×: set confidence 10–30, stop.
         Exception: if a same-zone OZ comparable appears with similarity ≥ 90%
         AND Council-approved status, skip the cap — proceed to Steps 2 and 3
         and apply the approved comparable as a +8 upward adjustment in Step 3.
-Step 2: Determine base band (70–80 for zero STRUCTURAL violations + compatible zone;
-        55–65 for zero structural violations + mismatched zone; 35–55 for structural
+Step 2: Determine base band (70–80 for zero STRUCTURAL violations + compatible zone
+        + at least one verified numeric limit; 55–65 for zero structural violations
+        with no checkable limit OR a mismatched zone; 35–55 for structural
         violations present). INFORMATIONAL violations never lower the band.
 Step 3: Adjust within the base band (±8 max) for MTSA/overlay/appeal rate.
         Appeal rate CANNOT push the score below the Step 2 floor.
-Remember: data gaps are caveats, NOT violations. Do not penalise for missing data.
+Remember: data gaps are caveats, NOT violations. Do not penalise for missing data
+beyond the band choice in Step 2.
 VERIFY before writing CONFIDENCE:
   - If Use compatibility says "permitted" AND there are no NEEDS_VARIANCE or
-    NEEDS_REZONING violations: your score MUST be ≥ 70. INFORMATIONAL violations
-    (heritage notes, MTSA flags, exception notes) do NOT count. If you wrote below
-    70, re-apply Step 2A — the base band floor is 70, not lower.
+    NEEDS_REZONING violations: your score MUST be ≥ 70 when the Limits line shows
+    a numeric limit the extracted features respect, and ≥ 55 (band 55–65) when no
+    limit could be checked. INFORMATIONAL violations (heritage notes, MTSA flags,
+    exception notes) do NOT count against this.
 
 End with a CONFIDENCE line as required by the system rules.
 """

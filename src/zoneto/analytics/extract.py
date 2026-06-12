@@ -21,11 +21,22 @@ class ProjectFeatures:
     proposed_height_m: float | None = None
     # apartment/duplex/triplex/fourplex/multiplex/semi_detached/townhouse/detached/None
     building_type: str | None = None
+    proposed_fsi: float | None = None
 
 
 _STOREY_RE = re.compile(r"(?i)(\d+)\s*-?\s*store?ys?")
 _UNIT_RE = re.compile(r"(?i)(\d+)\s+(?:dwelling\s+)?units?")
 _HEIGHT_M_RE = re.compile(r"(?i)(\d+(?:\.\d+)?)\s*-?\s*(?:metres?|meters?|m)\b")
+# FSI / density phrasings seen in real AIC descriptions:
+#   "an FSI of 5.0 times", "a total Floor Space Index (FSI) of 5.4",
+#   "Floor Space Index of 5.5 times the lot", "a density of 32.27 times the lot area",
+#   "resulting in a density (floor space index) of 32.3 times the lot area"
+_FSI_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?i)\bfloor\s+space\s+index\s*(?:\(fsi\))?\s*of\s+(\d+(?:\.\d+)?)"),
+    re.compile(r"(?i)\bfsi\s*(?:\)\s*)?of\s+(\d+(?:\.\d+)?)"),
+    re.compile(r"(?i)\bdensity[^.]{0,30}?\bof\s+(\d+(?:\.\d+)?)\s+times\s+the\s+lot"),
+    re.compile(r"(?i)\b(\d+(?:\.\d+)?)\s+times\s+the\s+lot(?:\s+area)?\b"),
+)
 _BUILDING_TYPE_MAP: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?i)\bapartment\b"), "apartment"),
     (re.compile(r"(?i)\bduplex\b"), "duplex"),
@@ -92,6 +103,13 @@ def extract_project_features(description: str | None) -> ProjectFeatures:
     if height_match:
         height_m = float(height_match.group(1))
 
+    fsi: float | None = None
+    for fsi_re in _FSI_RES:
+        fsi_match = fsi_re.search(description)
+        if fsi_match:
+            fsi = float(fsi_match.group(1))
+            break
+
     proposed_use = classify_use(description)
 
     lower = description.lower()
@@ -127,4 +145,5 @@ def extract_project_features(description: str | None) -> ProjectFeatures:
         description=description,
         proposed_height_m=height_m,
         building_type=building_type,
+        proposed_fsi=fsi,
     )

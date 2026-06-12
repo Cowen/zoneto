@@ -6,10 +6,11 @@ Runs every unique refused application in data/enriched/dev_applications.parquet
 then probes the deterministic confidence overrides from both extremes (5 and
 95) to classify which mechanism would bind — without any LLM call:
 
-    floor-70       as-of-right floor fires (refused app looks fully compliant)
-    precedent-55   approved same-site comparable exempts the cap
-    cap-30         extreme-violation cap fires
-    passthrough    no override — the LLM's score stands
+    floor-70              as-of-right floor fires (a verified limit is respected)
+    floor-55-unverified   compatible use but no encoded limit could be checked
+    precedent-55          approved same-site comparable exempts the cap
+    cap-30                extreme-violation cap fires
+    passthrough           no override — the LLM's score stands
 
 Usage:
     uv run python scripts/narrator_refused_triage.py            # probe only
@@ -39,7 +40,10 @@ import polars as pl
 from zoneto.analytics.compliance import Severity, check_compliance
 from zoneto.analytics.extract import extract_project_features
 from zoneto.api.desc_similarity import score_description_similarity
-from zoneto.api.narrator import _apply_confidence_overrides
+from zoneto.api.narrator import (
+    _apply_confidence_overrides,
+    _has_approved_precedent,
+)
 from zoneto.api.site_context import lookup_site_context
 
 # Keys snapshotted into a golden case's ci.site (fixture convention).
@@ -118,6 +122,7 @@ def _analyze(
     )
     low = _apply_confidence_overrides(5, violations, site, extracted, sim)
     high = _apply_confidence_overrides(95, violations, site, extracted, sim)
+    precedent = _has_approved_precedent(sim, site.get("zoning_class"))
     return {
         "site": site,
         "extracted": extracted,
@@ -125,17 +130,17 @@ def _analyze(
         "sim": sim,
         "low": low,
         "high": high,
-        "bucket": _bucket(low, high),
+        "bucket": _bucket(low, high, precedent=precedent),
     }
 
 
-def _bucket(low: int, high: int) -> str:
+def _bucket(low: int, high: int, *, precedent: bool = False) -> str:
     if high <= 30:
         return "cap-30"
     if low == 70:
         return "floor-70"
     if low == 55:
-        return "precedent-55"
+        return "precedent-55" if precedent else "floor-55-unverified"
     if (low, high) == (5, 95):
         return "passthrough"
     return f"other ({low},{high})"
@@ -191,6 +196,7 @@ def _emit_case(app: dict, analysis: dict) -> None:
     site_snapshot = {k: analysis["site"].get(k) for k in _SITE_SNAPSHOT_KEYS}
     matches = (analysis["sim"] or {}).get("top_matches") or []
     sim_stub = None
+    unverified = analysis["bucket"] == "floor-55-unverified"
     if analysis["bucket"] == "precedent-55" and matches:
         best = matches[0]
         sim_stub = {
@@ -246,6 +252,7 @@ def _emit_case(app: dict, analysis: dict) -> None:
             "expected_overrides": {
                 "floor_70": analysis["bucket"] == "floor-70",
                 "precedent_floor_55": analysis["bucket"] == "precedent-55",
+                "unknown_limits_floor_55": unverified,
                 "cap_30": analysis["bucket"] == "cap-30",
             },
         },

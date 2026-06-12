@@ -940,3 +940,163 @@ class TestComplianceHeightM:
         violations = check_compliance(self._features(20.0), self._site(None))
         rule_ids = [v.rule_id for v in violations]
         assert "height_exceeds_max" not in rule_ids
+
+
+class TestExtractFSI:
+    def test_extracts_fsi_of_phrasing(self) -> None:
+        """Given: 'an FSI of 5.0 times' (320 McCowan phrasing).
+        When: Extracting.
+        Then: proposed_fsi == 5.0."""
+        features = extract_project_features(
+            "522 vehicular parking spaces and an FSI of 5.0 times, in response "
+            "to City staff comments."
+        )
+        assert features.proposed_fsi == 5.0
+
+    def test_extracts_floor_space_index_phrasing(self) -> None:
+        """Given: 'a Floor Space Index of 5.5 times the lot'.
+        When: Extracting.
+        Then: proposed_fsi == 5.5."""
+        features = extract_project_features(
+            "would result in a Floor Space Index of 5.5 times the lot."
+        )
+        assert features.proposed_fsi == 5.5
+
+    def test_extracts_fsi_parenthetical_phrasing(self) -> None:
+        """Given: 'a total Floor Space Index (FSI) of 5.4' (408 Livingston phrasing).
+        When: Extracting.
+        Then: proposed_fsi == 5.4."""
+        features = extract_project_features(
+            "30,888 sq. m of gross floor area (GFA), which results in a total "
+            "Floor Space Index (FSI) of 5.4"
+        )
+        assert features.proposed_fsi == 5.4
+
+    def test_extracts_density_times_the_lot_phrasing(self) -> None:
+        """Given: 'a density of 32.27 times the lot area' (36 Eglinton phrasing).
+        When: Extracting.
+        Then: proposed_fsi == 32.27."""
+        features = extract_project_features(
+            "The total gross floor area would be 45,112 square metres resulting "
+            "in a density of 32.27 times the lot area."
+        )
+        assert features.proposed_fsi == 32.27
+
+    def test_no_fsi_when_absent(self) -> None:
+        """Given: A description with no density language.
+        When: Extracting.
+        Then: proposed_fsi is None."""
+        features = extract_project_features("A 4-storey building with 10 units.")
+        assert features.proposed_fsi is None
+
+
+class TestComplianceInferredHeight:
+    def _site(
+        self,
+        max_height: float | None,
+        max_storeys: int | None = None,
+    ) -> dict:
+        return {
+            "zoning_class": "CR",
+            "zoning_max_storeys": max_storeys,
+            "zoning_max_units": None,
+            "zoning_max_height_m": max_height,
+            "zoning_max_density": None,
+            "permitted_use_category": "Commercial Residential (mixed)",
+        }
+
+    def test_violation_when_storeys_imply_height_far_over_limit(self) -> None:
+        """Given: 28 storeys stated, no metres, 18m limit, no storey limit
+        (the 68 Wellesley shape — 28 x 3m = 84m, 4.7x the limit).
+        When: Checking compliance.
+        Then: height_exceeds_max_inferred NEEDS_REZONING violation."""
+        features = extract_project_features("a 28 storey mixed-use building")
+        violations = check_compliance(features, self._site(18.0))
+        inferred = [
+            v for v in violations if v.rule_id == "height_exceeds_max_inferred"
+        ]
+        assert len(inferred) == 1
+        assert inferred[0].severity == Severity.NEEDS_REZONING
+
+    def test_no_violation_within_inference_slack(self) -> None:
+        """Given: 4 storeys (inferred 12m) against an 11m limit — over, but
+        within the 25% slack reserved for the 3m/storey assumption.
+        When: Checking compliance.
+        Then: No inferred-height violation."""
+        features = extract_project_features("a 4-storey residential building")
+        violations = check_compliance(features, self._site(11.0))
+        rule_ids = [v.rule_id for v in violations]
+        assert "height_exceeds_max_inferred" not in rule_ids
+
+    def test_no_inference_when_height_stated(self) -> None:
+        """Given: Height stated explicitly in metres (the direct check owns it).
+        When: Checking compliance.
+        Then: No inferred-height violation (height_exceeds_max fires instead)."""
+        features = extract_project_features("a 28-storey, 90 metre tower")
+        violations = check_compliance(features, self._site(18.0))
+        rule_ids = [v.rule_id for v in violations]
+        assert "height_exceeds_max_inferred" not in rule_ids
+        assert "height_exceeds_max" in rule_ids
+
+    def test_no_inference_when_storey_limit_encoded(self) -> None:
+        """Given: The zone has a storey limit — the storeys check owns the
+        dimension; inferring height too would double-flag it.
+        When: Checking compliance.
+        Then: No inferred-height violation (storeys_exceed_max fires instead)."""
+        features = extract_project_features("a 28 storey mixed-use building")
+        violations = check_compliance(features, self._site(18.0, max_storeys=6))
+        rule_ids = [v.rule_id for v in violations]
+        assert "height_exceeds_max_inferred" not in rule_ids
+        assert "storeys_exceed_max" in rule_ids
+
+
+class TestComplianceFSI:
+    def _site(self, max_density: float | None) -> dict:
+        return {
+            "zoning_class": "RM",
+            "zoning_max_storeys": None,
+            "zoning_max_units": None,
+            "zoning_max_height_m": None,
+            "zoning_max_density": max_density,
+            "permitted_use_category": "Residential",
+        }
+
+    def test_violation_when_fsi_exceeds_limit(self) -> None:
+        """Given: Stated FSI 5.4 against a 0.85 density limit.
+        When: Checking compliance.
+        Then: fsi_exceeds_max NEEDS_REZONING violation."""
+        features = extract_project_features(
+            "a total Floor Space Index (FSI) of 5.4"
+        )
+        violations = check_compliance(features, self._site(0.85))
+        fsi_vs = [v for v in violations if v.rule_id == "fsi_exceeds_max"]
+        assert len(fsi_vs) == 1
+        assert fsi_vs[0].severity == Severity.NEEDS_REZONING
+
+    def test_needs_variance_for_small_fsi_excess(self) -> None:
+        """Given: Stated FSI 0.9 against a 0.85 limit (≈6% excess).
+        When: Checking compliance.
+        Then: fsi_exceeds_max with NEEDS_VARIANCE severity."""
+        features = extract_project_features("an FSI of 0.9 times")
+        violations = check_compliance(features, self._site(0.85))
+        fsi_vs = [v for v in violations if v.rule_id == "fsi_exceeds_max"]
+        assert len(fsi_vs) == 1
+        assert fsi_vs[0].severity == Severity.NEEDS_VARIANCE
+
+    def test_no_violation_when_within_limit(self) -> None:
+        """Given: Stated FSI 0.6 against a 0.85 limit.
+        When: Checking compliance.
+        Then: No FSI violation."""
+        features = extract_project_features("an FSI of 0.6 times")
+        violations = check_compliance(features, self._site(0.85))
+        rule_ids = [v.rule_id for v in violations]
+        assert "fsi_exceeds_max" not in rule_ids
+
+    def test_no_violation_when_limit_unknown(self) -> None:
+        """Given: Stated FSI 5.4 but no encoded density limit.
+        When: Checking compliance.
+        Then: No FSI violation (cannot determine exceedance)."""
+        features = extract_project_features("an FSI of 5.4 times")
+        violations = check_compliance(features, self._site(None))
+        rule_ids = [v.rule_id for v in violations]
+        assert "fsi_exceeds_max" not in rule_ids

@@ -24,11 +24,11 @@ _Last verified: 2026-05-29_
 
 `narrate_evaluation(..., description=None)` — when `description` is provided, injects a `## Project description` section (raw proposal text verbatim) right after `## Extracted project features`. Lets the LLM reason about details regex extraction misses (parking, laneway access, accessibility).
 
-Confidence: Step 1 extreme violation check (≥3× limit → cap 10–30); Step 2 base band (70–80 no violations + compatible use, 55–65 mismatched, 35–55 moderate); Step 3 ±8 (MTSA/exception up; high appeal/heritage down).
+Confidence: Step 1 extreme violation check (≥3× limit → cap 10–30, including inferred-height and FSI); Step 2 base band (70–80 zero structural + compatible use + ≥1 verified limit; 55–65 compatible use with no checkable limit OR mismatched use; 35–55 structural violations); Step 3 ±8 (MTSA/exception up; high appeal/heritage down).
 
 **Deterministic overrides (applied after LLM parse):**
-- Floor: `violations == []` and `permitted_use_category` contains "mixed"/"commercial residential" → `max(score, 70)`.
-- Cap: proposed_storeys/zoning_max_storeys OR proposed_units/zoning_max_units ≥ 3.0 → `min(score, 30)`.
+- Floor: compatible use + zero structural violations → `max(score, 70)` when `_limits_verified` (≥1 encoded limit checked against an extracted value), else `max(score, 55)` — a zone with all-null limits is "unknowable", not as-of-right.
+- Cap: any of storeys, units, height (stated metres or `effective_height_m` = storeys × 3.0), or FSI ≥ 3.0× its zone limit → `min(score, 30)`. Compliance also emits `height_exceeds_max_inferred` (no stated metres, no storey limit, estimate >125% of metre limit) and `fsi_exceeds_max` violations.
 
 Cross-zone: outcome line suppressed when best comparable's zone ≠ site zone — prevents cross-zone bleed. Data gaps do NOT deduct from confidence score.
 
