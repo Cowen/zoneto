@@ -1,7 +1,8 @@
-"""Tests verifying enrich_dev() prefers AIC records over CKAN for same folderrsn."""
+"""Tests verifying enrich_dev() enriches CKAN records with AIC-only fields."""
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import polars as pl
@@ -34,19 +35,23 @@ def _write_minimal_ckan_dev(tmp_path: Path) -> None:
 
 
 def _write_minimal_aic_apps(tmp_path: Path) -> None:
-    """Write AIC application records that overlap with CKAN on F001."""
+    """Write AIC application records with AIC-only spatial/milestone fields."""
     df = pl.DataFrame(
         {
-            "folderrsn": ["F001", "F004"],  # F001 overlaps, F004 is AIC-only
+            "folderrsn": ["F001", "F004"],  # F001 overlaps CKAN, F004 is AIC-only
             "application_type": ["OZ", "OZ"],
-            "status": ["Approved", "Under Review"],
-            "date_submitted": pl.Series(["2021-06-01", "2023-05-01"]).str.to_date(),
-            "description": ["AIC OZ desc (preferred)", "AIC-only application"],
-            "ward_number": ["10", "12"],
+            "lat": [43.67, 43.68],
+            "lon": [-79.45, -79.46],
+            "latest_milestone": ["Hearing Scheduled", "Application Complete"],
+            "latest_milestone_date": pl.Series(
+                [date(2022, 3, 1), date(2023, 6, 15)], dtype=pl.Date
+            ),
+            "complete_date": pl.Series([None, None], dtype=pl.Date),
+            "scraped_at": pl.Series(
+                [date(2024, 1, 1), date(2024, 1, 1)], dtype=pl.Date
+            ),
             "year": pl.Series([2021, 2023], dtype=pl.Int32),
             "source_name": ["aic_applications"] * 2,
-            "community_meeting_date": [None, None],
-            "postal": ["M5V", "M5Z"],
         }
     )
     out = tmp_path / "aic_applications" / "year=2021"
@@ -54,14 +59,13 @@ def _write_minimal_aic_apps(tmp_path: Path) -> None:
     df.write_parquet(out / "part0.parquet")
 
 
-def test_enrich_dev_uses_aic_over_ckan_for_matching_folderrsn(
+def test_enrich_dev_enriches_ckan_with_aic_spatial_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When AIC data exists, enrich_dev() uses AIC status/description for F001."""
+    """AIC adds lat/lon/milestone to matching CKAN rows; CKAN fields are preserved."""
     _write_minimal_ckan_dev(tmp_path)
     _write_minimal_aic_apps(tmp_path)
 
-    # Stub out spatial join and reference fetch
     monkeypatch.setattr(
         "zoneto.analytics.enrich._spatial_join_dev",
         lambda df, data_dir: df.with_columns(
@@ -83,13 +87,20 @@ def test_enrich_dev_uses_aic_over_ckan_for_matching_folderrsn(
 
     df = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
 
-    # F001: AIC record should override CKAN
+    # F001: CKAN fields are preserved; AIC-only lat/lon/milestone fields are added
     f001 = df.filter(pl.col("folderrsn") == "F001")
     assert len(f001) == 1
-    assert f001["description"][0] == "AIC OZ desc (preferred)"
+    assert f001["description"][0] == "CKAN OZ desc", "CKAN description preserved"
+    assert f001["status"][0] == "Closed", "CKAN status must be preserved"
+    assert f001["lat"][0] == pytest.approx(43.67), "AIC lat must be added"
+    assert f001["lon"][0] == pytest.approx(-79.45), "AIC lon must be added"
+    assert f001["latest_milestone"][0] == "Hearing Scheduled"
 
-    # F002 and F003: CKAN-only records still present
-    assert len(df.filter(pl.col("folderrsn") == "F002")) == 1
+    # F002 and F003: CKAN-only records still present, lat/lon null
+    f002 = df.filter(pl.col("folderrsn") == "F002")
+    assert len(f002) == 1
+    assert f002["lat"][0] is None, "CKAN-only row has no AIC lat"
+
     assert len(df.filter(pl.col("folderrsn") == "F003")) == 1
 
 

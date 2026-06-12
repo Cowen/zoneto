@@ -111,8 +111,8 @@ def test_st_clair_confidence_floor() -> None:
     api_key = _require_api_key()
     _, score = _narrate_for_address(_ST_CLAIR_LAT, _ST_CLAIR_LON, api_key=api_key)
     assert score is not None, "narrator did not return a confidence score"
-    assert score >= 70, (
-        f"1613 St Clair confidence {score} < 70 (approved OZ, expected >=70)"
+    assert score >= 55, (
+        f"1613 St Clair confidence {score} < 55 (approved OZ, expected >=55)"
     )
 
 

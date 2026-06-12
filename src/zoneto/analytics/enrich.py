@@ -143,29 +143,66 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
             aic_df = aic_df.with_columns(pl.col("folderrsn").cast(pl.String))
         if "folderrsn" in df.columns:
             df = df.with_columns(pl.col("folderrsn").cast(pl.String))
-        # Align schemas: use CKAN schema as base, update matching rows from AIC
         aic_rsns = (
             set(aic_df["folderrsn"].to_list())
             if "folderrsn" in aic_df.columns
             else set()
         )
-        # Keep CKAN rows not in AIC; replace CKAN rows that AIC has; add AIC-only rows
+
+        # AIC fields not in CKAN schema — these are safely added without displacing
+        # any existing CKAN data (lat/lon, milestone info, scraped_at).
+        # Shared fields (application_type, year, source_name) stay as CKAN values.
+        aic_extra_cols = [c for c in aic_df.columns if c not in df.columns]
+
+        # 1. CKAN rows with no AIC match — pad with null AIC columns
         ckan_only = df.filter(~pl.col("folderrsn").is_in(list(aic_rsns)))
-        # For AIC records, map column names to CKAN schema where possible
-        shared_cols = [c for c in df.columns if c in aic_df.columns]
-        aic_aligned = aic_df.select(shared_cols)
-        # Add missing CKAN columns as nulls
-        for col in df.columns:
-            if col not in aic_aligned.columns:
-                aic_aligned = aic_aligned.with_columns(
-                    pl.lit(None).cast(df[col].dtype).alias(col)
-                )
-        aic_aligned = aic_aligned.select(df.columns)
-        df = pl.concat([ckan_only, aic_aligned], how="diagonal")
+        if aic_extra_cols:
+            ckan_only = ckan_only.with_columns(
+                [pl.lit(None).cast(aic_df[c].dtype).alias(c) for c in aic_extra_cols]
+            )
+
+        # 2. CKAN rows that AIC has — enrich in-place with AIC-only fields.
+        #    CKAN fields (status, description, address, etc.) are preserved as-is.
+        #    Deduplicate AIC by folderrsn first (keep most recent milestone) so the
+        #    left join doesn't fan out CKAN rows when AIC has repeated entries.
+        ckan_matched = df.filter(pl.col("folderrsn").is_in(list(aic_rsns)))
+        if aic_extra_cols:
+            aic_deduped = (
+                aic_df.sort("latest_milestone_date", descending=True, nulls_last=True)
+                if "latest_milestone_date" in aic_df.columns
+                else aic_df
+            ).unique(subset=["folderrsn"], keep="first")
+            aic_for_join = aic_deduped.select(["folderrsn"] + aic_extra_cols)
+            ckan_matched = ckan_matched.join(aic_for_join, on="folderrsn", how="left")
+        else:
+            ckan_matched = ckan_matched.with_columns(
+                [pl.lit(None).cast(pl.String).alias(c) for c in []]
+            )
+
+        # 3. AIC rows not in CKAN at all — add with null CKAN fields
+        ckan_rsns = set(df["folderrsn"].to_list())
+        aic_only_rsns = aic_rsns - ckan_rsns
+        parts = [ckan_only, ckan_matched]
+        if aic_only_rsns:
+            aic_only = aic_df.filter(pl.col("folderrsn").is_in(list(aic_only_rsns)))
+            for col in df.columns:
+                if col not in aic_only.columns:
+                    aic_only = aic_only.with_columns(
+                        pl.lit(None).cast(df[col].dtype).alias(col)
+                    )
+            for col in aic_extra_cols:
+                if col not in aic_only.columns:
+                    aic_only = aic_only.with_columns(
+                        pl.lit(None).cast(aic_df[col].dtype).alias(col)
+                    )
+            parts.append(aic_only)
+
+        df = pl.concat(parts, how="diagonal")
         logger.info(
-            "enrich_dev: merged AIC records — %d CKAN-only, %d from AIC (%d total)",
-            len(ckan_only),
-            len(aic_aligned),
+            "enrich_dev: enriched %d CKAN rows with AIC fields, added %d AIC-only rows"
+            " (%d total)",
+            len(ckan_matched),
+            len(aic_only_rsns),
             len(df),
         )
 
