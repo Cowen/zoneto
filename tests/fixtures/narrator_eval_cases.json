@@ -1,7 +1,7 @@
 {
   "_meta": {
     "created": "2026-06-12",
-    "notes": "Golden cases for narrator confidence regression. Outcomes verified against the live Toronto AIC ArcGIS FeatureServer on the date above. Every real case's description also exists in data/enriched/dev_applications.parquet, so integration-time TF-IDF similarity returns the case itself as a ~100% comparable: for approved cases this deterministically triggers the precedent floor-55; for refused cases (dev_approved=0) it does not. ci.site blocks are snapshots of lookup_site_context() output so the CI tier needs no data/reference or duckdb. Run `just narrator-eval` for per-case detail. Band derivation: floors/caps are deterministic one-sided anchors; the ceiling of 88 for non-capped cases is the system prompt's Step-2A maximum (base band max 80 + max within-band adjustment of +8). Cap-30 cases use a lower bound of 10, the floor of the prompt's extreme-violation band. Bands calibrated against ~6 live runs on 2026-06-12; observed ranges are recorded per case in notes."
+    "notes": "Golden cases for narrator confidence regression. Outcomes verified against the live Toronto AIC ArcGIS FeatureServer on the date above. Every real case's description also exists in data/enriched/dev_applications.parquet, so integration-time TF-IDF similarity returns the case itself as a ~100% comparable: for approved cases this deterministically triggers the precedent floor-55; for refused cases (dev_approved=0) it does not. ci.site blocks are snapshots of lookup_site_context() output so the CI tier needs no data/reference or duckdb. Run `just narrator-eval` for per-case detail. Band derivation: floors/caps are deterministic one-sided anchors; the ceiling of 88 for non-capped cases is the system prompt's Step-2A maximum (base band max 80 + max within-band adjustment of +8). Cap-30 cases use a lower bound of 10, the floor of the prompt's extreme-violation band. Bands calibrated against ~6 live runs on 2026-06-12; observed ranges are recorded per case in notes. 2026-06-12 refused/revised triage batch (yonge-374, dupont-328, mendota-2, finch-57-revised, finch-57-original): cases selected from scripts/narrator_refused_triage.py over all unique refused applications; refusal reasons researched in specs/2026-06-12-narrator-refusal-gap-analysis.md. NOTE: the AIC layer schema changed by 2026-06 — the GET verification URLs recorded for the original 8 cases now return 400; use POST with where=FOLDERRSN IN (...) and the STATUS_DESC field instead."
   },
   "cases": [
     {
@@ -509,6 +509,318 @@
         }
       },
       "notes": "Residential proposed in an Open Space zone — use_not_permitted structural violation, so no floor-70. In integration runs the TF-IDF self-match (Council-approved, same OR zone, same site) floors at 55. No sim stub in CI, so the CI tier expects pure passthrough here. Observed over 5 calibration runs (2026-06-12): 78-82."
+    },
+    {
+      "id": "yonge-374",
+      "label": "372-378 Yonge St — 73st mixed-use SA over heritage row, refused",
+      "folderrsn": "4997273",
+      "lat": 43.65679332590546,
+      "lon": -79.38241128636624,
+      "description": "Site Plan Approval for a 73-storey mixed-use building having an non-residential gross floor area of 954.50 square metres, and a residential gross floor area of 33,144.90 square metres with 415 dwelling units.",
+      "outcome": {
+        "decision": "refused",
+        "body": "SA Refused (AIC STATUS_DESC 'Refused'); heritage-driven — City refusal report (toronto.ca/legdocs/mmis/2024/pb/bgrd/backgroundfile-243428.pdf) cites negative impact on the heritage attributes of scale, form and massing of the designated Victorian/Art Deco row at 372-378 Yonge; parent OZ 4789418 went to OLT (in-principle settlement 2022)",
+        "year": 2024,
+        "appealed": false,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live POST query, STATUS_DESC field). Layer schema changed by 2026-06: the old GET ?where=FOLDERRSN=...&outFields=* form returns 400; verify with POST form data where=FOLDERRSN IN (...), outFields=FOLDERRSN,STATUS_DESC,LATEST_MILESTONE,LATEST_MILESTONE_DATE",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "KNOWN LIMITATION: floor-70 fires despite heritage-driven refusal",
+      "expected_confidence": {
+        "min": 70,
+        "max": 88
+      },
+      "advisory": true,
+      "ci": {
+        "site": {
+          "zoning_class": "CR",
+          "zoning_max_units": null,
+          "zoning_max_density": null,
+          "zoning_max_storeys": null,
+          "zoning_max_height_m": 46.0,
+          "permitted_use_category": "Commercial Residential (mixed)",
+          "zoning_min_frontage_m": null,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 1,
+          "zoning_exception_no": "78",
+          "zoning_pct_res": 6.0,
+          "zoning_pct_comm": 2.0,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": null,
+        "expected_overrides": {
+          "floor_70": true,
+          "precedent_floor_55": false,
+          "cap_30": false
+        }
+      },
+      "notes": "ADVISORY — documents two stacked limitations. (1) The CR zone DOES have an encoded 46m height limit, but the description states height only in storeys (73) and extraction does no storeys-to-metres inference, so check_compliance sees zero structural violations and the floor-70 binds. (2) The refusal driver is heritage (designated facades on-site), but in_heritage_register=0 at this geocode and heritage flags are informational-only — they can never block the floor-70. If either gap is fixed this case should drop out of the 70+ band; re-band it then. Refused/revised triage batch (2026-06-12). Observed over 5 calibration runs (2026-06-12): 70-75 (floor-70 binding)."
+    },
+    {
+      "id": "dupont-328",
+      "label": "328-356 Dupont St — 13st rezoning, refused; OMB capped corridor at 12st",
+      "folderrsn": "3693046",
+      "lat": 43.67277991586383,
+      "lon": -79.40924372090099,
+      "description": "Proposal for a revised rezoning application for ine towers (13 storeys) with 85 residential units",
+      "outcome": {
+        "decision": "refused",
+        "body": "City Council (OZ, Refused; AIC STATUS_DESC 'Refused'). OMB decision on the adjacent 328 Dupont proposal capped buildings at 12 storeys and enforced the Dupont Street Secondary Plan's 20m rail-corridor safety setback for high-occupancy uses (joecressy.com/update_328_dupont_omb_decision; staff report toronto.ca/legdocs/mmis/2017/te/bgrd/backgroundfile-102479.pdf)",
+        "year": 2017,
+        "appealed": true,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live POST query, STATUS_DESC field). Layer schema changed by 2026-06: the old GET ?where=FOLDERRSN=...&outFields=* form returns 400; verify with POST form data where=FOLDERRSN IN (...), outFields=FOLDERRSN,STATUS_DESC,LATEST_MILESTONE,LATEST_MILESTONE_DATE",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "KNOWN LIMITATION: floor-70 fires despite secondary-plan-driven refusal",
+      "expected_confidence": {
+        "min": 70,
+        "max": 88
+      },
+      "advisory": true,
+      "ci": {
+        "site": {
+          "zoning_class": "R",
+          "zoning_max_units": null,
+          "zoning_max_density": 1.0,
+          "zoning_max_storeys": null,
+          "zoning_max_height_m": 13.0,
+          "permitted_use_category": "Residential",
+          "zoning_min_frontage_m": null,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 1,
+          "zoning_exception_no": "900",
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 1,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": null,
+        "expected_overrides": {
+          "floor_70": true,
+          "precedent_floor_55": false,
+          "cap_30": false
+        }
+      },
+      "notes": "ADVISORY — three stacked limitations. (1) 13.0m height limit encoded but '13 storeys' is never converted to metres, so zero structural violations and floor-70 binds. (2) The binding constraint was the Dupont Street Secondary Plan (20m rail-corridor setback, corridor height cap), but in_secondary_plan=0 here — the secondary-plans layer does not cover this corridor study area. (3) in_heritage_district=1 is informational-only (worth at most -8 within band). FSI limit 1.0 also present and unchecked. Refused/revised triage batch (2026-06-12). Observed over 5 calibration runs (2026-06-12): 70 every run (floor binds exactly)."
+    },
+    {
+      "id": "mendota-2",
+      "label": "2-4 Mendota Rd — 4st self-storage OZ in RM zone, Council refused 2026",
+      "folderrsn": "5559219",
+      "lat": 43.62275534592343,
+      "lon": -79.49530611075724,
+      "description": "Proposal to amend the Official Plan and Zoning By-law to permit a 4-storey (15.2 metre) tall self-storage facility with a gross floor area of 11,168.26 square metres, 31 at-grade parking spaces and 3 truck loading bays.",
+      "outcome": {
+        "decision": "refused",
+        "body": "City Council (OZ, Refused; AIC milestone 'City Council Decision Made' 2026-05-21; refusal covered in UrbanToronto's May 2026 council roundup)",
+        "year": 2026,
+        "appealed": false,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live POST query, STATUS_DESC field). Layer schema changed by 2026-06: the old GET ?where=FOLDERRSN=...&outFields=* form returns 400; verify with POST form data where=FOLDERRSN IN (...), outFields=FOLDERRSN,STATUS_DESC,LATEST_MILESTONE,LATEST_MILESTONE_DATE",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "refused: self-storage use mismatch in RM zone, LLM mid/low band",
+      "expected_confidence": {
+        "min": 10,
+        "max": 50
+      },
+      "advisory": false,
+      "ci": {
+        "site": {
+          "zoning_class": "RM",
+          "zoning_max_units": 4,
+          "zoning_max_density": null,
+          "zoning_max_storeys": null,
+          "zoning_max_height_m": null,
+          "permitted_use_category": "Residential",
+          "zoning_min_frontage_m": null,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 1,
+          "zoning_exception_no": "18",
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": null,
+        "expected_overrides": {
+          "floor_70": false,
+          "precedent_floor_55": false,
+          "cap_30": false
+        }
+      },
+      "notes": "Self-storage facility in a Residential Multiple zone — use_not_permitted structural violation, no cap (no storey limit; units limit 4 but no unit count extracted). No deterministic override; LLM Step-2C governs, like livingston-408 but use-driven on the proposal side rather than the zone side. The narrator's one refused case it gets right for the right reason. Refused/revised triage batch (2026-06-12). Observed over 5 calibration runs (2026-06-12): 25-40."
+    },
+    {
+      "id": "finch-57-revised",
+      "label": "57-63 Finch Ave W — 70u proposal revised to 42 stacked towns, OMB approved",
+      "folderrsn": "3103677",
+      "lat": 43.77648429616059,
+      "lon": -79.42065239301269,
+      "description": "Original proposal for a 4-storey, 70 unit residential development with 68 underground parking spaces. Application has been appealed to the OMB and has been revised in accordance with the following: a reduction in the number of units from 70 to 42 and a shift from traditional apartment house dwelling units to back-to-back stacked townhouse units; a decrease in the proposed building coverage; the addition of a communal outdoor landscaped amenity area, doubling the overall amount of soft landscaping on the site; a shortened driveway due to a proposed car lift in replacement of the previously proposed car ramp; an increase in setbacks along the Finch and Elmview Avenue frontages and rear yard; removal of the previously proposed rooftop mechanical units; better integration of waste management facilities.",
+      "outcome": {
+        "decision": "approved",
+        "body": "OMB (OZ, OMB Approved; City Council Decision Made milestone 2014-08-25) — approved only after the revision enumerated in the description (70 -> 42 units, apartments -> back-to-back stacked towns, larger setbacks, less coverage)",
+        "year": 2014,
+        "appealed": true,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live POST query, STATUS_DESC field). Layer schema changed by 2026-06: the old GET ?where=FOLDERRSN=...&outFields=* form returns 400; verify with POST form data where=FOLDERRSN IN (...), outFields=FOLDERRSN,STATUS_DESC,LATEST_MILESTONE,LATEST_MILESTONE_DATE",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "floor-70 (zero structural violations) + approved self-precedent",
+      "expected_confidence": {
+        "min": 70,
+        "max": 88
+      },
+      "advisory": false,
+      "ci": {
+        "site": {
+          "zoning_class": "RM",
+          "zoning_max_units": null,
+          "zoning_max_density": 0.85,
+          "zoning_max_storeys": null,
+          "zoning_max_height_m": null,
+          "permitted_use_category": "Residential",
+          "zoning_min_frontage_m": 21.0,
+          "zoning_min_lot_area_sqm": 925.0,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 0,
+          "zoning_exception_no": null,
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": {
+          "n_similar": 1,
+          "appeal_rate": 1.0,
+          "query_lat": 43.77648429616059,
+          "query_lon": -79.42065239301269,
+          "top_matches": [
+            {
+              "folderrsn": "3103677",
+              "application_type": "OZ",
+              "similarity": 1.0,
+              "dev_approved": 1,
+              "dev_appealed": 1,
+              "zoning_class": "RM",
+              "lat": 43.77648429616059,
+              "lon": -79.42065239301269
+            }
+          ]
+        },
+        "expected_overrides": {
+          "floor_70": true,
+          "precedent_floor_55": false,
+          "cap_30": false
+        }
+      },
+      "notes": "The approved half of the revised-then-approved pair. RM zone encodes no storey/height/unit limits (only FSI 0.85, which is never violation-checked), so floor-70 binds; the approved self-match at 100% similarity additionally provides the precedent floor-55, which floor-70 supersedes in the probe. Outcome calibrated correctly (approved, scores 70+), though partly for the wrong reason — see finch-57-original. Refused/revised triage batch (2026-06-12). Observed over 5 calibration runs (2026-06-12): 78-82."
+    },
+    {
+      "id": "finch-57-original",
+      "label": "57-63 Finch Ave W (pre-revision) — 4st/70u apartments, not approvable as proposed",
+      "folderrsn": "3103677",
+      "lat": 43.77648429616059,
+      "lon": -79.42065239301269,
+      "description": "Original proposal for a 4-storey, 70 unit residential development with 68 underground parking spaces.",
+      "outcome": {
+        "decision": "not approved as proposed",
+        "body": "Council made no decision; owner appealed to OMB, which approved 2014 only after the proposal was cut from 70 apartment units to 42 back-to-back stacked townhouse units with larger setbacks and less coverage",
+        "year": 2014,
+        "appealed": true,
+        "verification": {
+          "source": "Reconstructed pre-revision proposal: the description is the verbatim first sentence of folderrsn 3103677's description in dev_applications.parquet, which records both the original proposal and the revision list. Outcome context verified against the AIC FeatureServer record for 3103677 (POST query, STATUS_DESC 'OMB Approved').",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query",
+          "verified_date": "2026-06-12"
+        }
+      },
+      "mechanism": "KNOWN LIMITATION: original and revised score identically (floor-70 both)",
+      "expected_confidence": {
+        "min": 70,
+        "max": 88
+      },
+      "advisory": true,
+      "ci": {
+        "site": {
+          "zoning_class": "RM",
+          "zoning_max_units": null,
+          "zoning_max_density": 0.85,
+          "zoning_max_storeys": null,
+          "zoning_max_height_m": null,
+          "permitted_use_category": "Residential",
+          "zoning_min_frontage_m": 21.0,
+          "zoning_min_lot_area_sqm": 925.0,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 0,
+          "zoning_exception_no": null,
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 0,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": null,
+        "expected_overrides": {
+          "floor_70": true,
+          "precedent_floor_55": false,
+          "cap_30": false
+        }
+      },
+      "notes": "ADVISORY — pins the pair-compression limitation: the narrator cannot separate a refused-shape original from its approved revision. The revision that won OMB approval (-40% units, building-type change, setbacks, coverage) is invisible to the rule engine because the RM zone encodes no unit/storey/height limits and FSI 0.85 is never checked (70 units at 4 storeys on a 925 sqm-min lot is far past 0.85 FSI). Both halves of the pair floor at 70, so no ordering between them is asserted. If FSI checking or unit-density inference lands, this case should drop below finch-57-revised; add the ordering then. Refused/revised triage batch (2026-06-12). Observed over 5 calibration runs (2026-06-12): 75-78 — tied finch-57-revised once (78 vs 78), confirming no within-pair ordering can be asserted."
     }
   ],
   "orderings": [
@@ -521,6 +833,11 @@
       "higher": "weston-1552",
       "lower": "livingston-408",
       "note": "as-of-right floor-70 vs refused use-mismatch"
+    },
+    {
+      "higher": "finch-57-revised",
+      "lower": "mendota-2",
+      "note": "OMB-approved revised proposal vs Council-refused use-mismatch self-storage"
     }
   ]
 }

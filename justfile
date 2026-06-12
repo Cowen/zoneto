@@ -35,6 +35,11 @@ bylaw-eval:
 narrator-eval *ARGS:
     uv run python scripts/narrator_eval.py {{ARGS}}
 
+# Triage refused / revised-then-approved applications against the narrator
+# (deterministic by default; --llm narrates each, --emit-case prints a fixture stanza)
+narrator-triage *ARGS:
+    uv run python scripts/narrator_refused_triage.py {{ARGS}}
+
 # Enrich data
 enrich:
     uv run zoneto enrich

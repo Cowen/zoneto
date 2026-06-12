@@ -197,6 +197,13 @@ def test_confidence_in_band(case_id: str) -> None:
     lo = case["expected_confidence"]["min"]
     hi = case["expected_confidence"]["max"]
     assert score is not None, f"{case['label']}: narrator returned no confidence"
+    if not lo <= score <= hi and case.get("advisory", False):
+        # Advisory cases document known limitations; a band miss is reported
+        # (matching scripts/narrator_eval.py semantics) but must not fail CI.
+        pytest.xfail(
+            f"{case['label']}: advisory miss — confidence {score} "
+            f"outside [{lo}, {hi}] ({case['mechanism']})"
+        )
     assert lo <= score <= hi, (
         f"{case['label']}: confidence {score} outside [{lo}, {hi}] "
         f"({case['mechanism']}) — run `just narrator-eval` for details"
