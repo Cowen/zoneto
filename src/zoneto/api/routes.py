@@ -15,6 +15,12 @@ from pydantic import BaseModel
 from zoneto.analytics.compliance import check_compliance
 from zoneto.analytics.explain import explain_one
 from zoneto.analytics.extract import extract_project_features
+from zoneto.analytics.planning_act import (
+    ADDITIONAL_PROCESS,
+    PROCESS_BY_PATH,
+    additional_processes,
+    path_for_violations,
+)
 from zoneto.analytics.score import score_one
 from zoneto.api.comps import query_comps
 from zoneto.api.desc_similarity import (
@@ -280,6 +286,19 @@ class RelevantSection(BaseModel):
     score: float
 
 
+class StatutoryProcessResult(BaseModel):
+    """The Planning Act process implied by the compliance verdict (framing only)."""
+
+    path: str  # as_of_right | minor_variance | rezoning | prohibited
+    act_section: str
+    process_label: str
+    decider: str
+    appeal_body: str | None = None
+    non_decision_appeal_days: int | None = None
+    third_party_appeal: bool = False
+    notes: str
+
+
 class EvaluateRequest(BaseModel):
     address: str
     description: str
@@ -298,6 +317,8 @@ class EvaluateResponse(BaseModel):
     data_gaps: list[str] = []
     description_similarity: dict[str, Any] | None = None
     community_benefits_context: dict[str, Any] | None = None
+    statutory_process: StatutoryProcessResult | None = None
+    additional_processes: list[StatutoryProcessResult] = []
     nearby_active_applications: list[NearbyApplication] = []
 
 
@@ -480,6 +501,14 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
     extracted = extract_project_features(body.description)
     violations = check_compliance(extracted, site)
 
+    _path = path_for_violations(violations)
+    _proc = PROCESS_BY_PATH[_path]
+    statutory_process = StatutoryProcessResult(path=_path, **vars(_proc))
+    extra_processes = [
+        StatutoryProcessResult(path=k, **vars(ADDITIONAL_PROCESS[k]))
+        for k in additional_processes(extracted)
+    ]
+
     chunks = []
     if bylaw_index is not None:
         chunks = _retrieve_chunks(
@@ -564,6 +593,8 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         data_gaps=data_gaps,
         description_similarity=desc_sim,
         community_benefits_context=cb_context,
+        statutory_process=statutory_process,
+        additional_processes=extra_processes,
         nearby_active_applications=[NearbyApplication(**r) for r in nearby],
     )
 

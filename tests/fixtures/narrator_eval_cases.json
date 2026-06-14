@@ -77,6 +77,17 @@
           "precedent_floor_55": true,
           "cap_30": false,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "rezoning",
+          "act_section_contains": "s.34",
+          "decider": "City Council",
+          "non_decision_appeal_days": 120,
+          "actual_process": "rezoning",
+          "matches_reality": true,
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "57m proposed vs 11m zone limit (5.2x) would trigger the cap-30, but the same-zone Council-approved comparable at 100% similarity within 250m exempts it and floors confidence at 55. The height violation is structural, so the floor-70 does not apply. In integration runs the TF-IDF self-match against the enriched parquet provides the precedent. Observed over 6 calibration runs (2026-06-12): 55-78 (55 = precedent floor binding)."
@@ -154,6 +165,18 @@
           "precedent_floor_55": false,
           "cap_30": true,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "rezoning",
+          "act_section_contains": "s.34",
+          "decider": "City Council",
+          "non_decision_appeal_days": 120,
+          "actual_process": "rezoning",
+          "matches_reality": true,
+          "note": "synthetic twin of st-clair-1613",
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "Same extreme description placed in an R zone with a 13m height limit (57/13 = 4.4x). The St Clair approval is ~1.1 km away, beyond the 250m same-site radius, so the precedent exemption must NOT fire and the cap-30 binds. Observed over 6 calibration runs (2026-06-12): 30 every run (cap binds)."
@@ -214,6 +237,18 @@
           "precedent_floor_55": false,
           "cap_30": false,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "as_of_right",
+          "act_section_contains": "no amendment",
+          "decider": "Toronto Building (Chief Building Official)",
+          "non_decision_appeal_days": null,
+          "actual_process": "site_plan",
+          "matches_reality": true,
+          "note": "SA on a permitted use — no rezoning needed; as_of_right is correct",
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "8 storeys proposed vs RA zone max 8 — within limits, residential use permitted in Residential Apartment, zero structural violations. The as-of-right floor-70 binds deterministically. Observed over 5 calibration runs (2026-06-12): 75-82."
@@ -274,6 +309,18 @@
           "precedent_floor_55": false,
           "cap_30": false,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "as_of_right",
+          "act_section_contains": "no amendment",
+          "decider": "Toronto Building (Chief Building Official)",
+          "non_decision_appeal_days": null,
+          "actual_process": "site_plan",
+          "matches_reality": true,
+          "note": "SA school addition, permitted — no rezoning needed",
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "2-storey elementary school addition in an RS zone with a 2-storey limit. classify_use → institutional, which Residential permits; zero structural violations, so floor-70 binds. Observed over 5 calibration runs (2026-06-12): 78-88."
@@ -334,6 +381,17 @@
           "precedent_floor_55": false,
           "cap_30": false,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "rezoning",
+          "act_section_contains": "s.34",
+          "decider": "City Council",
+          "non_decision_appeal_days": 120,
+          "actual_process": "rezoning",
+          "matches_reality": true,
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "Residential tower in a Utility/Transportation zone — use_not_permitted structural violation, no encoded height/unit limits so no cap. No deterministic override applies; the LLM Step-2C band (35-55) minus adjustments governs. Self-match precedent cannot fire (dev_approved=0). Widest band in the suite — the only LLM-dominated case. Observed over 5 calibration runs (2026-06-12): 15-45 — high variance, hence the wide band."
@@ -394,6 +452,17 @@
           "precedent_floor_55": false,
           "cap_30": true,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "rezoning",
+          "act_section_contains": "s.34",
+          "decider": "City Council",
+          "non_decision_appeal_days": 120,
+          "actual_process": "rezoning",
+          "matches_reality": true,
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "46 storeys proposed vs RD zone max 2 (23x). The cap-30 binds; no approved precedent exists (self-match has dev_approved=0). Refusal correlates with the deterministic cap — the assertable refused case. Observed over 5 calibration runs (2026-06-12): 18-30."
@@ -454,6 +523,17 @@
           "precedent_floor_55": false,
           "cap_30": true,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "rezoning",
+          "act_section_contains": "s.34",
+          "decider": "City Council",
+          "non_decision_appeal_days": 120,
+          "actual_process": "rezoning",
+          "matches_reality": true,
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "Formerly THE advisory case: the CR zone encodes an 18m height limit but the description states height only in storeys (28), so pre-2026-06 scoring saw zero structural violations and the floor-70 pinned a refused application at 70. The storeys-to-metres inference (3m/storey) added in the refusal gap-analysis batch now yields ≈84m vs 18m (4.7x): structural violation + cap-30, matching the real outcome (Council refused 2024, OLT dismissed the appeal 2025). The underlying OP blind spot (Church St character policies, Barbara Hall Park shadow) is still real — it is now documented by finch-57-original instead. Re-banded 2026-06-12 after the scoring change. Observed over 5 calibration runs post-change (2026-06-12): 22-28."
@@ -514,6 +594,17 @@
           "precedent_floor_55": false,
           "cap_30": false,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "rezoning",
+          "act_section_contains": "s.34",
+          "decider": "City Council",
+          "non_decision_appeal_days": 120,
+          "actual_process": "rezoning",
+          "matches_reality": true,
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "Residential proposed in an Open Space zone — use_not_permitted structural violation, so no floor-70. In integration runs the TF-IDF self-match (Council-approved, same OR zone, same site) floors at 55. No sim stub in CI, so the CI tier expects pure passthrough here. Observed over 5 calibration runs (2026-06-12): 78-82."
@@ -574,6 +665,18 @@
           "precedent_floor_55": false,
           "cap_30": true,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "rezoning",
+          "act_section_contains": "s.34",
+          "decider": "City Council",
+          "non_decision_appeal_days": 120,
+          "actual_process": "rezoning",
+          "matches_reality": true,
+          "note": "rezoning detected via storeys->metres height inference",
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "Was advisory (floor-70 despite heritage-driven refusal) at creation; the storeys-to-metres inference now converts 73 storeys against the CR zone's 46m limit into a cap-30, matching the refusal. The heritage blind spot itself (in_heritage_register=0 at this geocode; heritage flags informational-only) is still unfixed — this case now passes for the height reason, not the heritage reason; the refusal report's actual grounds were heritage scale/form/massing. Re-banded 2026-06-12 after the scoring change. Observed over 5 calibration runs post-change (2026-06-12): 22-30."
@@ -634,6 +737,17 @@
           "precedent_floor_55": false,
           "cap_30": true,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "rezoning",
+          "act_section_contains": "s.34",
+          "decider": "City Council",
+          "non_decision_appeal_days": 120,
+          "actual_process": "rezoning",
+          "matches_reality": true,
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "Was advisory (floor-70 despite secondary-plan-driven refusal); the storeys-to-metres inference now converts 13 storeys against the R zone's 13m limit into exactly 3.0x — cap-30, matching the refusal. Still-unfixed blind spots this case documented: in_secondary_plan=0 here (the Dupont Street Secondary Plan corridor is missing from the secondary-plans layer) and the 20m rail-corridor setback is unmodeled. Re-banded 2026-06-12 after the scoring change. Observed over 5 calibration runs post-change (2026-06-12): 25-28."
@@ -694,6 +808,18 @@
           "precedent_floor_55": false,
           "cap_30": false,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "rezoning",
+          "act_section_contains": "s.34",
+          "decider": "City Council",
+          "non_decision_appeal_days": 120,
+          "actual_process": "rezoning",
+          "matches_reality": true,
+          "note": "use mismatch (self-storage in RM) -> rezoning",
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "Self-storage facility in a Residential Multiple zone — use_not_permitted structural violation, no cap (no storey limit; units limit 4 but no unit count extracted). No deterministic override; LLM Step-2C governs, like livingston-408 but use-driven on the proposal side rather than the zone side. The narrator's one refused case it gets right for the right reason. Refused/revised triage batch (2026-06-12). Observed over 5 calibration runs (2026-06-12): 25-40."
@@ -771,6 +897,18 @@
           "precedent_floor_55": true,
           "cap_30": false,
           "unknown_limits_floor_55": false
+        },
+        "expected_statutory": {
+          "path": "as_of_right",
+          "act_section_contains": "no amendment",
+          "decider": "Toronto Building (Chief Building Official)",
+          "non_decision_appeal_days": null,
+          "actual_process": "rezoning",
+          "matches_reality": false,
+          "note": "LIMITATION: zone limits unknowable from data -> engine sees no violation, derives as_of_right; real process was a rezoning (OMB)",
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "The approved half of the revised-then-approved pair. RM zone encodes no storey/height/unit limits and no FSI is stated in the text, so no limit can be verified — under post-2026-06 scoring the as-of-right floor demotes to 55 (was 70), and the approved self-match precedent independently floors at 55. Outcome approved, so the LLM's Step-2B band (55-65) plus precedent uplift should land mid-to-high. Re-banded 2026-06-12 after the scoring change. Observed over 5 calibration runs post-change (2026-06-12): 78-80."
@@ -831,6 +969,18 @@
           "precedent_floor_55": false,
           "cap_30": false,
           "unknown_limits_floor_55": true
+        },
+        "expected_statutory": {
+          "path": "as_of_right",
+          "act_section_contains": "no amendment",
+          "decider": "Toronto Building (Chief Building Official)",
+          "non_decision_appeal_days": null,
+          "actual_process": "rezoning",
+          "matches_reality": false,
+          "note": "LIMITATION: zone limits unknowable -> derives as_of_right; real proposal needed a rezoning",
+          "additional": [
+            "site_plan"
+          ]
         }
       },
       "notes": "ADVISORY — pins the pair-compression limitation: the narrator still cannot separate the refused-shape original from its approved revision. Post-2026-06 scoring demotes both halves from floor-70 to floor-55 (RM zone, no verifiable limits; FSI 0.85 encoded but neither text states an FSI to check). The revision that won OMB approval (-40% units, building-type change, setbacks, coverage) remains invisible to the rule engine. If unit-density inference (units vs lot area) lands, this case should drop below finch-57-revised; add the within-pair ordering then. Re-banded 2026-06-12 after the scoring change. Observed over 5 calibration runs post-change (2026-06-12): 60-78 — still overlaps finch-57-revised (78-80), so the pair stays unordered; the LLM now sometimes applies the unknown-limits band (60) but often mirrors the revised score."

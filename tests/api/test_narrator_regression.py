@@ -36,6 +36,11 @@ import pytest
 
 from zoneto.analytics.compliance import check_compliance
 from zoneto.analytics.extract import extract_project_features
+from zoneto.analytics.planning_act import (
+    PROCESS_BY_PATH,
+    additional_processes,
+    path_for_violations,
+)
 from zoneto.api.llm_client import FakeLLMClient
 from zoneto.api.narrator import _apply_confidence_overrides, narrate_evaluation
 
@@ -96,6 +101,55 @@ def test_deterministic_overrides(case_id: str) -> None:
         assert (low, high) == (5, 95), (
             f"{label}: expected passthrough, got (5 -> {low}, 95 -> {high})"
         )
+
+
+@pytest.mark.parametrize("case_id", _CASE_IDS)
+def test_statutory_process(case_id: str) -> None:
+    """Given a golden case's snapshotted site context, when the Planning Act
+    process is derived from the compliance verdict, then it matches the
+    deterministic statutory mapping recorded in expected_statutory.
+
+    This is the content regression the band-based eval is blind to: the
+    statutory layer never moves the confidence number, so only a direct
+    assertion on the derived process catches a mapping or wiring regression.
+    """
+    case = _CASES[case_id]
+    ci = case["ci"]
+    expected = ci["expected_statutory"]
+    extracted = extract_project_features(case["description"])
+    violations = check_compliance(extracted, ci["site"])
+
+    path = path_for_violations(violations)
+    proc = PROCESS_BY_PATH[path]
+
+    label = case["label"]
+    assert path == expected["path"], (
+        f"{label}: derived path {path!r} != expected {expected['path']!r}"
+    )
+    assert expected["act_section_contains"] in proc.act_section
+    assert proc.decider == expected["decider"]
+    assert proc.non_decision_appeal_days == expected["non_decision_appeal_days"]
+    assert additional_processes(extracted) == expected["additional"], (
+        f"{label}: additional processes drifted"
+    )
+
+
+def test_statutory_process_detection_accuracy() -> None:
+    """Across the golden set, the derived process matches the real-world process
+    for all but the documented limits-unknowable cases.
+
+    Pins the known limitation (Finch pair: zone limits absent from data → the
+    engine sees no violation and derives as_of_right where reality was a
+    rezoning) so a regression that silently widens it fails loudly.
+    """
+    misses = [
+        cid
+        for cid, c in _CASES.items()
+        if not c["ci"]["expected_statutory"]["matches_reality"]
+    ]
+    assert set(misses) == {"finch-57-revised", "finch-57-original"}, (
+        f"process-detection misses changed: {sorted(misses)}"
+    )
 
 
 @pytest.mark.parametrize("case_id", _CASE_IDS)

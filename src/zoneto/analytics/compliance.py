@@ -72,6 +72,40 @@ class Violation:
     suggested_remedy: str
 
 
+def _planning_act_ref(severity: Severity) -> str:
+    """Provincial-statute suffix for a violation's municipal ``section_ref``.
+
+    By-law 569-2013 is the municipal layer; the Planning Act is the provincial
+    process that resolves the violation. A variance is granted under s.45; a
+    rezoning under s.34 (with s.22 where an OPA is also required).
+    """
+    if severity == Severity.NEEDS_VARIANCE:
+        return "; Planning Act s.45 (minor variance)"
+    if severity == Severity.NEEDS_REZONING:
+        return "; Planning Act s.34 (zoning by-law amendment) / s.22 (OPA)"
+    return ""
+
+
+def _minor_variance_note() -> str:
+    """Plain-language statement of the Planning Act s.45(1) minor-variance tests.
+
+    Replaces the legally false "up to 10% deviation is typically considered
+    minor" heuristic: there is no statutory percentage that makes a variance
+    "minor" — eligibility turns on four qualitative tests, and Toronto Committee
+    of Adjustment panels routinely grant larger variances and refuse smaller
+    ones. Single-sourced from ``planning_act.MINOR_VARIANCE_TESTS`` via a
+    deferred import (planning_act imports Severity/Violation from this module).
+    """
+    from zoneto.analytics.planning_act import MINOR_VARIANCE_TESTS
+
+    tests = "; ".join(MINOR_VARIANCE_TESTS)
+    return (
+        "Whether the Committee of Adjustment grants this turns on the four "
+        f"Planning Act s.45(1) tests (the variance: {tests}) — there is no fixed "
+        "percentage that makes a variance 'minor'."
+    )
+
+
 def check_compliance(
     extracted: ProjectFeatures,
     site: dict[str, Any],
@@ -149,7 +183,7 @@ def _check_prohibited_uses(extracted: ProjectFeatures) -> list[Violation]:
 def _check_storeys(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
     max_storeys = site.get("zoning_max_storeys")
     proposed = extracted.proposed_storeys
-    if proposed is None or max_storeys is None:
+    if proposed is None or not max_storeys or max_storeys <= 0:
         return []
     if proposed <= max_storeys:
         return []
@@ -158,9 +192,9 @@ def _check_storeys(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Vio
     if excess <= 2:
         severity = Severity.NEEDS_VARIANCE
         remedy = (
-            f"Reduce to {max_storeys} storeys to be as-of-right, or apply "
-            "to the Committee of Adjustment for a minor variance (up to 10% "
-            "deviation is typically considered minor)."
+            f"Reduce to {max_storeys} storeys to be as-of-right, or apply to "
+            f"the Committee of Adjustment for a minor variance. "
+            f"{_minor_variance_note()}"
         )
     else:
         severity = Severity.NEEDS_REZONING
@@ -174,7 +208,10 @@ def _check_storeys(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Vio
     return [
         Violation(
             rule_id="storeys_exceed_max",
-            section_ref="By-law 569-2013 — zone-specific building height requirements",
+            section_ref=(
+                "By-law 569-2013 — zone-specific building height requirements"
+                + _planning_act_ref(severity)
+            ),
             observed=f"{proposed} storeys proposed",
             allowed=f"max {max_storeys} storeys",
             severity=severity,
@@ -188,7 +225,7 @@ def _check_height_m(
 ) -> list[Violation]:
     max_height = site.get("zoning_max_height_m")
     proposed = extracted.proposed_height_m
-    if proposed is None or max_height is None:
+    if proposed is None or not max_height or max_height <= 0:
         return []
     if proposed <= max_height:
         return []
@@ -198,8 +235,7 @@ def _check_height_m(
         severity = Severity.NEEDS_VARIANCE
         remedy = (
             f"Reduce to {max_height}m to be as-of-right, or apply to the "
-            "Committee of Adjustment for a minor variance (up to 10% deviation "
-            "is typically considered minor)."
+            f"Committee of Adjustment for a minor variance. {_minor_variance_note()}"
         )
     else:
         severity = Severity.NEEDS_REZONING
@@ -212,7 +248,10 @@ def _check_height_m(
     return [
         Violation(
             rule_id="height_exceeds_max",
-            section_ref="By-law 569-2013 — zone-specific height overlay (HT_HEIGHT)",
+            section_ref=(
+                "By-law 569-2013 — zone-specific height overlay (HT_HEIGHT)"
+                + _planning_act_ref(severity)
+            ),
             observed=f"{proposed}m proposed",
             allowed=f"max {max_height}m",
             severity=severity,
@@ -250,7 +289,10 @@ def _check_height_inferred(
     return [
         Violation(
             rule_id="height_exceeds_max_inferred",
-            section_ref="By-law 569-2013 — zone-specific height overlay (HT_HEIGHT)",
+            section_ref=(
+                "By-law 569-2013 — zone-specific height overlay (HT_HEIGHT)"
+                + _planning_act_ref(Severity.NEEDS_REZONING)
+            ),
             observed=(
                 f"≈{inferred:g}m proposed (inferred from {storeys} storeys "
                 f"at {STOREY_HEIGHT_M:g}m/storey)"
@@ -270,7 +312,7 @@ def _check_height_inferred(
 def _check_units(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
     max_units = site.get("zoning_max_units")
     proposed = extracted.proposed_units
-    if proposed is None or max_units is None:
+    if proposed is None or not max_units or max_units <= 0:
         return []
     if proposed <= max_units:
         return []
@@ -278,7 +320,10 @@ def _check_units(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Viola
     return [
         Violation(
             rule_id="units_exceed_max",
-            section_ref=("By-law 569-2013 — zone-specific lot requirements (UNITS)"),
+            section_ref=(
+                "By-law 569-2013 — zone-specific lot requirements (UNITS)"
+                + _planning_act_ref(Severity.NEEDS_REZONING)
+            ),
             observed=f"{proposed} units proposed",
             allowed=f"max {max_units} units",
             severity=Severity.NEEDS_REZONING,
@@ -295,7 +340,7 @@ def _check_units(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Viola
 def _check_fsi(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
     max_density = site.get("zoning_max_density")
     proposed = extracted.proposed_fsi
-    if proposed is None or max_density is None:
+    if proposed is None or not max_density or max_density <= 0:
         return []
     if proposed <= max_density:
         return []
@@ -305,8 +350,8 @@ def _check_fsi(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violati
         severity = Severity.NEEDS_VARIANCE
         remedy = (
             f"Reduce gross floor area to FSI {max_density} to be as-of-right, "
-            "or apply to the Committee of Adjustment for a minor variance "
-            "(up to 10% deviation is typically considered minor)."
+            f"or apply to the Committee of Adjustment for a minor variance. "
+            f"{_minor_variance_note()}"
         )
     else:
         severity = Severity.NEEDS_REZONING
@@ -320,7 +365,10 @@ def _check_fsi(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violati
     return [
         Violation(
             rule_id="fsi_exceeds_max",
-            section_ref="By-law 569-2013 — zone-specific density (DENSITY/FSI)",
+            section_ref=(
+                "By-law 569-2013 — zone-specific density (DENSITY/FSI)"
+                + _planning_act_ref(severity)
+            ),
             observed=f"FSI {proposed:g} proposed",
             allowed=f"max FSI {max_density:g}",
             severity=severity,
@@ -340,7 +388,7 @@ def _check_unit_limit_advisory(
     Only fires when max_units <= 6 and the proposed use is residential or mixed.
     """
     max_units = site.get("zoning_max_units")
-    if max_units is None or max_units > 6:
+    if not max_units or max_units <= 0 or max_units > 6:
         return []
     if extracted.proposed_units is not None:
         return []
@@ -349,7 +397,10 @@ def _check_unit_limit_advisory(
     return [
         Violation(
             rule_id="unit_limit_advisory",
-            section_ref="By-law 569-2013 — zone-specific lot requirements (UNITS)",
+            section_ref=(
+                "By-law 569-2013 — zone-specific lot requirements (UNITS)"
+                + _planning_act_ref(Severity.NEEDS_REZONING)
+            ),
             observed=(
                 f"proposed use is {extracted.proposed_use}; "
                 f"zone permits a maximum of {max_units} unit(s)"
@@ -379,6 +430,7 @@ def _check_use(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violati
             section_ref=(
                 "By-law 569-2013 — zone-specific permitted uses "
                 "(Chapter 10–90, principal permitted uses)"
+                + _planning_act_ref(Severity.NEEDS_REZONING)
             ),
             observed=f"proposed use: {proposed_use}",
             allowed=f"permitted category for this zone: {permitted_category}",
@@ -512,7 +564,10 @@ def _check_holding(site: dict[str, Any]) -> list[Violation]:
     return [
         Violation(
             rule_id="holding_provision",
-            section_ref="By-law 569-2013 — Holding (H) symbol",
+            section_ref=(
+                "By-law 569-2013 — Holding (H) symbol; "
+                "Planning Act s.36 (removal of holding symbol)"
+            ),
             observed="site has a Holding (H) symbol on its zoning",
             allowed="development requires removal of the H symbol first",
             severity=Severity.NEEDS_REZONING,

@@ -18,6 +18,7 @@ from zoneto.analytics.features import (
     PERMIT_CAT_COLS,
     PERMIT_NUM_COLS,
 )
+from zoneto.analytics.planning_act import statutory_timeline_days
 
 # Model registry: dev_applications models only.
 # coa_approved: AUC 0.535 at 94% base rate — retired.
@@ -170,6 +171,22 @@ def score_all(
                 for i, val in zip(oz_sa_indices, surv_result[col]):
                     pct_lists[col][i] = val
         extra.update(pct_lists)
+
+    # Statutory non-decision appeal clock per application type (Planning Act).
+    # Deterministic, covers ALL types — unlike the OZ/SA-only survival model,
+    # which leaves CD/SB/PL null. This is the statutory FLOOR to an applicant's
+    # appeal right, not a predicted decision time; never conflate it with the
+    # survival p50. OZ splits 90 (standalone ZBA) vs 120 (combined with an OPA)
+    # using is_combined_application. See planning_act.py and the 2026-06-13 spec.
+    _types = df_dev["application_type"].to_list()
+    if "is_combined_application" in df_dev.columns:
+        _combined = [v == 1 for v in df_dev["is_combined_application"].to_list()]
+    else:
+        _combined = [None] * len(_types)
+    extra["statutory_min_decision_days"] = [
+        statutory_timeline_days(t, is_combined=c)
+        for t, c in zip(_types, _combined)
+    ]
 
     df_dev_scored = df_dev.with_columns(
         [pl.Series(name=k, values=v) for k, v in extra.items()]

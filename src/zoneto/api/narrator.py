@@ -6,6 +6,7 @@ import math
 import re
 from typing import Any
 
+from zoneto.analytics import planning_act
 from zoneto.analytics.bylaw_index import Chunk
 from zoneto.analytics.compliance import Severity, Violation, effective_height_m
 from zoneto.analytics.extract import ProjectFeatures
@@ -88,6 +89,10 @@ STRICT RULES you must always follow:
      and data gaps CANNOT move the score below that floor.
      DATA GAPS ARE NOT PENALTIES — mention them as caveats in the
      prose summary but do NOT subtract from the CONFIDENCE number.
+   - The "Statutory process & appeal route (Planning Act)" section is
+     CONTEXT for the prose only. Requiring an OPA/ZBA, a minor variance,
+     or having an OLT appeal route does NOT by itself lower confidence —
+     it just names the correct path. Do NOT adjust CONFIDENCE for it.
    This line must be the absolute last line of your response.
 """
 
@@ -130,6 +135,47 @@ def _format_violations(violations: list[Violation]) -> str:
             f"  Reference: {v.section_ref}"
         )
     return "\n".join(lines)
+
+
+_OPA_RE = re.compile(r"official plan amendment|\bOPA\b", re.I)
+
+
+def _format_statutory_process(
+    violations: list[Violation],
+    extracted: ProjectFeatures,
+    description_similarity: dict[str, Any] | None = None,
+    description: str | None = None,
+) -> str:
+    """Render the Planning Act process/appeal/timeline block for the prompt.
+
+    Derives the primary provincial process from the violation severities (who
+    decides, appeal route, statutory non-decision clock, and how to read a
+    comparable appeal rate post-Bill 23/185) and then lists any ORTHOGONAL
+    processes the proposal also triggers (site plan, subdivision, consent,
+    rental replacement). This is CONTEXT only — it never changes CONFIDENCE.
+    """
+    path = planning_act.path_for_violations(violations)
+    appeal_rate = (
+        description_similarity.get("appeal_rate") if description_similarity else None
+    )
+    # OZ filings can be a standalone ZBA (90-day clock) or combined with an OPA
+    # (120). Detect an OPA mention so the rezoning line shows the right floor.
+    is_combined = bool(description and _OPA_RE.search(description)) or None
+    text = planning_act.format_statutory_context(
+        path, comparable_appeal_rate=appeal_rate, is_combined=is_combined
+    )
+    extras = [
+        planning_act.ADDITIONAL_PROCESS[k].process_label
+        + f" ({planning_act.ADDITIONAL_PROCESS[k].act_section})"
+        for k in planning_act.additional_processes(extracted)
+    ]
+    if extras:
+        text += (
+            " Likely also required (orthogonal to zoning): "
+            + "; ".join(extras)
+            + "."
+        )
+    return text
 
 
 def _format_chunks(chunks: list[Chunk]) -> str:
@@ -501,6 +547,9 @@ def narrate_evaluation(
     """
     gaps_section = _format_data_gaps(data_gaps or [])
     site_zone = site.get("zoning_class") if site else None
+    statutory_section = _format_statutory_process(
+        violations, extracted, description_similarity, description
+    )
     sim_section = _format_description_similarity(
         description_similarity, site_zoning_class=site_zone
     )
@@ -517,6 +566,9 @@ def narrate_evaluation(
 
 ## Compliance violations (authoritative — do not contradict)
 {_format_violations(violations)}
+
+## Statutory process & appeal route (Planning Act) — context only, not scored
+{statutory_section}
 
 ## Relevant By-law 569-2013 sections (retrieved by semantic search)
 {_format_chunks(chunks)}
@@ -543,7 +595,8 @@ def narrate_evaluation(
 Write a concise compliance summary (4–8 sentences maximum) in plain markdown. Explain:
 1. What the violations mean in practical terms for the applicant.
 2. What path forward is most likely (as-of-right adjustment, minor variance,
-   or rezoning), citing the specific violations above.
+   or rezoning), grounded in the Statutory process & appeal route section above —
+   name the Planning Act process, who decides, and the appeal route/timeline.
 3. Any important context from the retrieved by-law sections above.
 4. If comparable application outcomes are listed above, factor the appeal rate
    of similar projects into your confidence assessment.

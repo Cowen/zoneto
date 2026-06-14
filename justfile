@@ -40,6 +40,11 @@ narrator-eval *ARGS:
 narrator-triage *ARGS:
     uv run python scripts/narrator_refused_triage.py {{ARGS}}
 
+# Evaluate the Planning Act process classifier: derived process vs actual
+# application_type over the enriched corpus (deterministic; needs `just enrich`)
+planning-act-eval *ARGS:
+    uv run python scripts/planning_act_eval.py {{ARGS}}
+
 # Enrich data
 enrich:
     uv run zoneto enrich

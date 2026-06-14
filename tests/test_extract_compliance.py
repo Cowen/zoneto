@@ -1100,3 +1100,46 @@ class TestComplianceFSI:
         violations = check_compliance(features, self._site(None))
         rule_ids = [v.rule_id for v in violations]
         assert "fsi_exceeds_max" not in rule_ids
+
+
+class TestComplianceZeroLimits:
+    """A zoning limit of 0 means 'no encoded limit', not 'maximum of zero'.
+
+    Regression for a ZeroDivisionError surfaced by scripts/planning_act_eval.py
+    on real enriched rows where zoning_max_density == 0, and for the false
+    positives a 0 storey/unit limit would otherwise produce.
+    """
+
+    def _site(self, **overrides) -> dict:
+        site = {
+            "zoning_class": "RM",
+            "zoning_max_storeys": None,
+            "zoning_max_units": None,
+            "zoning_max_height_m": None,
+            "zoning_max_density": None,
+            "permitted_use_category": "Residential",
+        }
+        site.update(overrides)
+        return site
+
+    def test_zero_density_does_not_crash_or_flag(self) -> None:
+        features = extract_project_features("a Floor Space Index (FSI) of 5.4")
+        violations = check_compliance(features, self._site(zoning_max_density=0))
+        assert "fsi_exceeds_max" not in {v.rule_id for v in violations}
+
+    def test_zero_height_does_not_crash_or_flag(self) -> None:
+        features = extract_project_features("a 60 metre tower")
+        violations = check_compliance(features, self._site(zoning_max_height_m=0))
+        assert "height_exceeds_max" not in {v.rule_id for v in violations}
+
+    def test_zero_storey_limit_does_not_flag(self) -> None:
+        features = extract_project_features("a 12-storey building")
+        violations = check_compliance(features, self._site(zoning_max_storeys=0))
+        assert "storeys_exceed_max" not in {v.rule_id for v in violations}
+
+    def test_zero_unit_limit_does_not_flag(self) -> None:
+        features = extract_project_features("200 dwelling units")
+        violations = check_compliance(features, self._site(zoning_max_units=0))
+        ids = {v.rule_id for v in violations}
+        assert "units_exceed_max" not in ids
+        assert "unit_limit_advisory" not in ids
