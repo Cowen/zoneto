@@ -8,7 +8,10 @@ from enum import Enum
 from typing import Any
 
 from zoneto.analytics.extract import ProjectFeatures
-from zoneto.analytics.use_classifier import use_matches_zone
+from zoneto.analytics.use_classifier import (
+    op_use_matches_designation,
+    use_matches_zone,
+)
 
 # By-law 569-2013 §60.20.20.10(1): uses explicitly excluded from all zones,
 # including Employment Industrial. These cannot be permitted through rezoning.
@@ -136,6 +139,7 @@ def check_compliance(
     violations.extend(_check_fsi(extracted, site))
     violations.extend(_check_unit_limit_advisory(extracted, site))
     violations.extend(_check_use(extracted, site))
+    violations.extend(_check_op_conformity(extracted, site))
     violations.extend(_check_heritage(site))
     violations.extend(_check_mtsa(site))
     violations.extend(_check_trca(site))
@@ -440,6 +444,51 @@ def _check_use(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violati
                 f"non-permitted use. Alternatively, consider whether your "
                 "proposal can be characterised within the permitted "
                 f"category ({permitted_category}) to reduce approval risk."
+            ),
+        )
+    ]
+
+
+def _check_op_conformity(
+    extracted: ProjectFeatures, site: dict[str, Any]
+) -> list[Violation]:
+    """Flag a proposed use that does not conform to the Official Plan designation.
+
+    The provincial counterpart to ``_check_use`` (which checks the municipal zoning
+    permitted-use category). A non-conforming use implicates an Official Plan
+    Amendment (Planning Act s.22) on top of any rezoning, since by s.24 a zoning
+    by-law must conform to the Official Plan — the practical effect is the longer
+    combined OPA+ZBA process and its 120-day non-decision clock.
+
+    Severity is INFORMATIONAL: the designation comes from an interim, deep-learning-
+    derived reconstruction (see analytics/reference.py), so it widens the process
+    picture and refines the narrator's combined-application read **without** moving
+    the confidence number on possibly-imprecise data. Promote to NEEDS_REZONING once
+    an authoritative City designation layer replaces the interim source.
+    """
+    proposed_use = extracted.proposed_use
+    designation = site.get("op_land_use_designation")
+    match = op_use_matches_designation(proposed_use, designation)
+    if match is None or match == 1:
+        return []
+
+    return [
+        Violation(
+            rule_id="op_use_nonconforming",
+            section_ref=(
+                f"Official Plan land-use designation ({designation}); "
+                "Planning Act s.24 (conformity) / s.22 (Official Plan Amendment)"
+            ),
+            observed=f"proposed use: {proposed_use}",
+            allowed=f"Official Plan designation for this site: {designation}",
+            severity=Severity.INFORMATIONAL,
+            suggested_remedy=(
+                f"The site's Official Plan designation ({designation}) does not "
+                f"contemplate a {proposed_use} use. Beyond a Zoning By-law Amendment, "
+                "an Official Plan Amendment (Planning Act s.22) is likely required so "
+                "the rezoning conforms to the Plan (s.24) — this is the longer "
+                "combined OPA + rezoning process (120-day non-decision clock). Confirm "
+                "the designation against the authoritative Official Plan map schedule."
             ),
         )
     ]

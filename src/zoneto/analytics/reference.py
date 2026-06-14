@@ -83,6 +83,35 @@ _TRCA_FEATURESERVER_URL = (
 # CRS: EPSG:4269 (NAD83), functionally identical to WGS84 for spatial joins
 _GREENBELT_URL = "https://ws.gisetl.lrc.gov.on.ca/fmedatadownload/Packages/GBOUTBND.zip"
 
+# Official Plan land-use designations — INTERIM source.
+#
+# No official City of Toronto polygon layer for OP land-use *designations* is
+# published on open data (verified 2026-06-13: neither the COTGEO ArcGIS org nor
+# gis.toronto.ca's cot_geospatial11 planning service carries it; COT_official_plan_areas
+# is only the map-sheet index). The license-clean long-term source is a City
+# Geospatial Competency Centre data request (gcc@toronto.ca) — pending. Until then
+# this uses the Borealis/Dataverse academic reconstruction (doi:10.5683/SP3/1VMJAG),
+# the `LanduseParcelsMergedv01` layer dissolved to 10 designation multipolygons,
+# EPSG:26917 (UTM Zone 17N). License: CC BY-NC 4.0 — interim use only; swap for the
+# authoritative City layer (also polygons → same point-in-polygon join) when secured.
+# See specs/2026-06-13-planning-act-integration.md item 4b.
+_OP_LAND_USE_URL = "https://borealisdata.ca/api/access/datafile/315976"
+# The source `Class_name` values use inconsistent casing/spacing; normalize to the
+# canonical Toronto OP designation names so the official City layer (which uses these)
+# drops in without touching _OP_DESIGNATION_ALLOWED in use_classifier.py.
+_OP_CLASS_NORMALIZE: dict[str, str] = {
+    "Neighbourhoods": "Neighbourhoods",
+    "ApartmentNeighbourhoods": "Apartment Neighbourhoods",
+    "MixedUse": "Mixed Use Areas",
+    "CoreEmploymentAreas": "Core Employment Areas",
+    "GeneralEmployment": "General Employment Areas",
+    "Institutional": "Institutional Areas",
+    "Natural areas": "Natural Areas",
+    "Parks": "Parks",
+    "OtherOpenSpace": "Other Open Space Areas",
+    "Regeneration": "Regeneration Areas",
+}
+
 
 def _download(url: str, dest: Path) -> None:
     """Download *url* to *dest* (binary)."""
@@ -346,6 +375,71 @@ def _fetch_greenbelt(dest: Path) -> None:
             shutil.rmtree(tmp_dir)
 
 
+def _fetch_op_land_use(dest: Path) -> None:
+    """Download the Official Plan land-use designation polygons and write GeoJSON.
+
+    INTERIM source: the Borealis reconstruction's ``LanduseParcelsMerged`` layer
+    (CC BY-NC 4.0), a Shapefile dissolved to 10 designation multipolygons in
+    EPSG:26917 (UTM Zone 17N). Reprojected to WGS84 via DuckDB ``ST_Transform``
+    (greenbelt's NAD83≈WGS84 shortcut does *not* hold here — UTM metres must be
+    transformed). Each feature carries a single ``op_designation`` property
+    normalized to the canonical Toronto OP designation name. Null-geometry slivers
+    in the source are dropped.
+    """
+    import duckdb  # noqa: PLC0415
+
+    tmp_zip = dest.parent / "_op_land_use_tmp.zip"
+    tmp_dir = dest.parent / "_op_land_use_tmp"
+    try:
+        with httpx.Client(follow_redirects=True, timeout=300) as client:
+            r = client.get(_OP_LAND_USE_URL)
+            r.raise_for_status()
+            tmp_zip.write_bytes(r.content)
+
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(tmp_zip) as zf:
+            zf.extractall(tmp_dir)
+
+        shp_files = list(tmp_dir.rglob("*.shp"))
+        if not shp_files:
+            logger.warning("_fetch_op_land_use: no .shp found in downloaded ZIP")
+            return
+
+        escaped = str(shp_files[0]).replace("'", "''")
+        con = duckdb.connect()
+        con.execute("INSTALL spatial; LOAD spatial;")
+        rows = con.execute(f"""
+            SELECT
+                Class_name AS class_name,
+                ST_AsGeoJSON(
+                    ST_Transform(geom, 'EPSG:26917', 'EPSG:4326', always_xy := true)
+                ) AS geom_json
+            FROM ST_Read('{escaped}')
+            WHERE Class_name IS NOT NULL
+        """).fetchall()
+        con.close()
+
+        features = []
+        for class_name, geom_json in rows:
+            if geom_json is None:
+                continue
+            designation = _OP_CLASS_NORMALIZE.get(str(class_name).strip(), class_name)
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": json.loads(geom_json),
+                    "properties": {"op_designation": designation},
+                }
+            )
+        geojson = {"type": "FeatureCollection", "features": features}
+        dest.write_text(json.dumps(geojson))
+        logger.info("_fetch_op_land_use: wrote %d features to %s", len(features), dest)
+    finally:
+        tmp_zip.unlink(missing_ok=True)
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+
+
 def fetch_reference(data_dir: Path = Path("data")) -> None:
     """Download all reference datasets to *data_dir*/reference/.
 
@@ -451,4 +545,17 @@ def fetch_reference(data_dir: Path = Path("data")) -> None:
         except Exception:
             logger.warning(
                 "Greenbelt boundary not available — in_greenbelt will be 0 for all rows"
+            )
+
+    # Official Plan land-use designations GeoJSON (interim Borealis source).
+    # Optional — when absent, op_land_use_designation is null everywhere and the
+    # pipeline still runs (mirrors TRCA/greenbelt). Acquired via `just op`.
+    op_land_use_geojson = ref / "op_land_use.geojson"
+    if not op_land_use_geojson.exists():
+        try:
+            _fetch_op_land_use(op_land_use_geojson)
+        except Exception:
+            logger.warning(
+                "OP land-use designations not available — "
+                "op_land_use_designation will be null for all rows"
             )

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from zoneto.analytics.use_classifier import classify_use, use_matches_zone
+from zoneto.analytics.use_classifier import (
+    classify_use,
+    op_use_matches_designation,
+    use_matches_zone,
+)
 
 # ---------------------------------------------------------------------------
 # classify_use
@@ -198,3 +202,50 @@ def test_use_matches_zone_none_when_either_unknown() -> None:
     assert use_matches_zone(None, "Residential") is None
     assert use_matches_zone("residential", None) is None
     assert use_matches_zone(None, None) is None
+
+
+# ---------------------------------------------------------------------------
+# op_use_matches_designation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "proposed,designation,expected",
+    [
+        # Neighbourhoods — residential/institutional/recreational (not comm/emp)
+        ("residential", "Neighbourhoods", 1),
+        ("institutional", "Neighbourhoods", 1),
+        ("commercial", "Neighbourhoods", 0),
+        ("employment", "Neighbourhoods", 0),
+        ("residential", "Apartment Neighbourhoods", 1),
+        # Employment Areas exclude residential — the key OPA trigger
+        ("employment", "Core Employment Areas", 1),
+        ("residential", "Core Employment Areas", 0),
+        ("commercial", "Core Employment Areas", 0),
+        ("employment", "General Employment Areas", 1),
+        ("commercial", "General Employment Areas", 1),
+        ("residential", "General Employment Areas", 0),
+        # Mixed Use / Regeneration — permissive
+        ("residential", "Mixed Use Areas", 1),
+        ("commercial", "Mixed Use Areas", 1),
+        ("employment", "Mixed Use Areas", 1),
+        ("residential", "Regeneration Areas", 1),
+        # Institutional / open space
+        ("institutional", "Institutional Areas", 1),
+        ("residential", "Institutional Areas", 0),
+        ("recreational", "Parks", 1),
+        ("residential", "Parks", 0),
+        ("recreational", "Natural Areas", 1),
+    ],
+)
+def test_op_use_matches_designation_matrix(
+    proposed: str, designation: str, expected: int
+) -> None:
+    assert op_use_matches_designation(proposed, designation) == expected
+
+
+def test_op_use_matches_designation_none_when_unknown() -> None:
+    assert op_use_matches_designation(None, "Neighbourhoods") is None
+    assert op_use_matches_designation("residential", None) is None
+    # Unmapped designation (e.g. "Roads") → None, not a violation
+    assert op_use_matches_designation("residential", "Roads") is None

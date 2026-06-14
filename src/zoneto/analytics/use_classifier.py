@@ -133,6 +133,48 @@ _ZONE_ALLOWED: dict[str, frozenset[str]] = {
 }
 
 
+# Official Plan land-use designations (canonical Toronto OP names, produced by
+# reference._OP_CLASS_NORMALIZE) → the proposed-use buckets each designation
+# contemplates as-of-conformity. This is the *provincial* Official-Plan layer that
+# pairs with the *municipal* zoning layer in _ZONE_ALLOWED: a use outside the
+# designation's set signals that an Official Plan Amendment (Planning Act s.22), not
+# just a rezoning, is required (s.24 conformity). Employment Areas notably exclude
+# residential — the most common real OPA trigger.
+_OP_DESIGNATION_ALLOWED: dict[str, frozenset[str]] = {
+    "Neighbourhoods": frozenset({"residential", "institutional", "recreational"}),
+    "Apartment Neighbourhoods": frozenset(
+        {"residential", "institutional", "recreational"}
+    ),
+    "Mixed Use Areas": frozenset(
+        {
+            "residential",
+            "commercial",
+            "mixed_use",
+            "employment",
+            "institutional",
+            "recreational",
+        }
+    ),
+    "Regeneration Areas": frozenset(
+        {
+            "residential",
+            "commercial",
+            "mixed_use",
+            "employment",
+            "institutional",
+            "recreational",
+        }
+    ),
+    "Core Employment Areas": frozenset({"employment"}),
+    "General Employment Areas": frozenset({"employment", "commercial"}),
+    "Institutional Areas": frozenset({"institutional", "recreational"}),
+    "Natural Areas": frozenset({"recreational"}),
+    "Parks": frozenset({"recreational"}),
+    "Other Open Space Areas": frozenset({"recreational"}),
+    "Utility Corridors": frozenset({"recreational"}),
+}
+
+
 def classify_use(description: str | None) -> str | None:
     """Return a single use bucket inferred from a description, or None.
 
@@ -174,6 +216,24 @@ def use_matches_zone(
     if proposed is None or permitted_category is None:
         return None
     allowed = _ZONE_ALLOWED.get(permitted_category)
+    if allowed is None:
+        return None
+    return 1 if proposed in allowed else 0
+
+
+def op_use_matches_designation(
+    proposed: str | None, designation: str | None
+) -> int | None:
+    """Return 1 if the proposed use conforms to the Official Plan designation, 0 if
+    not, None when either input is unknown or the designation isn't mapped.
+
+    Counterpart to ``use_matches_zone`` for the provincial Official-Plan layer: a 0
+    means an Official Plan Amendment (Planning Act s.22) is implicated beyond a plain
+    zoning by-law amendment.
+    """
+    if proposed is None or designation is None:
+        return None
+    allowed = _OP_DESIGNATION_ALLOWED.get(designation)
     if allowed is None:
         return None
     return 1 if proposed in allowed else 0

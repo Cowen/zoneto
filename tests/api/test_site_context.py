@@ -73,6 +73,30 @@ def ref_dir(tmp_path: Path) -> Path:
     }
     (ref / "secondary_plans.geojson").write_text(json.dumps(sp))
 
+    # Official Plan land-use designation: same polygon, "Mixed Use Areas"
+    op = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"op_designation": "Mixed Use Areas"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [-79.39, 43.64],
+                            [-79.37, 43.64],
+                            [-79.37, 43.66],
+                            [-79.39, 43.66],
+                            [-79.39, 43.64],
+                        ]
+                    ],
+                },
+            }
+        ],
+    }
+    (ref / "op_land_use.geojson").write_text(json.dumps(op))
+
     return ref
 
 
@@ -147,9 +171,16 @@ def test_lookup_returns_secondary_plan(ref_dir: Path) -> None:
     assert result["in_secondary_plan"] == 1
 
 
+def test_lookup_returns_op_designation(ref_dir: Path) -> None:
+    """Point inside the OP polygon returns its land-use designation."""
+    result = lookup_site_context(43.65, -79.38, ref_dir)
+    assert result["op_land_use_designation"] == "Mixed Use Areas"
+
+
 def test_lookup_outside_all_polygons(ref_dir: Path) -> None:
     """Point far outside all polygons returns nulls and zeros."""
     result = lookup_site_context(44.0, -80.0, ref_dir)
+    assert result["op_land_use_designation"] is None
     assert result["zoning_class"] is None
     assert result["zoning_max_units"] is None
     assert result["zoning_max_density"] is None

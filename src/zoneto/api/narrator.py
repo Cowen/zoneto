@@ -159,8 +159,13 @@ def _format_statutory_process(
         description_similarity.get("appeal_rate") if description_similarity else None
     )
     # OZ filings can be a standalone ZBA (90-day clock) or combined with an OPA
-    # (120). Detect an OPA mention so the rezoning line shows the right floor.
-    is_combined = bool(description and _OPA_RE.search(description)) or None
+    # (120). An OPA is signalled by either an explicit mention in the description or
+    # an Official-Plan non-conformity (op_use_nonconforming) — the latter *is* the
+    # statutory trigger for an OPA — so the rezoning line shows the right floor.
+    op_nonconforming = any(v.rule_id == "op_use_nonconforming" for v in violations)
+    is_combined = (
+        bool(description and _OPA_RE.search(description)) or op_nonconforming or None
+    )
     text = planning_act.format_statutory_context(
         path, comparable_appeal_rate=appeal_rate, is_combined=is_combined
     )

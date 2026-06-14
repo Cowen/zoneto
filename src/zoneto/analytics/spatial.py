@@ -264,6 +264,57 @@ def _add_greenbelt_feature(df: pl.DataFrame, greenbelt_path: Path) -> pl.DataFra
     )
 
 
+def _add_op_land_use_feature(df: pl.DataFrame, op_path: Path) -> pl.DataFrame:
+    """Add op_land_use_designation (String) via DuckDB spatial join.
+
+    Official Plan land-use designation polygons (op_land_use.geojson, WGS84) carry
+    an op_designation property. Rows with null lat/lon, outside any designation, or
+    when the file is absent get null — the layer is optional (interim Borealis
+    source; see analytics/reference.py).
+    """
+    if not op_path.exists() or "lat" not in df.columns or "lon" not in df.columns:
+        return df.with_columns(
+            pl.lit(None, dtype=pl.String).alias("op_land_use_designation")
+        )
+
+    valid_df = df.filter(df["lat"].is_not_null() & df["lon"].is_not_null())
+    if len(valid_df) == 0:
+        return df.with_columns(
+            pl.lit(None, dtype=pl.String).alias("op_land_use_designation")
+        )
+
+    escaped = str(op_path).replace("'", "''")
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.register("apps", valid_df.to_arrow())
+
+    result = con.execute(f"""
+        SELECT DISTINCT ON (apps._rid)
+            apps._rid,
+            op.op_designation AS op_land_use_designation
+        FROM apps
+        LEFT JOIN ST_Read('{escaped}') op
+            ON ST_Within(ST_Point(apps.lon, apps.lat), op.geom)
+    """).pl()
+
+    con.close()
+
+    rid_to_op: dict[int, str | None] = dict(
+        zip(
+            result["_rid"].to_list(),
+            result["op_land_use_designation"].to_list(),
+        )
+    )
+    all_rids = df["_rid"].to_list() if "_rid" in df.columns else list(range(len(df)))
+    return df.with_columns(
+        pl.Series(
+            "op_land_use_designation",
+            [rid_to_op.get(rid) for rid in all_rids],
+            dtype=pl.String,
+        )
+    )
+
+
 def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     """Add zoning_class, secondary_plan_name, in_heritage_register,
     in_heritage_district, in_secondary_plan, in_mtsa columns via DuckDB spatial join.
@@ -402,5 +453,9 @@ def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     # Add Greenbelt boundary flag
     greenbelt_path = ref / "greenbelt.geojson"
     result = _add_greenbelt_feature(result, greenbelt_path)
+
+    # Add Official Plan land-use designation (interim Borealis source; optional)
+    op_path = ref / "op_land_use.geojson"
+    result = _add_op_land_use_feature(result, op_path)
 
     return result

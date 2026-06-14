@@ -287,6 +287,67 @@ class TestComplianceUse:
 
 
 # ---------------------------------------------------------------------------
+# check_compliance — Official Plan conformity (s.24 / s.22)
+# ---------------------------------------------------------------------------
+
+
+class TestComplianceOpConformity:
+    def _site(self, designation: str | None, **kwargs: object) -> dict:
+        base: dict = {
+            "zoning_max_storeys": None,
+            "zoning_max_units": None,
+            "zoning_max_density": None,
+            "permitted_use_category": None,
+            "op_land_use_designation": designation,
+            "in_heritage_register": 0,
+            "in_heritage_district": 0,
+            "in_mtsa": 0,
+            "zoning_holding": 0,
+        }
+        base.update(kwargs)
+        return base
+
+    def test_nonconforming_use_flags_informational(self) -> None:
+        """Given: residential proposed on a Core Employment Areas site.
+        When: checking compliance.
+        Then: op_use_nonconforming violation at INFORMATIONAL severity (does not
+        move the confidence number while on the interim source)."""
+        extracted = ProjectFeatures(
+            proposed_storeys=None,
+            proposed_units=None,
+            proposed_use="residential",
+            has_ground_floor_retail=False,
+        )
+        violations = check_compliance(extracted, self._site("Core Employment Areas"))
+        op_vs = [v for v in violations if v.rule_id == "op_use_nonconforming"]
+        assert len(op_vs) == 1
+        assert op_vs[0].severity == Severity.INFORMATIONAL
+        assert "s.22" in op_vs[0].section_ref
+
+    def test_conforming_use_no_violation(self) -> None:
+        """Residential in Neighbourhoods → no OP conformity violation."""
+        extracted = ProjectFeatures(
+            proposed_storeys=None,
+            proposed_units=None,
+            proposed_use="residential",
+            has_ground_floor_retail=False,
+        )
+        violations = check_compliance(extracted, self._site("Neighbourhoods"))
+        assert "op_use_nonconforming" not in [v.rule_id for v in violations]
+
+    def test_no_violation_when_designation_unknown(self) -> None:
+        """No designation (layer absent / off-coverage) → no OP violation."""
+        extracted = ProjectFeatures(
+            proposed_storeys=None,
+            proposed_units=None,
+            proposed_use="residential",
+            has_ground_floor_retail=False,
+        )
+        violations = check_compliance(extracted, self._site(None))
+        assert "op_use_nonconforming" not in [v.rule_id for v in violations]
+
+
+# ---------------------------------------------------------------------------
 # check_compliance — unit limit advisory (low max_units, no explicit count)
 # ---------------------------------------------------------------------------
 

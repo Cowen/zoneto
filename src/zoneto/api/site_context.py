@@ -72,6 +72,7 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
         "in_mtsa": 0,
         "in_trca_regulated_area": 0,
         "in_greenbelt": 0,
+        "op_land_use_designation": None,
     }
 
     con = duckdb.connect()
@@ -248,6 +249,29 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
         """).fetchall()
         if rows:
             result["in_greenbelt"] = 1
+
+    # Official Plan land-use designation (interim Borealis source). Like zoning,
+    # parcel/designation polygons can miss off-parcel geocodes — snap to the nearest
+    # designation within ~200m on a strict-within miss.
+    op_path = ref_dir / "op_land_use.geojson"
+    if op_path.exists():
+        escaped = str(op_path).replace("'", "''")
+        rows = con.execute(f"""
+            SELECT op.op_designation
+            FROM ST_Read('{escaped}') op
+            WHERE ST_Within({point_sql}, op.geom)
+            LIMIT 1
+        """).fetchall()
+        if not rows:
+            rows = con.execute(f"""
+                SELECT op.op_designation
+                FROM ST_Read('{escaped}') op
+                WHERE ST_DWithin({point_sql}, op.geom, 0.002)
+                ORDER BY ST_Distance({point_sql}, op.geom)
+                LIMIT 1
+            """).fetchall()
+        if rows:
+            result["op_land_use_designation"] = rows[0][0]
 
     # Zoning height overlay (HT_STORIES + HT_LABEL for metres)
     # The GeoJSON uses HT_LABEL (double) for height in metres, not HT_HEIGHT.

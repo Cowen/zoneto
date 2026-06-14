@@ -46,6 +46,12 @@ _SITE_COLS = {
     "in_mtsa": "in_mtsa",
     "in_trca_regulated_area": "in_trca_regulated_area",
     "in_greenbelt": "in_greenbelt",
+    # OP land-use designation (interim Borealis source). Unlike permitted_use_category
+    # — which is looked up live in /evaluate and so is absent here — this IS enriched,
+    # so the s.24/s.22 conformity signal CAN fire in the batch set. It is INFORMATIONAL
+    # (does not flip the primary zoning path), so it adds an ORTHOGONAL OPA-detection
+    # axis rather than moving rezoning path-recall.
+    "op_land_use_designation": "op_land_use_designation",
 }
 
 # Which derived path we'd expect for each application_type, where the
@@ -56,12 +62,14 @@ _EXPECTED_PATH = {"OZ": "rezoning", "MV": "minor_variance"}
 _LIMIT_COLS = ("zoning_max_storeys", "zoning_max_units", "zoning_max_density")
 
 
-def _derive(row: dict) -> tuple[str, list[str]]:
-    """Return (primary zoning path, additional process keys) for a row."""
+def _derive(row: dict) -> tuple[str, list[str], bool]:
+    """Return (primary zoning path, additional process keys, op_nonconforming)."""
     site = {dst: row.get(src) for src, dst in _SITE_COLS.items()}
     extracted = extract_project_features(row.get("description"))
-    path = path_for_violations(check_compliance(extracted, site))
-    return path, additional_processes(extracted)
+    violations = check_compliance(extracted, site)
+    path = path_for_violations(violations)
+    op_nonconforming = any(v.rule_id == "op_use_nonconforming" for v in violations)
+    return path, additional_processes(extracted), op_nonconforming
 
 
 def run_eval(
@@ -90,18 +98,28 @@ def run_eval(
     # are NOT a clean test. dev_approved != 1 (refused/active/unknown) is clean.
     oz_split: Counter[tuple[str, bool]] = Counter()  # (bucket, detected)
     additional: Counter[str] = Counter()  # orthogonal-process trigger counts
+    op_covered = 0  # rows with a non-null OP designation (join coverage)
+    # OZ detection with/without the OP-conformity signal: (path_only, with_op)
+    oz_op_detect = {"path_only": 0, "with_op": 0, "total": 0}
 
     for row in df.iter_rows(named=True):
         app_type = row.get("application_type") or "?"
-        derived, extra = _derive(row)
+        derived, extra, op_nonconforming = _derive(row)
         has_limit = any(row.get(c) is not None for c in _LIMIT_COLS)
         confusion[(app_type, derived)] += 1
         by_coverage[(app_type, derived, has_limit)] += 1
+        if row.get("op_land_use_designation") is not None:
+            op_covered += 1
         for key in extra:
             additional[key] += 1
         if app_type == "OZ":
             bucket = "approved (drift)" if row.get("dev_approved") == 1 else "clean"
             oz_split[(bucket, derived == "rezoning")] += 1
+            oz_op_detect["total"] += 1
+            if derived == "rezoning":
+                oz_op_detect["path_only"] += 1
+            if derived == "rezoning" or op_nonconforming:
+                oz_op_detect["with_op"] += 1
 
     app_types = sorted({k[0] for k in confusion})
     paths = ["as_of_right", "minor_variance", "rezoning", "prohibited"]
@@ -177,6 +195,30 @@ def run_eval(
                 f"\n  rezoning precision: {confusion[('OZ', 'rezoning')]:,}/"
                 f"{called_rezoning:,} = {prec:.1%} of rows we call 'rezoning' "
                 "actually filed an OZ"
+            )
+
+    # --- Official Plan conformity signal (item 4b) ---
+    # The OP designation is enriched (permitted_use_category is not), so the
+    # s.24/s.22 conformity check adds an orthogonal OPA-detection axis. Report the
+    # join coverage and the OZ detection lift from adding it to the zoning path.
+    results["op_coverage"] = op_covered / len(df) if len(df) else 0.0
+    tot = oz_op_detect["total"]
+    if tot:
+        recall_path = oz_op_detect["path_only"] / tot
+        recall_with_op = oz_op_detect["with_op"] / tot
+        results["OZ_recall_path_only"] = recall_path
+        results["OZ_recall_with_op"] = recall_with_op
+        if verbose:
+            print(
+                f"\n  Official Plan conformity (interim Borealis layer): "
+                f"{op_covered:,}/{len(df):,} rows have a designation "
+                f"({results['op_coverage']:.1%} coverage)."
+            )
+            print(
+                f"    OZ detection — zoning path only: {oz_op_detect['path_only']:,}/"
+                f"{tot:,} = {recall_path:.1%}; with OP-conformity signal: "
+                f"{oz_op_detect['with_op']:,}/{tot:,} = {recall_with_op:.1%} "
+                f"(+{recall_with_op - recall_path:.1%} from the OP layer)."
             )
 
     # --- Orthogonal process triggers (item 4a) ---

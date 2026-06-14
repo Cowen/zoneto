@@ -42,7 +42,11 @@ from zoneto.analytics.planning_act import (
     path_for_violations,
 )
 from zoneto.api.llm_client import FakeLLMClient
-from zoneto.api.narrator import _apply_confidence_overrides, narrate_evaluation
+from zoneto.api.narrator import (
+    _apply_confidence_overrides,
+    _format_statutory_process,
+    narrate_evaluation,
+)
 
 _FIXTURE_PATH = Path(__file__).parents[1] / "fixtures" / "narrator_eval_cases.json"
 _FIXTURE = json.loads(_FIXTURE_PATH.read_text())
@@ -150,6 +154,36 @@ def test_statutory_process_detection_accuracy() -> None:
     assert set(misses) == {"finch-57-revised", "finch-57-original"}, (
         f"process-detection misses changed: {sorted(misses)}"
     )
+
+
+def test_op_nonconformity_selects_combined_120_day_clock() -> None:
+    """An OP non-conformity (op_use_nonconforming) signals an accompanying OPA, so
+    the rezoning line uses the combined 120-day non-decision clock — even with no
+    explicit "OPA" mention in the description. Without it, a standalone ZBA shows 90.
+    """
+    extracted = extract_project_features(
+        "A 12-storey residential apartment building with 90 dwelling units"
+    )
+    # Residential in an employment zone (use_not_permitted → rezoning path) on a
+    # Core Employment Areas OP site (residential nonconforming → op_use_nonconforming).
+    site_combined = {
+        "permitted_use_category": "Employment Industrial",
+        "op_land_use_designation": "Core Employment Areas",
+    }
+    viols_combined = check_compliance(extracted, site_combined)
+    assert any(v.rule_id == "op_use_nonconforming" for v in viols_combined)
+    text_combined = _format_statutory_process(viols_combined, extracted)
+    assert "120 days" in text_combined
+
+    # Same rezoning trigger, but the OP designation conforms → standalone ZBA, 90 days.
+    site_standalone = {
+        "permitted_use_category": "Employment Industrial",
+        "op_land_use_designation": "Mixed Use Areas",
+    }
+    viols_standalone = check_compliance(extracted, site_standalone)
+    assert not any(v.rule_id == "op_use_nonconforming" for v in viols_standalone)
+    text_standalone = _format_statutory_process(viols_standalone, extracted)
+    assert "90 days" in text_standalone
 
 
 @pytest.mark.parametrize("case_id", _CASE_IDS)

@@ -173,17 +173,37 @@ and in the golden fixtures (`expected_statutory.additional`, asserted). Corpus t
 site_plan 64.3%, condominium 14.0%, subdivision 8.4%, rental_replacement 3.6%, part_lot 2.1%,
 consent 0.3% — signal the old single-bucket classifier discarded entirely.
 
-## Item 4b — Official Plan land-use join — DEFERRED
+## Item 4b — Official Plan land-use join — DONE (interim source)
 
-The premise (OP land use is on Toronto Open Data as a polygon layer) is **wrong**. Verified
-2026-06-13: **CKAN** (`open.toronto.ca`) has secondary plans, SASPs, 3D massing, MTSAs — but **no
-land-use designation layer**; the **City ArcGIS** (`gis.toronto.ca`, reachable) has zoning,
-secondary plans, statistical neighbourhoods — **no OP land-use designation layer**. Toronto
-publishes OP land use as PDF map schedules + an interactive viewer, not a bulk polygon download.
-The only polygon version found is an academic reconstruction (Borealis/Dataverse, parcel-level,
-2019–21) with licensing/quality caveats. **Deferred per user decision** until an official polygon
-source is secured; the s.24 conformity check it would feed is not built. This remains the
-highest-value open enrichment if the data can be obtained (City planning cartography / data request).
+The premise (OP land use is on Toronto Open Data as a polygon layer) is **wrong**. Re-verified
+2026-06-13/14: neither the **COTGEO ArcGIS org** (`services3.arcgis.com/b9WvedVPoizGfvfD`, the
+one the AIC source uses — only `COT_official_plan_areas`, the map-sheet index) nor
+`gis.toronto.ca/.../cot_geospatial11` (zoning, secondary plans, SASP, MTSA, heritage) carries an
+OP land-use **designation** layer. The license-clean long-term source is a **City Geospatial
+Competency Centre (GCC) data request** (`gcc@toronto.ca`) — pending; the binding question is
+whether commercial redistribution is permitted, which only the GCC can confirm.
+
+**Built now against an interim source** (user decision: ingest Borealis now, full incorporation,
+swap the official layer in later): the Borealis/Dataverse reconstruction (`doi:10.5683/SP3/1VMJAG`),
+`LanduseParcelsMerged` layer — 10 designation multipolygons dissolved, EPSG:26917, **CC BY-NC 4.0**
+(interim only). Implemented as the established reference-polygon pattern:
+- `reference._fetch_op_land_use` (datafile 315976 → reproject UTM17N→WGS84 via DuckDB `ST_Transform`
+  → `data/reference/op_land_use.geojson`, canonical OP designation names); `just op` / `zoneto op`.
+  Optional/graceful in `fetch_reference` (absent → null everywhere), like TRCA/greenbelt.
+- `spatial._add_op_land_use_feature` adds `op_land_use_designation` to enriched dev rows;
+  `site_context.lookup_site_context` adds it (with the zoning-style ~200m snap fallback) for `/evaluate`.
+- **s.24/s.22 conformity check** now built: `use_classifier.op_use_matches_designation` +
+  `compliance._check_op_conformity` emit `op_use_nonconforming` (INFORMATIONAL — surfaces the OPA
+  requirement + flips the narrator's combined 120-day clock, but does **not** move the confidence
+  number on the uncertain interim layer; promote to `NEEDS_REZONING` with the authoritative layer).
+- Eval: `planning-act-eval` reports `op_coverage` + OZ detection lift (`OZ_recall_path_only` vs
+  `OZ_recall_with_op`); floors pinned in `tests/analytics/test_planning_act_eval.py` (integration).
+
+**Measured on the real enriched corpus (n=30,772):** OP designation **coverage 60.9%** (the
+dissolved layer omits roads/utility/water/gaps). OZ "needs a Planning Act amendment process"
+detection lifts from **10.4% (zoning path only) → 35.4% (with the OP-conformity signal)** — a +25pt
+lift that validates the "single largest missing signal" claim — while rezoning **precision is
+unchanged at 65%** (the OP signal is orthogonal to the zoning-envelope path, by design).
 
 ## Also fixed
 

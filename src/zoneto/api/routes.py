@@ -472,6 +472,16 @@ def _compute_data_gaps(site: dict[str, Any], extracted: Any) -> list[str]:
                 "height overlay area (~85% of the city). Base zone regulations govern "
                 "maximum height; no HT designation applies here."
             )
+    # Official Plan designation: needed for the s.24/s.22 conformity read. Absent
+    # when the site falls outside the interim layer's coverage or the layer isn't
+    # installed — the OPA-conformity check can't run without it.
+    if site.get("op_land_use_designation") is None and site.get("zoning_class"):
+        gaps.append(
+            "Official Plan land-use designation: not available for this site "
+            "(interim reconstruction layer; pending an authoritative City source). "
+            "Whether an Official Plan Amendment (Planning Act s.22) is required "
+            "alongside any rezoning could not be assessed."
+        )
     # Building type: needed to determine which zone exception standards apply
     if getattr(extracted, "building_type", None) is None:
         gaps.append(

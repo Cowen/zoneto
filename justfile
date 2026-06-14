@@ -22,6 +22,10 @@ aic-full:
 olt:
     uv run zoneto olt
 
+# Fetch Official Plan land-use designation polygons (interim Borealis source)
+op:
+    uv run zoneto op
+
 # Build the bylaw index for semantic search
 bylaw-index:
     uv run zoneto bylaw-index

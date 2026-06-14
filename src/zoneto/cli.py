@@ -148,6 +148,29 @@ def olt(
 
 
 @app.command()
+def op() -> None:
+    """Fetch the Official Plan land-use designation polygons (interim Borealis source).
+
+    Writes data/reference/op_land_use.geojson (WGS84). Kept out of `enrich` so the
+    download isn't forced on every run; `enrich` joins the file when present and
+    leaves op_land_use_designation null when absent. CC BY-NC 4.0 — interim only;
+    see specs/2026-06-13-planning-act-integration.md item 4b.
+    """
+    from zoneto.analytics.reference import _fetch_op_land_use  # noqa: PLC0415
+
+    ref = DATA_DIR / "reference"
+    ref.mkdir(parents=True, exist_ok=True)
+    dest = ref / "op_land_use.geojson"
+    console.print("[bold]Fetching Official Plan land-use designations...[/bold]")
+    try:
+        _fetch_op_land_use(dest)
+        console.print(f"[green]✓[/green] OP land-use designations written to {dest}")
+    except Exception as exc:
+        console.print(f"  [red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def bylaw_index(
     bylaw_dir: Annotated[
         Path,
