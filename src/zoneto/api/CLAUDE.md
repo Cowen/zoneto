@@ -2,7 +2,11 @@
 
 ## App Factory (`app.py`)
 
-BERT: if `desc_bert_embeddings.npy` exists, loads `SentenceTransformer("BAAI/bge-small-en-v1.5")`; reuses `bylaw_index.model` if already loaded (same weights, avoids double load). LLM client created when `ANTHROPIC_API_KEY` set; otherwise `None`. `create_app_from_env()` reads `ZONETO_DATA_DIR`/`ZONETO_MODEL_DIR`/`ZONETO_STATIC_DIR` env vars for uvicorn `--reload` (`factory=True`).
+BERT: if `desc_bert_embeddings.npy` exists, loads `SentenceTransformer("BAAI/bge-small-en-v1.5")`; reuses `bylaw_index.model` if already loaded (same weights, avoids double load). Narrator agents (`app.state.narrator`, a `NarratorAgents` bundle from `zoneto.llm.agents.make_narrator_agents`) created when `ANTHROPIC_API_KEY` set; otherwise `None` (routes 503). `create_app_from_env()` reads `ZONETO_DATA_DIR`/`ZONETO_MODEL_DIR`/`ZONETO_STATIC_DIR` env vars for uvicorn `--reload` (`factory=True`).
+
+## LLM Agents (`zoneto.llm`)
+
+LLM calls go through **Pydantic AI** agents, not a hand-rolled client. `agents.toml` (packaged; override path via `ZONETO_AGENTS_CONFIG`) declares one table per agent (`narrator_evaluation`, `narrator_question`) with `model`/`max_tokens`/`retries`/`temperature`; `load_agents_config` reads it via stdlib `tomllib` into `AgentConfig` models, and `ZONETO_LLM_MODEL` still overrides every agent's model. System prompts stay in `narrator.py` (coupled to the formatters). `narrate_evaluation` returns a **typed** `NarrationResult{summary_md, confidence}` (`zoneto.llm.schemas`) — the old free-text `CONFIDENCE:` line + regex parser are gone; `_apply_confidence_overrides` still clamps the structured `confidence`. Tests stub agents with `TestModel`/`FunctionModel` via `tests/stubs.py` (no key, no network).
 
 ## Site Context (`site_context.py`)
 
@@ -26,7 +30,7 @@ _Last verified: 2026-05-29_
 
 Confidence: Step 1 extreme violation check (≥3× limit → cap 10–30, including inferred-height and FSI); Step 2 base band (70–80 zero structural + compatible use + ≥1 verified limit; 55–65 compatible use with no checkable limit OR mismatched use; 35–55 structural violations); Step 3 ±8 (MTSA/exception up; high appeal/heritage down).
 
-**Deterministic overrides (applied after LLM parse):**
+**Deterministic overrides (applied to the structured `confidence` after the agent returns):**
 - Floor: compatible use + zero structural violations → `max(score, 70)` when `_limits_verified` (≥1 encoded limit checked against an extracted value), else `max(score, 55)` — a zone with all-null limits is "unknowable", not as-of-right.
 - Cap: any of storeys, units, height (stated metres or `effective_height_m` = storeys × 3.0), or FSI ≥ 3.0× its zone limit → `min(score, 30)`. Compliance also emits `height_exceeds_max_inferred` (no stated metres, no storey limit, estimate >125% of metre limit) and `fsi_exceeds_max` violations.
 

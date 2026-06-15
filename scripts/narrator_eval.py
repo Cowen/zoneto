@@ -41,13 +41,13 @@ from zoneto.analytics.compliance import (
 from zoneto.analytics.extract import extract_project_features
 from zoneto.analytics.use_classifier import use_matches_zone
 from zoneto.api.desc_similarity import score_description_similarity
-from zoneto.api.llm_client import AnthropicClient
 from zoneto.api.narrator import (
     _has_approved_precedent,
     _limits_verified,
     narrate_evaluation,
 )
 from zoneto.api.site_context import lookup_site_context
+from zoneto.llm.agents import NarratorAgents, make_narrator_agents
 
 _SECTION_RE = re.compile(r"§[\d][\d.()]*")
 
@@ -68,7 +68,7 @@ def _narrate_case(
     ref_dir: Path,
     data_dir: Path,
     model_dir: Path,
-    llm: AnthropicClient,
+    agents: NarratorAgents,
 ) -> dict:
     """Run the full evaluate pipeline for one golden case.
 
@@ -91,7 +91,7 @@ def _narrate_case(
         extracted,
         violations,
         chunks=[],
-        llm_client=llm,
+        agent=agents.evaluation,
         description=case["description"],
         description_similarity=sim,
     )
@@ -172,7 +172,7 @@ def run_eval(
             print(f"ERROR: no cases match {case_ids}")
             sys.exit(2)
 
-    llm = AnthropicClient(api_key=os.environ["ANTHROPIC_API_KEY"])
+    agents = make_narrator_agents()
     results: dict[str, dict] = {}
     passed = failed = advisory_missed = 0
 
@@ -182,7 +182,7 @@ def run_eval(
             ref_dir=Path(ref_dir),
             data_dir=Path(data_dir),
             model_dir=Path(model_dir),
-            llm=llm,
+            agents=agents,
         )
         results[case["id"]] = result
         score = result["score"]

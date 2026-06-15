@@ -498,9 +498,9 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
     data_dir: Path = getattr(request.app.state, "data_dir", Path("data"))
     ref_dir = data_dir / "reference"
     bylaw_index = getattr(request.app.state, "bylaw_index", None)
-    llm_client = getattr(request.app.state, "llm_client", None)
+    narrator = getattr(request.app.state, "narrator", None)
 
-    if llm_client is None:
+    if narrator is None:
         raise HTTPException(
             status_code=503,
             detail="LLM client not configured. Set ANTHROPIC_API_KEY.",
@@ -558,7 +558,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         extracted,
         violations,
         chunks,
-        llm_client,
+        narrator.evaluation,
         description=body.description,
         data_gaps=data_gaps,
         description_similarity=desc_sim,
@@ -620,9 +620,9 @@ def ask(request: Request, body: AskRequest) -> dict[str, str]:
     data_dir: Path = getattr(request.app.state, "data_dir", Path("data"))
     ref_dir = data_dir / "reference"
     bylaw_index = getattr(request.app.state, "bylaw_index", None)
-    llm_client = getattr(request.app.state, "llm_client", None)
+    narrator = getattr(request.app.state, "narrator", None)
 
-    if llm_client is None:
+    if narrator is None:
         raise HTTPException(
             status_code=503,
             detail="LLM client not configured. Set ANTHROPIC_API_KEY.",
@@ -644,6 +644,6 @@ def ask(request: Request, body: AskRequest) -> dict[str, str]:
         violations=violations,
         retrieved_chunks=chunks,
         history=body.history,
-        llm_client=llm_client,
+        agent=narrator.question,
     )
     return {"answer": answer}

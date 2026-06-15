@@ -39,6 +39,7 @@ src/zoneto/
   sources/           Source protocol, CKAN/AIC/OLT scrapers, registry
   analytics/         Enrichment, feature extraction, training, scoring
   api/               FastAPI app, routes, comps, narrator, site context
+  llm/               Pydantic AI agents: agents.toml config, typed schemas
 static/
   index.html         Frontend: address search, /evaluate, comps
 Dockerfile

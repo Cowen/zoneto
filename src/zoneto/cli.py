@@ -572,13 +572,13 @@ def evaluate(
 
             bert_model = SentenceTransformer("BAAI/bge-small-en-v1.5")
 
-    llm_client = None
+    narrator = None
     if os.environ.get("ANTHROPIC_API_KEY"):
-        from zoneto.api.llm_client import make_llm_client  # noqa: PLC0415
+        from zoneto.llm.agents import make_narrator_agents  # noqa: PLC0415
 
-        llm_client = make_llm_client()
+        narrator = make_narrator_agents()
 
-    if llm_client is None:
+    if narrator is None:
         console.print("[red]✗ ANTHROPIC_API_KEY not set[/red]")
         raise typer.Exit(code=1)
 
@@ -623,7 +623,7 @@ def evaluate(
         extracted,
         violations,
         chunks,
-        llm_client,
+        narrator.evaluation,
         data_gaps=data_gaps,
         description_similarity=desc_sim,
         community_benefits=cb_context,

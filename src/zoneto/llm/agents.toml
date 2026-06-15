@@ -1,0 +1,19 @@
+# LLM agent declarations for Zoneto.
+#
+# Each table declares one agent the application calls. System prompts live in
+# code (coupled to the formatter functions); this file governs only the model
+# and runtime parameters. The ZONETO_LLM_MODEL env var, when set, overrides the
+# `model` of every agent. Point ZONETO_AGENTS_CONFIG at an alternate file to
+# swap this whole declaration without code changes.
+#
+# `model` is an Anthropic model id (an optional "anthropic:" prefix is ignored).
+
+[narrator_evaluation]
+model = "claude-haiku-4-5-20251001"
+max_tokens = 1200
+retries = 2
+
+[narrator_question]
+model = "claude-haiku-4-5-20251001"
+max_tokens = 400
+retries = 2

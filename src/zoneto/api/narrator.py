@@ -6,12 +6,21 @@ import math
 import re
 from typing import Any
 
+from pydantic_ai import Agent
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    UserPromptPart,
+)
+
 from zoneto.analytics import planning_act
 from zoneto.analytics.bylaw_index import Chunk
 from zoneto.analytics.compliance import Severity, Violation, effective_height_m
 from zoneto.analytics.extract import ProjectFeatures
 from zoneto.analytics.use_classifier import use_matches_zone
-from zoneto.api.llm_client import LLMClient
+from zoneto.llm.schemas import NarrationResult
 
 _SYSTEM_PROMPT = """\
 You are a Toronto urban planning assistant that helps evaluate development
@@ -27,10 +36,10 @@ STRICT RULES you must always follow:
    "I cannot answer this from the available context. Please consult
    Toronto City Planning at toronto.ca/city-planning or call 311."
 5. Be concise and precise. Use plain language where possible.
-6. At the very end of your compliance summary, on its own line, write:
-   CONFIDENCE: <0-100>
-   where the number is your assessment of the proposal's likelihood of
-   obtaining planning approval (through whatever process is required):
+6. You must return two things: a markdown compliance summary (`summary_md`)
+   and a `confidence` score from 0 to 100. The confidence is your assessment
+   of the proposal's likelihood of obtaining planning approval (through
+   whatever process is required):
      90–100: as-of-right or near-certain approval — no rezoning needed
      70–89:  strong likelihood — well-supported rezoning, backed by direct
              comparable approvals (especially same-zone) or good zone fit
@@ -88,40 +97,14 @@ STRICT RULES you must always follow:
      The floor of the Step 2 band is an absolute floor. Appeal rate
      and data gaps CANNOT move the score below that floor.
      DATA GAPS ARE NOT PENALTIES — mention them as caveats in the
-     prose summary but do NOT subtract from the CONFIDENCE number.
+     prose summary but do NOT subtract from the confidence score.
    - The "Statutory process & appeal route (Planning Act)" section is
      CONTEXT for the prose only. Requiring an OPA/ZBA, a minor variance,
      or having an OLT appeal route does NOT by itself lower confidence —
-     it just names the correct path. Do NOT adjust CONFIDENCE for it.
-   This line must be the absolute last line of your response.
+     it just names the correct path. Do NOT adjust confidence for it.
+   The confidence is a separate numeric field — do NOT write it inside the
+   summary text.
 """
-
-
-def _parse_confidence(raw: str) -> tuple[str, int | None]:
-    """Extract a CONFIDENCE: <n> line from LLM output, scanning backward.
-
-    Returns (summary_markdown, score) where score is None if the line was absent.
-    Score is clamped to [0, 100]. Scanning backward (rather than checking only
-    the last line) makes extraction robust when the LLM appends a trailing note
-    or caveat after the CONFIDENCE line.
-    """
-    lines = raw.splitlines()
-    while lines and not lines[-1].strip():
-        lines.pop()
-    score: int | None = None
-    for i in range(len(lines) - 1, -1, -1):
-        # Allow optional markdown bold (**), trailing period/comma, and parenthetical
-        m = re.match(
-            r"^\s*\*{0,2}CONFIDENCE:\*{0,2}\s*(-?\d+)[.,)%*\s]*$", lines[i], re.I
-        )
-        if m:
-            score = min(100, max(0, int(m.group(1))))
-            lines.pop(i)
-            break
-    # Strip trailing blank lines after removing score line
-    while lines and not lines[-1].strip():
-        lines.pop()
-    return "\n".join(lines), score
 
 
 def _format_violations(violations: list[Violation]) -> str:
@@ -533,22 +516,22 @@ def narrate_evaluation(
     extracted: ProjectFeatures,
     violations: list[Violation],
     chunks: list[Chunk],
-    llm_client: LLMClient,
+    agent: Agent[None, NarrationResult],
     *,
     description: str | None = None,
     data_gaps: list[str] | None = None,
     description_similarity: dict[str, Any] | None = None,
     community_benefits: dict[str, Any] | None = None,
-) -> tuple[str, int | None]:
+) -> tuple[str, int]:
     """Generate a markdown compliance summary and confidence score.
 
-    The LLM receives structured context and is constrained to narrate only
+    The agent receives structured context and is constrained to narrate only
     what the rule engine and retrieval system found — it cannot invent rules.
-    The trailing CONFIDENCE: <n> line is parsed out and returned separately.
+    It returns a typed :class:`NarrationResult`; the confidence is then passed
+    through the deterministic ``_apply_confidence_overrides`` clamp.
 
     Returns:
-        (summary_markdown, confidence_score) where confidence_score is 0–100
-        or None if the LLM did not emit the expected line.
+        (summary_markdown, confidence_score) where confidence_score is 0–100.
     """
     gaps_section = _format_data_gaps(data_gaps or [])
     site_zone = site.get("zoning_class") if site else None
@@ -611,7 +594,7 @@ Write a concise compliance summary (4–8 sentences maximum) in plain markdown. 
 Do not repeat the violations verbatim — explain them in plain language.
 Do not invent information not present in the context above.
 
-BEFORE writing CONFIDENCE, follow the three-step rule from the system prompt:
+When setting the `confidence` field, follow the three-step rule from the system prompt:
 Step 1: Check each violation ratio (including inferred-height and FSI violations).
         If ANY exceeds 3×: set confidence 10–30, stop.
         Exception: if a same-zone OZ comparable appears with similarity ≥ 90%
@@ -632,19 +615,13 @@ VERIFY before writing CONFIDENCE:
     limit could be checked. INFORMATIONAL violations (heritage notes, MTSA flags,
     exception notes) do NOT count against this.
 
-End with a CONFIDENCE line as required by the system rules.
+Return the summary in `summary_md` and the score in `confidence`.
 """
-    raw = llm_client.complete(
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_content}],
-        max_tokens=1200,
+    result = agent.run_sync(user_content)
+    score = _apply_confidence_overrides(
+        result.output.confidence, violations, site, extracted, description_similarity
     )
-    summary, score = _parse_confidence(raw)
-    if score is not None:
-        score = _apply_confidence_overrides(
-            score, violations, site, extracted, description_similarity
-        )
-    return summary, score
+    return result.output.summary_md, score
 
 
 def narrate_question(
@@ -654,14 +631,14 @@ def narrate_question(
     violations: list[Violation],
     retrieved_chunks: list[Chunk],
     history: list[dict[str, str]],
-    llm_client: LLMClient,
+    agent: Agent[None, str],
 ) -> str:
     """Answer a follow-up question about the evaluated project.
 
     Constructs a bounded context from site facts, violations, and retrieved
-    sections, then calls the LLM with the full chat history.
+    sections, then calls the agent with the full chat history.
 
-    Returns the answer string (caller is responsible for streaming if needed).
+    Returns the answer string.
     """
     context_block = f"""\
 ## Site context
@@ -676,14 +653,19 @@ def narrate_question(
 ## Relevant By-law sections for this question
 {_format_chunks(retrieved_chunks)}
 """
-    messages: list[dict[str, str]] = [
-        {"role": "user", "content": context_block},
-        {"role": "assistant", "content": "Context noted. What is your question?"},
-        *history,
-        {"role": "user", "content": question},
+    ack = "Context noted. What is your question?"
+    message_history: list[ModelMessage] = [
+        ModelRequest(parts=[UserPromptPart(content=context_block)]),
+        ModelResponse(parts=[TextPart(content=ack)]),
     ]
-    return llm_client.complete(
-        system=_SYSTEM_PROMPT,
-        messages=messages,
-        max_tokens=400,
-    )
+    for turn in history:
+        if turn.get("role") == "assistant":
+            message_history.append(
+                ModelResponse(parts=[TextPart(content=turn.get("content", ""))])
+            )
+        else:
+            message_history.append(
+                ModelRequest(parts=[UserPromptPart(content=turn.get("content", ""))])
+            )
+    result = agent.run_sync(question, message_history=message_history)
+    return result.output

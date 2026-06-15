@@ -1,126 +1,17 @@
-"""Tests for narrator confidence score parsing and narrate_evaluation return type."""
+"""Tests for narrate_evaluation structured output and prompt construction."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
+from tests.stubs import capturing_eval_agent, stub_eval_agent
 from zoneto.analytics.compliance import Severity, Violation
 from zoneto.analytics.extract import ProjectFeatures
-from zoneto.api.llm_client import FakeLLMClient
 from zoneto.api.narrator import (
     _apply_confidence_overrides,
     _format_community_benefits,
     _format_description_similarity,
     _format_site,
-    _parse_confidence,
     narrate_evaluation,
 )
-
-
-class CapturingFakeLLMClient:
-    """FakeLLMClient variant that captures the last call's messages for assertion."""
-
-    def __init__(self, response: str = "Summary.\n\nCONFIDENCE: 60") -> None:
-        self._response = response
-        self.last_messages: list[dict[str, str]] = []
-        self.last_system: str = ""
-
-    def complete(
-        self, system: str, messages: list[dict[str, str]], max_tokens: int
-    ) -> str:
-        self.last_system = system
-        self.last_messages = messages
-        return self._response
-
-    def stream(
-        self, system: str, messages: list[dict[str, str]], max_tokens: int
-    ) -> Iterator[str]:
-        self.last_system = system
-        self.last_messages = messages
-        yield self._response
-
-
-class TestParseConfidence:
-    def test_extracts_score_from_trailing_line(self) -> None:
-        """Given: LLM output ending with CONFIDENCE: 72.
-        When: Parsing.
-        Then: Returns score 72 and removes the line from the summary."""
-        raw = "The proposal needs a rezoning.\n\nCONFIDENCE: 72"
-        summary, score = _parse_confidence(raw)
-        assert score == 72
-        assert "CONFIDENCE" not in summary
-        assert "The proposal needs a rezoning." in summary
-
-    def test_clamps_score_to_100(self) -> None:
-        """Given: LLM returns CONFIDENCE: 150 (out of range).
-        When: Parsing.
-        Then: Score is clamped to 100."""
-        _, score = _parse_confidence("Summary.\n\nCONFIDENCE: 150")
-        assert score == 100
-
-    def test_clamps_score_to_0(self) -> None:
-        """Given: LLM returns a negative confidence.
-        When: Parsing.
-        Then: Score is clamped to 0."""
-        _, score = _parse_confidence("Summary.\n\nCONFIDENCE: -5")
-        assert score == 0
-
-    def test_returns_none_when_no_confidence_line(self) -> None:
-        """Given: LLM output with no CONFIDENCE line.
-        When: Parsing.
-        Then: Score is None and full text returned as summary."""
-        raw = "This is a summary with no score."
-        summary, score = _parse_confidence(raw)
-        assert score is None
-        assert summary == raw
-
-    def test_case_insensitive(self) -> None:
-        """Given: LLM writes 'confidence: 55' in lowercase.
-        When: Parsing.
-        Then: Score is still extracted."""
-        _, score = _parse_confidence("Summary.\n\nconfidence: 55")
-        assert score == 55
-
-    def test_trailing_whitespace_handled(self) -> None:
-        """Given: CONFIDENCE line has trailing spaces/newlines.
-        When: Parsing.
-        Then: Score is extracted correctly."""
-        _, score = _parse_confidence("Summary.\n\nCONFIDENCE: 40\n\n")
-        assert score == 40
-
-    def test_finds_confidence_even_when_not_last_line(self) -> None:
-        """Given: LLM appended a note after the CONFIDENCE line.
-        When: Parsing.
-        Then: Score is still extracted and the CONFIDENCE line is removed."""
-        raw = "Proposal has issues.\n\nCONFIDENCE: 30\n\nPlease consult city planning."
-        summary, score = _parse_confidence(raw)
-        assert score == 30
-        assert "CONFIDENCE" not in summary
-        assert "Proposal has issues." in summary
-
-    def test_trailing_period_handled(self) -> None:
-        """Given: LLM appends a period after the confidence number.
-        When: Parsing.
-        Then: Score is still extracted."""
-        _, score = _parse_confidence("Summary.\n\nCONFIDENCE: 72.")
-        assert score == 72
-
-    def test_markdown_bold_handled(self) -> None:
-        """Given: LLM wraps CONFIDENCE in markdown bold markers.
-        When: Parsing.
-        Then: Score is still extracted."""
-        _, score = _parse_confidence("Summary.\n\n**CONFIDENCE: 65**")
-        assert score == 65
-
-    def test_summary_not_mangled_when_score_present(self) -> None:
-        """Given: Multi-paragraph summary with trailing CONFIDENCE line.
-        When: Parsing.
-        Then: Summary text is preserved intact."""
-        raw = "## Heading\n\nParagraph one.\n\nParagraph two.\n\nCONFIDENCE: 60"
-        summary, score = _parse_confidence(raw)
-        assert score == 60
-        assert "## Heading" in summary
-        assert "Paragraph two." in summary
 
 
 class TestNarrateEvaluationDataGaps:
@@ -145,11 +36,11 @@ class TestNarrateEvaluationDataGaps:
         When: LLM returns a valid response.
         Then: Returns (summary, score) without error. Score may be floored above
         the raw LLM value when the use is compatible and no structural violations."""
-        client = FakeLLMClient("Summary noting gaps.\n\nCONFIDENCE: 45")
+        agent = stub_eval_agent(summary="Summary noting gaps.", confidence=45)
         extracted = ProjectFeatures(None, None, "residential", False)
         gaps = ["Actual lot area and frontage not available from open data."]
         summary, score = narrate_evaluation(
-            self._minimal_site(), extracted, [], [], client, data_gaps=gaps
+            self._minimal_site(), extracted, [], [], agent, data_gaps=gaps
         )
         assert score is not None
         assert "Summary" in summary
@@ -158,10 +49,10 @@ class TestNarrateEvaluationDataGaps:
         """Given: narrate_evaluation called with an empty data_gaps list.
         When: LLM returns a valid response.
         Then: Returns (summary, score) as normal."""
-        client = FakeLLMClient("Clean site.\n\nCONFIDENCE: 90")
+        agent = stub_eval_agent(summary="Clean site.", confidence=90)
         extracted = ProjectFeatures(None, None, "residential", False)
         summary, score = narrate_evaluation(
-            self._minimal_site(), extracted, [], [], client, data_gaps=[]
+            self._minimal_site(), extracted, [], [], agent, data_gaps=[]
         )
         assert score == 90
 
@@ -169,10 +60,10 @@ class TestNarrateEvaluationDataGaps:
         """Given: narrate_evaluation called without data_gaps keyword.
         When: LLM returns a response.
         Then: Backward compatible — no error, normal return."""
-        client = FakeLLMClient("Normal summary.\n\nCONFIDENCE: 70")
+        agent = stub_eval_agent(summary="Normal summary.", confidence=70)
         extracted = ProjectFeatures(None, None, "residential", False)
         summary, score = narrate_evaluation(
-            self._minimal_site(), extracted, [], [], client
+            self._minimal_site(), extracted, [], [], agent
         )
         assert score == 70
 
@@ -193,29 +84,31 @@ class TestNarrateEvaluationReturnType:
             "zoning_holding": 0,
         }
 
-    def test_returns_tuple_of_str_and_none_when_no_confidence(self) -> None:
-        """Given: FakeLLMClient returning a response without CONFIDENCE line.
+    def test_returns_tuple_of_str_and_int(self) -> None:
+        """Given: a stub evaluation agent.
         When: narrate_evaluation called.
-        Then: Returns (str, None) tuple."""
-        client = FakeLLMClient("A plain summary.")
+        Then: Returns a (str, int) tuple."""
+        agent = stub_eval_agent(summary="A plain summary.", confidence=50)
         extracted = ProjectFeatures(None, None, "residential", False)
-        result = narrate_evaluation(self._minimal_site(), extracted, [], [], client)
+        result = narrate_evaluation(self._minimal_site(), extracted, [], [], agent)
         assert isinstance(result, tuple)
         summary, score = result
         assert isinstance(summary, str)
-        assert score is None
+        assert isinstance(score, int)
 
-    def test_returns_tuple_with_score_when_confidence_present(self) -> None:
-        """Given: FakeLLMClient returning response with CONFIDENCE: 85.
+    def test_returns_structured_summary_and_score(self) -> None:
+        """Given: a stub agent returning summary + confidence 85.
         When: narrate_evaluation called.
-        Then: Returns (str, 85) tuple and CONFIDENCE not in summary."""
-        client = FakeLLMClient("Good proposal with minor issues.\n\nCONFIDENCE: 85")
+        Then: Returns the summary and score 85."""
+        agent = stub_eval_agent(
+            summary="Good proposal with minor issues.", confidence=85
+        )
         extracted = ProjectFeatures(None, None, "residential", False)
         summary, score = narrate_evaluation(
-            self._minimal_site(), extracted, [], [], client
+            self._minimal_site(), extracted, [], [], agent
         )
         assert score == 85
-        assert "CONFIDENCE" not in summary
+        assert "Good proposal" in summary
 
 
 class TestFormatDescriptionSimilarity:
@@ -354,17 +247,17 @@ class TestNarrateEvaluationDescriptionSimilarity:
     def test_description_similarity_none_does_not_affect_output(self) -> None:
         """Given: description_similarity=None, no violations, compatible zone,
         but no encoded limits to verify the proposal against.
-        When: narrate_evaluation called with LLM returning CONFIDENCE: 40.
+        When: narrate_evaluation called with the agent returning confidence 40.
         Then: Score is floored to 55, not 70 — zero violations with all-null
         limits means nothing was checkable, not as-of-right."""
-        client = FakeLLMClient("Summary.\n\nCONFIDENCE: 40")
+        agent = stub_eval_agent(summary="Summary.", confidence=40)
         extracted = ProjectFeatures(None, None, "mixed_use", False)
         summary, score = narrate_evaluation(
             self._minimal_site(),
             extracted,
             [],
             [],
-            client,
+            agent,
             description_similarity=None,
         )
         assert score == 55
@@ -373,7 +266,7 @@ class TestNarrateEvaluationDescriptionSimilarity:
         """Given: description_similarity with appeal_rate=0.0 and n_similar=20.
         When: narrate_evaluation called.
         Then: The LLM user message includes appeal rate context."""
-        client = CapturingFakeLLMClient("Summary.\n\nCONFIDENCE: 72")
+        agent, captured = capturing_eval_agent(summary="Summary.", confidence=72)
         extracted = ProjectFeatures(17, 258, "mixed_use", False)
         sim = {
             "appeal_rate": 0.0,
@@ -385,10 +278,10 @@ class TestNarrateEvaluationDescriptionSimilarity:
             extracted,
             [],
             [],
-            client,
+            agent,
             description_similarity=sim,
         )
-        user_content = client.last_messages[0]["content"]
+        user_content = captured["prompt"]
         assert "appeal" in user_content.lower()
         assert "20" in user_content
 
@@ -396,10 +289,10 @@ class TestNarrateEvaluationDescriptionSimilarity:
         """Given: narrate_evaluation called without description_similarity kwarg.
         When: Called.
         Then: Works as before (backward compatible)."""
-        client = FakeLLMClient("Backward compat.\n\nCONFIDENCE: 70")
+        agent = stub_eval_agent(summary="Backward compat.", confidence=70)
         extracted = ProjectFeatures(None, None, "residential", False)
         summary, score = narrate_evaluation(
-            self._minimal_site(), extracted, [], [], client
+            self._minimal_site(), extracted, [], [], agent
         )
         assert score == 70
         assert "Backward compat." in summary
@@ -566,7 +459,7 @@ class TestProgrammaticCap:
         Then: Score capped to 30."""
         from zoneto.analytics.compliance import Severity, Violation
 
-        client = FakeLLMClient("Major violation summary.\n\nCONFIDENCE: 45")
+        agent = stub_eval_agent(summary="Major violation summary.", confidence=45)
         extracted = ProjectFeatures(12, None, "residential", False)
         v = Violation(
             rule_id="storeys_exceed_max",
@@ -577,7 +470,7 @@ class TestProgrammaticCap:
             suggested_remedy="Reduce storeys",
         )
         _, score = narrate_evaluation(
-            self._site_with_max_storeys(3), extracted, [v], [], client
+            self._site_with_max_storeys(3), extracted, [v], [], agent
         )
         assert score is not None
         assert score <= 30
@@ -588,7 +481,7 @@ class TestProgrammaticCap:
         Then: Score capped to 30."""
         from zoneto.analytics.compliance import Severity, Violation
 
-        client = FakeLLMClient("Major violation summary.\n\nCONFIDENCE: 48")
+        agent = stub_eval_agent(summary="Major violation summary.", confidence=48)
         extracted = ProjectFeatures(None, 120, "mixed_use", False)
         v = Violation(
             rule_id="unit_limit_advisory",
@@ -599,7 +492,7 @@ class TestProgrammaticCap:
             suggested_remedy="Reduce units",
         )
         _, score = narrate_evaluation(
-            self._site_with_max_units(4), extracted, [v], [], client
+            self._site_with_max_units(4), extracted, [v], [], agent
         )
         assert score is not None
         assert score <= 30
@@ -610,7 +503,7 @@ class TestProgrammaticCap:
         Then: Score not capped — 45 passes through."""
         from zoneto.analytics.compliance import Severity, Violation
 
-        client = FakeLLMClient("Moderate violation.\n\nCONFIDENCE: 45")
+        agent = stub_eval_agent(summary="Moderate violation.", confidence=45)
         extracted = ProjectFeatures(4, None, "residential", False)
         v = Violation(
             rule_id="storeys_exceed_max",
@@ -621,7 +514,7 @@ class TestProgrammaticCap:
             suggested_remedy="Reduce storeys",
         )
         _, score = narrate_evaluation(
-            self._site_with_max_storeys(3), extracted, [v], [], client
+            self._site_with_max_storeys(3), extracted, [v], [], agent
         )
         assert score == 45
 
@@ -629,10 +522,10 @@ class TestProgrammaticCap:
         """Given: zoning_max_storeys=None (no data).
         When: LLM returns CONFIDENCE: 50.
         Then: Score not capped — ratio can't be computed."""
-        client = FakeLLMClient("Unknown limit.\n\nCONFIDENCE: 50")
+        agent = stub_eval_agent(summary="Unknown limit.", confidence=50)
         extracted = ProjectFeatures(12, None, "residential", False)
         _, score = narrate_evaluation(
-            self._site_with_max_storeys(None), extracted, [], [], client
+            self._site_with_max_storeys(None), extracted, [], [], agent
         )
         assert score == 50
 
@@ -707,7 +600,7 @@ class TestNarrateEvaluationCommunityBenefits:
         """Given: community_benefits dict with n_comps=5 and median 250_000.
         When: narrate_evaluation called with community_benefits kwarg.
         Then: LLM user message includes Section 37 context with dollar amounts."""
-        client = CapturingFakeLLMClient("Summary.\n\nCONFIDENCE: 72")
+        agent, captured = capturing_eval_agent(summary="Summary.", confidence=72)
         extracted = ProjectFeatures(None, None, "mixed_use", False)
         cb = {
             "n_comps": 5,
@@ -721,10 +614,10 @@ class TestNarrateEvaluationCommunityBenefits:
             extracted,
             [],
             [],
-            client,
+            agent,
             community_benefits=cb,
         )
-        user_content = client.last_messages[0]["content"]
+        user_content = captured["prompt"]
         assert "250,000" in user_content
         assert "5" in user_content
 
@@ -732,10 +625,10 @@ class TestNarrateEvaluationCommunityBenefits:
         """Given: community_benefits=None.
         When: narrate_evaluation called.
         Then: No crash; returns normal (summary, score) tuple."""
-        client = FakeLLMClient("Summary.\n\nCONFIDENCE: 72")
+        agent = stub_eval_agent(summary="Summary.", confidence=72)
         extracted = ProjectFeatures(None, None, "mixed_use", False)
         summary, score = narrate_evaluation(
-            self._minimal_site(), extracted, [], [], client, community_benefits=None
+            self._minimal_site(), extracted, [], [], agent, community_benefits=None
         )
         assert score == 72
 
@@ -743,10 +636,10 @@ class TestNarrateEvaluationCommunityBenefits:
         """Given: narrate_evaluation called without community_benefits kwarg.
         When: Called.
         Then: Works as before (backward compatible)."""
-        client = FakeLLMClient("Backward compat.\n\nCONFIDENCE: 70")
+        agent = stub_eval_agent(summary="Backward compat.", confidence=70)
         extracted = ProjectFeatures(None, None, "mixed_use", False)
         summary, score = narrate_evaluation(
-            self._minimal_site(), extracted, [], [], client
+            self._minimal_site(), extracted, [], [], agent
         )
         assert score == 70
 
@@ -1238,7 +1131,7 @@ class TestNarrateEvaluationDescription:
         Then: The full description text appears verbatim so the LLM can reason
         about details (parking, laneway access, accessibility) that feature
         extraction does not capture."""
-        client = CapturingFakeLLMClient("Summary.\n\nCONFIDENCE: 60")
+        agent, captured = capturing_eval_agent(summary="Summary.", confidence=60)
         extracted = ProjectFeatures(
             4, 16, "residential", False, building_type="apartment"
         )
@@ -1257,10 +1150,10 @@ class TestNarrateEvaluationDescription:
             extracted,
             [],
             [],
-            client,
+            agent,
             description=description,
         )
-        user_content = client.last_messages[0]["content"]
+        user_content = captured["prompt"]
         assert "12 vehicular parking spaces" in user_content
         assert "pedestrian ramp" in user_content
         assert "laneway" in user_content
@@ -1269,10 +1162,10 @@ class TestNarrateEvaluationDescription:
         """Given: narrate_evaluation called without description kwarg.
         When: Called.
         Then: Backward compatible — no error, normal return."""
-        client = FakeLLMClient("Backward compat.\n\nCONFIDENCE: 70")
+        agent = stub_eval_agent(summary="Backward compat.", confidence=70)
         extracted = ProjectFeatures(None, None, "residential", False)
         summary, score = narrate_evaluation(
-            self._minimal_site(), extracted, [], [], client
+            self._minimal_site(), extracted, [], [], agent
         )
         assert score == 70
 
@@ -1280,12 +1173,12 @@ class TestNarrateEvaluationDescription:
         """Given: narrate_evaluation called with description=None.
         When: LLM user message assembled.
         Then: No '## Project description' section appears (nothing to show)."""
-        client = CapturingFakeLLMClient("Summary.\n\nCONFIDENCE: 70")
+        agent, captured = capturing_eval_agent(summary="Summary.", confidence=70)
         extracted = ProjectFeatures(None, None, "residential", False)
         narrate_evaluation(
-            self._minimal_site(), extracted, [], [], client, description=None
+            self._minimal_site(), extracted, [], [], agent, description=None
         )
-        user_content = client.last_messages[0]["content"]
+        user_content = captured["prompt"]
         assert "## Project description" not in user_content
 
 
@@ -1345,10 +1238,10 @@ class TestFormatSiteUseCompatibility:
         When: narrate_evaluation called.
         Then: LLM user prompt includes 'permitted' for use compatibility — LLM
         must not independently contradict what the rule engine determined."""
-        client = CapturingFakeLLMClient("Summary.\n\nCONFIDENCE: 65")
+        agent, captured = capturing_eval_agent(summary="Summary.", confidence=65)
         site = self._site("Residential")
         extracted = ProjectFeatures(None, None, "recreational", False)
-        narrate_evaluation(site, extracted, [], [], client)
-        user_content = client.last_messages[0]["content"]
+        narrate_evaluation(site, extracted, [], [], agent)
+        user_content = captured["prompt"]
         assert "permitted" in user_content.lower()
         assert "recreational" in user_content

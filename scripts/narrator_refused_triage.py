@@ -176,7 +176,7 @@ def _top_match(sim) -> str:
     )
 
 
-def _narrate(app: dict, analysis: dict, llm) -> int | None:
+def _narrate(app: dict, analysis: dict, agents) -> int | None:
     from zoneto.api.narrator import narrate_evaluation
 
     _, score = narrate_evaluation(
@@ -184,7 +184,7 @@ def _narrate(app: dict, analysis: dict, llm) -> int | None:
         analysis["extracted"],
         analysis["violations"],
         chunks=[],
-        llm_client=llm,
+        agent=agents.evaluation,
         description=app.get("description"),
         description_similarity=analysis["sim"],
     )
@@ -312,14 +312,14 @@ def main() -> None:
         _emit_case(app, analysis)
         return
 
-    llm = None
+    agents = None
     if args.llm:
         if not os.environ.get("ANTHROPIC_API_KEY"):
             print("ERROR: --llm requires ANTHROPIC_API_KEY")
             sys.exit(2)
-        from zoneto.api.llm_client import AnthropicClient
+        from zoneto.llm.agents import make_narrator_agents
 
-        llm = AnthropicClient(api_key=os.environ["ANTHROPIC_API_KEY"])
+        agents = make_narrator_agents()
 
     apps = _load_apps(data_dir, revised=args.revised)
     label = "revised-then-approved" if args.revised else "refused"
@@ -329,7 +329,7 @@ def main() -> None:
         "| folderrsn | address | type | status | zone | ratios "
         "| struct | top match | bucket |"
     )
-    if llm:
+    if agents:
         header += " score |"
     print(header)
     print("|" + "---|" * header.count("|"))
@@ -345,7 +345,7 @@ def main() -> None:
                 f"| {app['folderrsn']} | {_address(app)} "
                 f"| {app.get('application_type')} | {app.get('status')} "
                 f"| — | no coordinates | — | — | skipped |"
-                + (" — |" if llm else "")
+                + (" — |" if agents else "")
             )
             continue
         n_struct = sum(
@@ -362,8 +362,8 @@ def main() -> None:
             f"| {n_struct} | {_top_match(analysis['sim'])} "
             f"| {analysis['bucket']} |"
         )
-        if llm:
-            score = _narrate(app, analysis, llm)
+        if agents:
+            score = _narrate(app, analysis, agents)
             if score is not None:
                 scores.append(score)
             row += f" {score} |"

@@ -67,11 +67,11 @@ def create_app(
         import os  # noqa: PLC0415
 
         if os.environ.get("ANTHROPIC_API_KEY"):
-            from zoneto.api.llm_client import make_llm_client  # noqa: PLC0415
+            from zoneto.llm.agents import make_narrator_agents  # noqa: PLC0415
 
-            app.state.llm_client = make_llm_client()
+            app.state.narrator = make_narrator_agents()
         else:
-            app.state.llm_client = None
+            app.state.narrator = None
 
         yield
 

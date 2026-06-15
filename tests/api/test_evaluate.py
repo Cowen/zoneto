@@ -10,22 +10,22 @@ import polars as pl
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.stubs import stub_narrator_agents
 from zoneto.api.app import create_app
-from zoneto.api.llm_client import FakeLLMClient
 from zoneto.api.routes import _community_benefits_context
 
 
 @pytest.fixture
 def app(tmp_path: Path):
-    """Create app with a FakeLLMClient, no bylaw index (optional), no real data."""
+    """Create app with stub narrator agents, no bylaw index, no real data."""
     application = create_app(
         data_dir=tmp_path / "data",
         model_dir=tmp_path / "models",
         static_dir=tmp_path / "static",
     )
-    # Inject a fake LLM client and no bylaw index
-    application.state.llm_client = FakeLLMClient(
-        response="This is a fake compliance summary."
+    # Inject stub narrator agents and no bylaw index
+    application.state.narrator = stub_narrator_agents(
+        summary="This is a fake compliance summary.", confidence=60
     )
     application.state.bylaw_index = None
     return application
@@ -141,7 +141,7 @@ class TestEvaluateEndpoint:
         """Given: App with no LLM client configured.
         When: POST /evaluate.
         Then: Returns 503."""
-        app.state.llm_client = None
+        app.state.narrator = None
         test_client = TestClient(app, raise_server_exceptions=False)
         with (
             patch(
@@ -564,7 +564,7 @@ class TestAskEndpoint:
         """Given: App with no LLM client.
         When: POST /ask.
         Then: Returns 503."""
-        app.state.llm_client = None
+        app.state.narrator = None
         test_client = TestClient(app, raise_server_exceptions=False)
         with (
             patch(

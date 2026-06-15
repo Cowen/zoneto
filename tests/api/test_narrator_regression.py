@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.stubs import stub_eval_agent
 from zoneto.analytics.compliance import check_compliance
 from zoneto.analytics.extract import extract_project_features
 from zoneto.analytics.planning_act import (
@@ -41,7 +42,6 @@ from zoneto.analytics.planning_act import (
     additional_processes,
     path_for_violations,
 )
-from zoneto.api.llm_client import FakeLLMClient
 from zoneto.api.narrator import (
     _apply_confidence_overrides,
     _format_statutory_process,
@@ -188,8 +188,8 @@ def test_op_nonconformity_selects_combined_120_day_clock() -> None:
 
 @pytest.mark.parametrize("case_id", _CASE_IDS)
 def test_narrate_end_to_end_mocked(case_id: str) -> None:
-    """Given a golden case and a fake LLM answering CONFIDENCE: 50,
-    when narrate_evaluation runs (prompt assembly, parse, overrides),
+    """Given a golden case and a stub agent answering confidence 50,
+    when narrate_evaluation runs (prompt assembly, structured output, overrides),
     then the returned score reflects the case's expected floors/caps.
     """
     case = _CASES[case_id]
@@ -198,13 +198,13 @@ def test_narrate_end_to_end_mocked(case_id: str) -> None:
     extracted = extract_project_features(case["description"])
     violations = check_compliance(extracted, ci["site"])
 
-    client = FakeLLMClient("Summary.\n\nCONFIDENCE: 50")
+    agent = stub_eval_agent(summary="Summary.", confidence=50)
     summary, score = narrate_evaluation(
         ci["site"],
         extracted,
         violations,
         [],
-        client,
+        agent,
         description=case["description"],
         description_similarity=ci["sim_stub"],
     )
@@ -249,8 +249,8 @@ def _narration_for(case_id: str, api_key: str) -> tuple[str, int | None]:
     """
     if case_id not in _NARRATION_CACHE:
         from zoneto.api.desc_similarity import score_description_similarity
-        from zoneto.api.llm_client import AnthropicClient
         from zoneto.api.site_context import lookup_site_context
+        from zoneto.llm.agents import make_narrator_agents
 
         case = _CASES[case_id]
         site = lookup_site_context(case["lat"], case["lon"], _REF_DIR)
@@ -265,13 +265,13 @@ def _narration_for(case_id: str, api_key: str) -> tuple[str, int | None]:
             lon=case["lon"],
             radius_m=2000.0,
         )
-        llm = AnthropicClient(api_key=api_key)
+        agents = make_narrator_agents()
         _NARRATION_CACHE[case_id] = narrate_evaluation(
             site,
             extracted,
             violations,
             chunks=[],
-            llm_client=llm,
+            agent=agents.evaluation,
             description=case["description"],
             description_similarity=sim,
         )
