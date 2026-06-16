@@ -6,6 +6,7 @@ import datetime
 import json
 from collections.abc import Generator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import httpx
 import polars as pl
@@ -353,10 +354,8 @@ def _make_chunk(chunk_id: int, text: str = "text") -> object:
 
 
 class TestRetrieveChunks:
-    def _index(self, zone_results: list, desc_results: list) -> object:
+    def _index(self, zone_results: list, desc_results: list) -> MagicMock:
         """Mock BylawIndex whose search alternates between two result sets."""
-        from unittest.mock import MagicMock
-
         mock = MagicMock()
         mock.search.side_effect = [zone_results, desc_results]
         return mock

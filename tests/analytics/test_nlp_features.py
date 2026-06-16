@@ -6,11 +6,11 @@ from pathlib import Path
 
 import polars as pl
 
-from zoneto.analytics.nlp import _extract_text_features
+from zoneto.analytics.nlp import extract_text_features
 
 
 def test_extract_text_features_produces_svd_columns(tmp_path: Path) -> None:
-    """_extract_text_features() adds desc_svd_0..19 columns."""
+    """extract_text_features() adds desc_svd_0..19 columns."""
     descriptions = [
         "47-storey mixed-use residential tower with ground floor retail",
         "3-storey office building with underground parking",
@@ -25,7 +25,7 @@ def test_extract_text_features_produces_svd_columns(tmp_path: Path) -> None:
         }
     )
 
-    result, _ = _extract_text_features(df, model_dir=tmp_path, n_components=5)
+    result, _ = extract_text_features(df, model_dir=tmp_path, n_components=5)
 
     svd_cols = [f"desc_svd_{i}" for i in range(5)]
     for col in svd_cols:
@@ -34,7 +34,7 @@ def test_extract_text_features_produces_svd_columns(tmp_path: Path) -> None:
 
 
 def test_extract_text_features_serializes_vectorizer(tmp_path: Path) -> None:
-    """_extract_text_features() saves desc_tfidf.joblib to model_dir."""
+    """extract_text_features() saves desc_tfidf.joblib to model_dir."""
     import joblib
 
     # Use more diverse descriptions to get a larger vocab
@@ -51,7 +51,7 @@ def test_extract_text_features_serializes_vectorizer(tmp_path: Path) -> None:
         }
     )
 
-    _extract_text_features(df, model_dir=tmp_path, n_components=3)
+    extract_text_features(df, model_dir=tmp_path, n_components=3)
 
     joblib_path = tmp_path / "desc_tfidf.joblib"
     assert joblib_path.exists(), "desc_tfidf.joblib must be written to model_dir"
@@ -70,7 +70,7 @@ def test_extract_text_features_null_descriptions_get_zeros(tmp_path: Path) -> No
         }
     )
 
-    result, _ = _extract_text_features(df, model_dir=tmp_path, n_components=3)
+    result, _ = extract_text_features(df, model_dir=tmp_path, n_components=3)
 
     f002 = result.filter(pl.col("folderrsn") == "F002")
     for col in [f"desc_svd_{i}" for i in range(3)]:
@@ -81,7 +81,7 @@ def test_extract_text_features_no_description_column(tmp_path: Path) -> None:
     """When description column is absent, adds zero-filled SVD columns."""
     df = pl.DataFrame({"folderrsn": ["F001", "F002"]})
 
-    result, _ = _extract_text_features(df, model_dir=tmp_path, n_components=3)
+    result, _ = extract_text_features(df, model_dir=tmp_path, n_components=3)
 
     for col in [f"desc_svd_{i}" for i in range(3)]:
         assert col in result.columns

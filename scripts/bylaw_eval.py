@@ -68,7 +68,7 @@ def run_eval(
             for i, r in enumerate(results[:k]):
                 hit = "→" if r.section_number in expected else " "
                 print(
-                    f"    {hit} {i+1}. {r.section_number}: "
+                    f"    {hit} {i + 1}. {r.section_number}: "
                     f"{r.section_title} ({r.score:.3f})"
                 )
             if not in_top5:

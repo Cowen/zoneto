@@ -97,9 +97,7 @@ def test_deterministic_overrides(case_id: str) -> None:
     elif expected.get("unknown_limits_floor_55"):
         # Compatible use, zero structural violations, but no encoded limit could
         # be verified against the proposal — floors at 55, not 70.
-        assert low == 55, (
-            f"{label}: unknown-limits floor-55 did not bind (5 -> {low})"
-        )
+        assert low == 55, f"{label}: unknown-limits floor-55 did not bind (5 -> {low})"
         assert high == 95, f"{label}: unexpected cap (95 -> {high})"
     else:
         assert (low, high) == (5, 95), (

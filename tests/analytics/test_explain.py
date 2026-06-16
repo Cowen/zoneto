@@ -153,9 +153,7 @@ def test_explain_one_survival_model_returns_empty(tmp_path: Path) -> None:
     )
     events = np.array([True, False] * 10)
     times = np.array([365 + i * 20 for i in range(n)], dtype=np.int32)
-    y = np.array(
-        list(zip(events, times)), dtype=[("event", bool), ("time", np.int32)]
-    )
+    y = np.array(list(zip(events, times)), dtype=[("event", bool), ("time", np.int32)])
     pipe = _build_survival_pipeline(DEV_CAT_COLS, DEV_NUM_COLS)
     pipe.fit(X, y)
     model_dir = tmp_path / "models"

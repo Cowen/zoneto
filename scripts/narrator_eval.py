@@ -203,17 +203,13 @@ def run_eval(
             print(f"  {mark} [{case['id']}]{adv} score={score} band=[{lo}, {hi}]")
             print(f"      {case['label']}")
             n_struct = sum(
-                1
-                for v in result["violations"]
-                if v.severity != Severity.INFORMATIONAL
+                1 for v in result["violations"] if v.severity != Severity.INFORMATIONAL
             )
             print(
                 f"      violations: {len(result['violations'])} "
                 f"({n_struct} structural) | {_mechanism_trace(result)}"
             )
-            ungrounded = _ungrounded_citations(
-                result["summary"], result["violations"]
-            )
+            ungrounded = _ungrounded_citations(result["summary"], result["violations"])
             if ungrounded:
                 print(f"      note: citations not in violation refs: {ungrounded}")
             if not in_band:

@@ -20,9 +20,9 @@ from zoneto.analytics.labels import (
 from zoneto.analytics.labels import (
     match_olt_to_dev as match_olt_to_dev,  # noqa: F401
 )
-from zoneto.analytics.nlp import _extract_text_features
+from zoneto.analytics.nlp import extract_text_features
 from zoneto.analytics.reference import fetch_reference as fetch_reference  # noqa: F401
-from zoneto.analytics.spatial import _enrich_ward_features, _spatial_join_dev
+from zoneto.analytics.spatial import enrich_ward_features, spatial_join_dev
 from zoneto.analytics.use_classifier import classify_use
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ def enrich_coa(data_dir: Path = Path("data")) -> int:
     )
 
     # Enrich with ward profiles
-    df = _enrich_ward_features(df, data_dir)
+    df = enrich_ward_features(df, data_dir)
 
     out = data_dir / "enriched"
     out.mkdir(parents=True, exist_ok=True)
@@ -210,7 +210,7 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
     )
 
     # Spatial enrichment (monkeypatchable)
-    df = _spatial_join_dev(df, data_dir)
+    df = spatial_join_dev(df, data_dir)
 
     df = df.with_columns(
         pl.col("status")
@@ -282,7 +282,7 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         df = df.with_columns(pl.lit(None, dtype=pl.String).alias("postal_fsa"))
 
     # Enrich with ward profiles
-    df = _enrich_ward_features(df, data_dir)
+    df = enrich_ward_features(df, data_dir)
 
     # --- AIC decision date join and survival labels ---
     aic_path = data_dir / "reference" / "aic_decisions.parquet"
@@ -433,7 +433,7 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
     # cap and SVD compression to 20 dimensions. Future work: fit TF-IDF per year
     # to eliminate leakage entirely, but current approach is acceptable for v1.
     _model_dir = data_dir.parent / "models"
-    df, _ = _extract_text_features(df, _model_dir)
+    df, _ = extract_text_features(df, _model_dir)
 
     out = data_dir / "enriched"
     out.mkdir(parents=True, exist_ok=True)

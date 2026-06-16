@@ -835,9 +835,7 @@ class TestSubsectionSplitting:
         When: Splitting.
         Then: Falls back to paragraph-based splitting."""
         paragraph = "Plain paragraph text without subsection markers. " * 35  # long
-        text = (
-            f"10.10 General Zone R\n\n{paragraph}\n\n{paragraph}\n"
-        )
+        text = f"10.10 General Zone R\n\n{paragraph}\n\n{paragraph}\n"
         chunks = split_into_chunks(text, source_file="test.txt", chapter="10")
         assert len(chunks) >= 2
         for chunk in chunks:

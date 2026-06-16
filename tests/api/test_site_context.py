@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import polars as pl
@@ -139,7 +140,7 @@ def data_dir_with_ref(tmp_path: Path, ref_dir: Path) -> Path:
 
 
 @pytest.fixture
-def client_with_ref(data_dir_with_ref: Path) -> TestClient:
+def client_with_ref(data_dir_with_ref: Path) -> Iterator[TestClient]:
     app = create_app(
         data_dir=data_dir_with_ref,
         model_dir=data_dir_with_ref / "models",

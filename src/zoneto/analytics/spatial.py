@@ -12,7 +12,7 @@ import pyproj
 logger = logging.getLogger(__name__)
 
 
-def _enrich_ward_features(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
+def enrich_ward_features(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     """Add ward profile features (ward_pct_renters, ward_median_income, etc.) to df.
 
     Reads ward_profiles.csv (simple format: one row per ward).
@@ -315,7 +315,7 @@ def _add_op_land_use_feature(df: pl.DataFrame, op_path: Path) -> pl.DataFrame:
     )
 
 
-def _spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
+def spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     """Add zoning_class, secondary_plan_name, in_heritage_register,
     in_heritage_district, in_secondary_plan, in_mtsa columns via DuckDB spatial join.
 

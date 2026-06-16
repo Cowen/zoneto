@@ -71,9 +71,7 @@ def _load_apps(data_dir: Path, *, revised: bool) -> list[dict]:
     df = pl.read_parquet(path)
     if revised:
         df = df.filter(
-            pl.col("description")
-            .str.to_lowercase()
-            .str.contains("revis|resubmi")
+            pl.col("description").str.to_lowercase().str.contains("revis|resubmi")
             & (pl.col("dev_approved") == 1)
         )
     else:
@@ -157,8 +155,7 @@ def _ratios(extracted, site) -> str:
         limit = site.get(key) or 0
         if prop and limit:
             parts.append(
-                f"{attr.removeprefix('proposed_')} {prop}/{limit}"
-                f" ({prop / limit:.1f}x)"
+                f"{attr.removeprefix('proposed_')} {prop}/{limit} ({prop / limit:.1f}x)"
             )
         elif prop:
             parts.append(f"{attr.removeprefix('proposed_')} {prop}/—")
@@ -344,14 +341,11 @@ def main() -> None:
             print(
                 f"| {app['folderrsn']} | {_address(app)} "
                 f"| {app.get('application_type')} | {app.get('status')} "
-                f"| — | no coordinates | — | — | skipped |"
-                + (" — |" if agents else "")
+                f"| — | no coordinates | — | — | skipped |" + (" — |" if agents else "")
             )
             continue
         n_struct = sum(
-            1
-            for v in analysis["violations"]
-            if v.severity != Severity.INFORMATIONAL
+            1 for v in analysis["violations"] if v.severity != Severity.INFORMATIONAL
         )
         buckets[analysis["bucket"]] = buckets.get(analysis["bucket"], 0) + 1
         row = (

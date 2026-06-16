@@ -42,9 +42,7 @@ def main() -> None:
             num_cols=DEV_NUM_COLS,
         )
         snapshot = {
-            "concordance_index_mean": round(
-                float(metrics["concordance_index_mean"]), 4
-            )
+            "concordance_index_mean": round(float(metrics["concordance_index_mean"]), 4)
         }
         baselines["dev_days_to_decision"] = snapshot
         print("done", snapshot)

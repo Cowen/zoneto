@@ -26,7 +26,7 @@ def stub_eval_agent(
 ) -> Agent[None, NarrationResult]:
     """An evaluation agent that always returns a fixed NarrationResult."""
     output = NarrationResult(summary_md=summary, confidence=confidence)
-    return Agent(
+    return Agent[None, NarrationResult](
         TestModel(custom_output_args=output),
         output_type=NarrationResult,
     )
@@ -77,4 +77,6 @@ def capturing_eval_agent(
             ]
         )
 
-    return Agent(FunctionModel(fn), output_type=NarrationResult), captured
+    return Agent[None, NarrationResult](
+        FunctionModel(fn), output_type=NarrationResult
+    ), captured

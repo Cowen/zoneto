@@ -9,10 +9,10 @@ The enrichment pipeline is split across modules; `enrich.py` is a thin orchestra
 
 | Module | Responsibility | Public API |
 |---|---|---|
-| `reference.py` | Reference dataset URLs + downloads | `fetch_reference()` |
-| `spatial.py` | Spatial joins, height/MTSA/ward features | `_spatial_join_dev`, `_add_height_feature`, `_add_mtsa_feature`, `_enrich_ward_features` (internal) |
+| `reference.py` | Reference dataset URLs + downloads | `fetch_reference()`, `fetch_op_land_use()` (CLI `op`) |
+| `spatial.py` | Spatial joins, height/MTSA/ward features | `spatial_join_dev`, `enrich_ward_features` (called by orchestrator); `_add_height_feature`, `_add_mtsa_feature` (internal) |
 | `labels.py` | Outcome status sets, OLT matching | `match_olt_to_dev()`; `_label_from_sets`, `_DEV_DAYS_CAP` (internal) |
-| `nlp.py` | TF-IDF/SVD text features, BERT embeddings | `compute_bert_embeddings()`; `_extract_text_features` (internal) |
+| `nlp.py` | TF-IDF/SVD text features, BERT embeddings | `compute_bert_embeddings()`, `extract_text_features()` |
 | `enrich.py` | Orchestration | `enrich_coa`, `enrich_dev`, `enrich_permits` |
 
 `enrich.py` re-exports `fetch_reference` and `match_olt_to_dev` for backward

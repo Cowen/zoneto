@@ -120,9 +120,8 @@ regression-integration:
 update-baselines:
     uv run python scripts/update_baselines.py
 
-# FIXME types are good for tests/ too, not just src/
 lint:
-    uv run ruff check && uv run ty check src/
+    uv run ruff check && uv run ruff format --check && uv run ty check src/ tests/
 
 fmt:
     uv run ruff format

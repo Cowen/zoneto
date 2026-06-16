@@ -1073,9 +1073,7 @@ class TestComplianceInferredHeight:
         Then: height_exceeds_max_inferred NEEDS_REZONING violation."""
         features = extract_project_features("a 28 storey mixed-use building")
         violations = check_compliance(features, self._site(18.0))
-        inferred = [
-            v for v in violations if v.rule_id == "height_exceeds_max_inferred"
-        ]
+        inferred = [v for v in violations if v.rule_id == "height_exceeds_max_inferred"]
         assert len(inferred) == 1
         assert inferred[0].severity == Severity.NEEDS_REZONING
 
@@ -1126,9 +1124,7 @@ class TestComplianceFSI:
         """Given: Stated FSI 5.4 against a 0.85 density limit.
         When: Checking compliance.
         Then: fsi_exceeds_max NEEDS_REZONING violation."""
-        features = extract_project_features(
-            "a total Floor Space Index (FSI) of 5.4"
-        )
+        features = extract_project_features("a total Floor Space Index (FSI) of 5.4")
         violations = check_compliance(features, self._site(0.85))
         fsi_vs = [v for v in violations if v.rule_id == "fsi_exceeds_max"]
         assert len(fsi_vs) == 1

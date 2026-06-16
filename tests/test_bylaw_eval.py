@@ -30,7 +30,7 @@ def _run_eval(k: int = 5) -> tuple[float, float]:
     """Return (recall@3, recall@5) against the labelled query fixture."""
     from zoneto.analytics.bylaw_index import BylawIndex
 
-    idx = BylawIndex(str(_INDEX_DIR))
+    idx = BylawIndex(_INDEX_DIR)
     queries = json.loads(_QUERIES_PATH.read_text())
 
     hits3 = hits5 = 0

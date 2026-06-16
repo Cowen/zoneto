@@ -661,7 +661,7 @@ class TestFormatChunks:
         When: _format_chunks renders it.
         Then: The full text appears in the output without truncation."""
         from zoneto.analytics.bylaw_index import Chunk
-        from zoneto.api.narrator import _format_chunks  # type: ignore[attr-defined]
+        from zoneto.api.narrator import _format_chunks
 
         long_text = "x" * 700
         chunk = Chunk(

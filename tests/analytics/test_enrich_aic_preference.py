@@ -67,7 +67,7 @@ def test_enrich_dev_enriches_ckan_with_aic_spatial_fields(
     _write_minimal_aic_apps(tmp_path)
 
     monkeypatch.setattr(
-        "zoneto.analytics.enrich._spatial_join_dev",
+        "zoneto.analytics.enrich.spatial_join_dev",
         lambda df, data_dir: df.with_columns(
             pl.lit(None, dtype=pl.Utf8).alias("zoning_class"),
             pl.lit(0, dtype=pl.Int8).alias("in_heritage_register"),
@@ -112,7 +112,7 @@ def test_enrich_dev_without_aic_falls_back_to_ckan(
     # No AIC data written
 
     monkeypatch.setattr(
-        "zoneto.analytics.enrich._spatial_join_dev",
+        "zoneto.analytics.enrich.spatial_join_dev",
         lambda df, data_dir: df.with_columns(
             pl.lit(None, dtype=pl.Utf8).alias("zoning_class"),
             pl.lit(0, dtype=pl.Int8).alias("in_heritage_register"),

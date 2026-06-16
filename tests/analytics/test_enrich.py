@@ -17,7 +17,7 @@ from zoneto.analytics.enrich import (
     enrich_permits,
     fetch_reference,
 )
-from zoneto.analytics.spatial import _spatial_join_dev
+from zoneto.analytics.spatial import spatial_join_dev
 
 
 def _write_minimal_shp(shp_path: Path) -> None:
@@ -59,7 +59,7 @@ def _fake_spatial_join(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
 
 @pytest.fixture()
 def stub_spatial_join(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("zoneto.analytics.enrich._spatial_join_dev", _fake_spatial_join)
+    monkeypatch.setattr("zoneto.analytics.enrich.spatial_join_dev", _fake_spatial_join)
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +496,7 @@ def test_enrich_coa_deduplicates_on_reference_file(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _spatial_join_dev integration (real DuckDB spatial, minimal reference files)
+# spatial_join_dev integration (real DuckDB spatial, minimal reference files)
 # ---------------------------------------------------------------------------
 
 
@@ -506,7 +506,7 @@ def _setup_spatial_ref(
     zoning_units: int | None = 200,
     zoning_density: float | None = 3.5,
 ) -> None:
-    """Create minimal reference files for _spatial_join_dev integration tests.
+    """Create minimal reference files for spatial_join_dev integration tests.
 
     Zoning polygon covers Toronto WGS84 (-80,-79) × (43,44).
     Secondary plans polygon is placed at (0,0)-(1,1) so it never matches.
@@ -573,7 +573,7 @@ def _setup_spatial_ref(
 
 
 def test_spatial_join_dev_uses_mtm_zone10_crs(tmp_path: Path) -> None:
-    """_spatial_join_dev must reproject from EPSG:2952 (MTM Zone 10), not EPSG:26917.
+    """spatial_join_dev must reproject from EPSG:2952 (MTM Zone 10), not EPSG:26917.
 
     99.8% of dev application coordinates have x~302k-326k, which is MTM Zone 10
     (false easting 304,800). Treating these as UTM Zone 17N (false easting 500,000)
@@ -587,7 +587,7 @@ def test_spatial_join_dev_uses_mtm_zone10_crs(tmp_path: Path) -> None:
 
     # MTM Zone 10 coordinates for a downtown Toronto parcel
     df = pl.DataFrame({"x": ["313000.0", None], "y": ["4834000.0", None]})
-    result = _spatial_join_dev(df, tmp_path)
+    result = spatial_join_dev(df, tmp_path)
 
     # With correct CRS (EPSG:2952), point lands in Toronto → zoning_class assigned
     assert result["zoning_class"][0] == "CR3", (
@@ -597,7 +597,7 @@ def test_spatial_join_dev_uses_mtm_zone10_crs(tmp_path: Path) -> None:
 
 
 def test_spatial_join_dev_reads_zoning_geojson(tmp_path: Path) -> None:
-    """_spatial_join_dev reads zoning from zoning.geojson via DuckDB ST_Read.
+    """spatial_join_dev reads zoning from zoning.geojson via DuckDB ST_Read.
 
     Uses x=313000, y=4834000 (EPSG:2952 MTM Zone 10) which projects to
     ~(-79.4°, 43.65°) WGS84, inside the test polygon covering (-80,-79) × (43,44).
@@ -606,7 +606,7 @@ def test_spatial_join_dev_reads_zoning_geojson(tmp_path: Path) -> None:
     _setup_spatial_ref(ref)
 
     df = pl.DataFrame({"x": ["313000.0", None], "y": ["4834000.0", None]})
-    result = _spatial_join_dev(df, tmp_path)
+    result = spatial_join_dev(df, tmp_path)
 
     # Point inside polygon → zoning_class assigned
     assert result["zoning_class"][0] == "CR3"
@@ -1068,7 +1068,7 @@ def test_enrich_dev_unit_excess_ratio(
 ) -> None:
     """unit_excess_ratio = proposed_units / zoning_max_units, null-safe."""
     monkeypatch.setattr(
-        "zoneto.analytics.enrich._spatial_join_dev",
+        "zoneto.analytics.enrich.spatial_join_dev",
         _fake_spatial_join_with_zoning_limits,
     )
     _make_dev_parquet_descriptions(tmp_path)
@@ -1097,7 +1097,7 @@ def test_enrich_dev_storey_excess_ratio(
 ) -> None:
     """storey_excess_ratio = proposed_storeys / zoning_max_storeys."""
     monkeypatch.setattr(
-        "zoneto.analytics.enrich._spatial_join_dev",
+        "zoneto.analytics.enrich.spatial_join_dev",
         _fake_spatial_join_with_zoning_limits,
     )
     _make_dev_parquet_descriptions(tmp_path)

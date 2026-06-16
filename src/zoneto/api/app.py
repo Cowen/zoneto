@@ -2,24 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
 from fastapi import FastAPI
 
 _BERT_MODEL_NAME = "BAAI/bge-small-en-v1.5"
-
-
-def _load_production_ready(model_dir: Path) -> dict[str, bool]:
-    """Load production_ready flags from metrics.json. Returns empty dict if absent."""
-    metrics_path = model_dir / "metrics.json"
-    if not metrics_path.exists():
-        return {}
-    with open(metrics_path) as f:
-        metrics: dict[str, Any] = json.load(f)
-    return {name: bool(m.get("production_ready", False)) for name, m in metrics.items()}
 
 
 def create_app(
@@ -34,9 +22,13 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        from zoneto.analytics.score import _load_production_ready  # noqa: PLC0415
+
         app.state.data_dir = resolved_data_dir
         app.state.model_dir = resolved_model_dir
-        app.state.production_ready = _load_production_ready(resolved_model_dir)
+        app.state.production_ready = _load_production_ready(
+            resolved_model_dir, default=False
+        )
         app.state.ready = True
 
         # Bylaw index — optional; absent if `zoneto bylaw-index` hasn't been run yet

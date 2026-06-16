@@ -59,6 +59,10 @@ filterwarnings = [
     "ignore:Skipping features without any observed values:UserWarning:sklearn",
     # TruncatedSVD warns on tiny corpus (expected when testing with minimal fixtures)
     "ignore::RuntimeWarning:sklearn",
+    # pydantic_ai 1.107.0 calls the deprecated asyncio.get_event_loop() inside its
+    # run_sync path (pydantic_ai._utils.get_event_loop); library-internal and
+    # unreachable from our code. Drop when pydantic_ai stops using get_event_loop().
+    "ignore:There is no current event loop:DeprecationWarning",
 ]
 
 [tool.ruff]

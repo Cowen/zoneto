@@ -23,14 +23,20 @@ def _load(model_dir: Path, model_name: str) -> Any:
     return joblib.load(model_dir / f"{model_name}.joblib")
 
 
-def _load_production_ready(model_dir: Path) -> dict[str, bool]:
-    """Load production_ready flags from metrics.json. Returns {} if absent."""
+def _load_production_ready(model_dir: Path, *, default: bool = True) -> dict[str, bool]:
+    """Load production_ready flags from metrics.json. Returns {} if absent.
+
+    ``default`` is the value assumed when a model's metrics entry omits the flag:
+    scoring assumes True (score it), serving assumes False (withhold it).
+    """
     metrics_path = model_dir / "metrics.json"
     if not metrics_path.exists():
         return {}
     with open(metrics_path) as f:
         metrics: dict[str, Any] = json.load(f)
-    return {name: bool(m.get("production_ready", True)) for name, m in metrics.items()}
+    return {
+        name: bool(m.get("production_ready", default)) for name, m in metrics.items()
+    }
 
 
 def _survival_percentile(times: Any, probs: Any, quantile: float) -> float:
@@ -145,8 +151,7 @@ def score_all(
     else:
         _combined = [None] * len(_types)
     extra["statutory_min_decision_days"] = [
-        statutory_timeline_days(t, is_combined=c)
-        for t, c in zip(_types, _combined)
+        statutory_timeline_days(t, is_combined=c) for t, c in zip(_types, _combined)
     ]
 
     df_dev_scored = df_dev.with_columns(

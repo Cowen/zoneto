@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Annotated
 
+import polars as pl
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -156,14 +157,14 @@ def op() -> None:
     leaves op_land_use_designation null when absent. CC BY-NC 4.0 — interim only;
     see specs/2026-06-13-planning-act-integration.md item 4b.
     """
-    from zoneto.analytics.reference import _fetch_op_land_use  # noqa: PLC0415
+    from zoneto.analytics.reference import fetch_op_land_use  # noqa: PLC0415
 
     ref = DATA_DIR / "reference"
     ref.mkdir(parents=True, exist_ok=True)
     dest = ref / "op_land_use.geojson"
     console.print("[bold]Fetching Official Plan land-use designations...[/bold]")
     try:
-        _fetch_op_land_use(dest)
+        fetch_op_land_use(dest)
         console.print(f"[green]✓[/green] OP land-use designations written to {dest}")
     except Exception as exc:
         console.print(f"  [red]✗ {exc}[/red]")
@@ -199,8 +200,6 @@ def bylaw_index(
         index = BylawIndex.build(bylaw_dir, index_dir, progress=console.print)
 
         # Load and report statistics
-        import polars as pl  # noqa: PLC0415
-
         chunks_df = pl.read_parquet(index_dir / "chunks.parquet")
         n_chunks = len(chunks_df)
 
@@ -268,8 +267,6 @@ def enrich(
             console.print(f"  [red]✗ {exc}[/red]")
 
     if fetch_olt:
-        import polars as pl  # noqa: PLC0415
-
         from zoneto.analytics.enrich import match_olt_to_dev  # noqa: PLC0415
 
         enriched_dev_path = DATA_DIR / "enriched" / "dev_applications.parquet"

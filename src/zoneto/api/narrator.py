@@ -159,9 +159,7 @@ def _format_statutory_process(
     ]
     if extras:
         text += (
-            " Likely also required (orthogonal to zoning): "
-            + "; ".join(extras)
-            + "."
+            " Likely also required (orthogonal to zoning): " + "; ".join(extras) + "."
         )
     return text
 
@@ -542,9 +540,7 @@ def narrate_evaluation(
         description_similarity, site_zoning_class=site_zone
     )
     cb_section = _format_community_benefits(community_benefits)
-    desc_section = (
-        f"\n## Project description\n{description}" if description else ""
-    )
+    desc_section = f"\n## Project description\n{description}" if description else ""
     user_content = f"""\
 ## Site context
 {_format_site(site, proposed_use=extracted.proposed_use)}

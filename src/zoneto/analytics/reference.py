@@ -8,6 +8,7 @@ import logging
 import shutil
 import tempfile
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -375,7 +376,7 @@ def _fetch_greenbelt(dest: Path) -> None:
             shutil.rmtree(tmp_dir)
 
 
-def _fetch_op_land_use(dest: Path) -> None:
+def fetch_op_land_use(dest: Path) -> None:
     """Download the Official Plan land-use designation polygons and write GeoJSON.
 
     INTERIM source: the Borealis reconstruction's ``LanduseParcelsMerged`` layer
@@ -402,7 +403,7 @@ def _fetch_op_land_use(dest: Path) -> None:
 
         shp_files = list(tmp_dir.rglob("*.shp"))
         if not shp_files:
-            logger.warning("_fetch_op_land_use: no .shp found in downloaded ZIP")
+            logger.warning("fetch_op_land_use: no .shp found in downloaded ZIP")
             return
 
         escaped = str(shp_files[0]).replace("'", "''")
@@ -433,11 +434,26 @@ def _fetch_op_land_use(dest: Path) -> None:
             )
         geojson = {"type": "FeatureCollection", "features": features}
         dest.write_text(json.dumps(geojson))
-        logger.info("_fetch_op_land_use: wrote %d features to %s", len(features), dest)
+        logger.info("fetch_op_land_use: wrote %d features to %s", len(features), dest)
     finally:
         tmp_zip.unlink(missing_ok=True)
         if tmp_dir.exists():
             shutil.rmtree(tmp_dir)
+
+
+def _fetch_optional(target: Path, fetch: Callable[[], object], warning: str) -> None:
+    """Run an optional reference download, degrading gracefully on failure.
+
+    No-op when *target* already exists. On a fetch error, logs *warning* instead
+    of raising — these datasets leave their feature at the absent-data default
+    (0/null) rather than aborting the pipeline.
+    """
+    if target.exists():
+        return
+    try:
+        fetch()
+    except Exception:
+        logger.warning(warning)
 
 
 def fetch_reference(data_dir: Path = Path("data")) -> None:
@@ -518,44 +534,35 @@ def fetch_reference(data_dir: Path = Path("data")) -> None:
         _fetch_ward_profiles_csv(ref)
 
     # Section 37 community benefits CSV → parquet
-    section37_parquet = ref / "section37.parquet"
-    if not section37_parquet.exists():
-        try:
-            _fetch_section37(ref)
-        except Exception:
-            logger.warning(
-                "Section 37 data not available for community benefits context"
-            )
+    _fetch_optional(
+        ref / "section37.parquet",
+        lambda: _fetch_section37(ref),
+        "Section 37 data not available for community benefits context",
+    )
 
     # TRCA regulated areas GeoJSON (paginated ArcGIS FeatureServer)
     trca_geojson = ref / "trca_regulated_areas.geojson"
-    if not trca_geojson.exists():
-        try:
-            _fetch_trca_regulated_areas(trca_geojson)
-        except Exception:
-            logger.warning(
-                "TRCA regulated areas not available — in_trca_regulated_area will be 0"
-            )
+    _fetch_optional(
+        trca_geojson,
+        lambda: _fetch_trca_regulated_areas(trca_geojson),
+        "TRCA regulated areas not available — in_trca_regulated_area will be 0",
+    )
 
     # Ontario Greenbelt boundary GeoJSON
     greenbelt_geojson = ref / "greenbelt.geojson"
-    if not greenbelt_geojson.exists():
-        try:
-            _fetch_greenbelt(greenbelt_geojson)
-        except Exception:
-            logger.warning(
-                "Greenbelt boundary not available — in_greenbelt will be 0 for all rows"
-            )
+    _fetch_optional(
+        greenbelt_geojson,
+        lambda: _fetch_greenbelt(greenbelt_geojson),
+        "Greenbelt boundary not available — in_greenbelt will be 0 for all rows",
+    )
 
     # Official Plan land-use designations GeoJSON (interim Borealis source).
     # Optional — when absent, op_land_use_designation is null everywhere and the
     # pipeline still runs (mirrors TRCA/greenbelt). Acquired via `just op`.
     op_land_use_geojson = ref / "op_land_use.geojson"
-    if not op_land_use_geojson.exists():
-        try:
-            _fetch_op_land_use(op_land_use_geojson)
-        except Exception:
-            logger.warning(
-                "OP land-use designations not available — "
-                "op_land_use_designation will be null for all rows"
-            )
+    _fetch_optional(
+        op_land_use_geojson,
+        lambda: fetch_op_land_use(op_land_use_geojson),
+        "OP land-use designations not available — "
+        "op_land_use_designation will be null for all rows",
+    )

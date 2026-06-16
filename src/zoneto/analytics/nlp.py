@@ -15,7 +15,7 @@ from sklearn.pipeline import Pipeline as SklearnPipeline
 logger = logging.getLogger(__name__)
 
 
-def _extract_text_features(
+def extract_text_features(
     df: pl.DataFrame,
     model_dir: Path,
     *,

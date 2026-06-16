@@ -964,9 +964,7 @@ class TestApplyConfidenceOverrides:
         Then: FSI joins the cap trio — score capped to 30."""
         site = self._site(zoning_class="RM")
         site["zoning_max_density"] = 0.85
-        extracted = ProjectFeatures(
-            None, None, "residential", False, proposed_fsi=5.4
-        )
+        extracted = ProjectFeatures(None, None, "residential", False, proposed_fsi=5.4)
         score = _apply_confidence_overrides(70, [], site, extracted)
         assert score == 30
 

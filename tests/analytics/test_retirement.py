@@ -36,7 +36,9 @@ def _make_dev_parquet(tmp_path: Path) -> Path:
         {
             "application_type": rng.choice(["OZ", "SA"], size=n).tolist(),
             "ward_number": [str(rng.integers(1, 26)) for _ in range(n)],
-            "zoning_class": rng.choice(["RS", "RM", None], size=n).tolist(),
+            "zoning_class": rng.choice(
+                np.array(["RS", "RM", None], dtype=object), size=n
+            ).tolist(),
             "secondary_plan_name": [None] * n,
             "year_submitted": rng.integers(2018, 2024, size=n).tolist(),
             "in_heritage_register": rng.integers(0, 2, size=n).tolist(),
