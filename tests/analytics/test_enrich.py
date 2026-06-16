@@ -159,30 +159,13 @@ def test_enrich_coa_creates_output(tmp_path: Path) -> None:
     assert out.exists()
 
 
-def test_enrich_coa_approved_label(tmp_path: Path) -> None:
+def test_enrich_coa_no_outcome_labels(tmp_path: Path) -> None:
+    """coa_approved / coa_days_to_approval models were deleted — no labels written."""
     _make_coa_parquet(tmp_path)
     enrich_coa(data_dir=tmp_path)
     df = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
-    # Row 0: Approved → 1
-    assert df.filter(pl.col("ward_number") == "5")["coa_approved"][0] == 1
-    # Row 1: Refused → 0
-    assert df.filter(pl.col("ward_number") == "10")["coa_approved"][0] == 0
-    # Row 2: Deferred → null
-    assert df.filter(pl.col("ward_number") == "15")["coa_approved"][0] is None
-    # Row 3: approved with conditions → 1
-    assert df.filter(pl.col("ward_number") == "20")["coa_approved"][0] == 1
-
-
-def test_enrich_coa_days_to_approval(tmp_path: Path) -> None:
-    _make_coa_parquet(tmp_path)
-    enrich_coa(data_dir=tmp_path)
-    df = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
-    # Row 0: 2022-01-15 to 2022-04-20 = 95 days, and is approved
-    row = df.filter(pl.col("ward_number") == "5")
-    assert row["coa_days_to_approval"][0] == 95
-    # Row 1: Refused → days_to_approval is null
-    row2 = df.filter(pl.col("ward_number") == "10")
-    assert row2["coa_days_to_approval"][0] is None
+    assert "coa_approved" not in df.columns
+    assert "coa_days_to_approval" not in df.columns
 
 
 def test_enrich_coa_ward_renamed(tmp_path: Path) -> None:
@@ -466,51 +449,6 @@ def test_enrich_dev_postal_fsa(tmp_path, stub_spatial_join):
 # ---------------------------------------------------------------------------
 
 
-def test_enrich_coa_caps_days_at_730(tmp_path: Path) -> None:
-    """coa_days_to_approval > 730 days should be null (outlier exclusion).
-
-    A 2,992-day outlier destabilizes the regression across CV folds.
-    Cap at 730 days (2 years); values beyond are treated as exceptional/null.
-    """
-    # Build a COA parquet with one row spanning >730 days (2014 → 2022 = ~2,992d)
-    df = pl.DataFrame(
-        {
-            "reference_file": ["REF-LONG", "REF-SHORT"],
-            "in_date": ["2014-01-01", "2022-01-15"],
-            "finaldate": ["2022-03-01", "2022-04-20"],
-            "hearing_date": ["2014-02-01", "2022-02-10"],
-            "c_of_a_descision": ["Approved", "Approved"],
-            "ward": [5, 10],
-            "application_type": ["Minor Variance", "Minor Variance"],
-            "sub_type": ["A", "A"],
-            "zoning_designation": ["RS", "RS"],
-            "planning_district": ["Toronto & East York", "Toronto & East York"],
-            "source_name": ["coa", "coa"],
-            "year": [2014, 2022],
-        }
-    ).with_columns(
-        pl.col("in_date").str.to_date(),
-        pl.col("finaldate").str.to_date(),
-        pl.col("hearing_date").str.to_date(),
-    )
-    out = tmp_path / "coa" / "year=2014"
-    out.mkdir(parents=True)
-    df.write_parquet(out / "part0.parquet")
-
-    enrich_coa(data_dir=tmp_path)
-    result = pl.read_parquet(tmp_path / "enriched" / "coa.parquet")
-
-    # The long row (>730d) should have null coa_days_to_approval
-    long_row = result.filter(pl.col("reference_file") == "REF-LONG")
-    assert long_row["coa_days_to_approval"][0] is None, (
-        "coa_days_to_approval > 730 days should be null (outlier cap)"
-    )
-
-    # The short row (95 days) should be preserved
-    short_row = result.filter(pl.col("reference_file") == "REF-SHORT")
-    assert short_row["coa_days_to_approval"][0] == 95
-
-
 def test_enrich_coa_planning_district(tmp_path: Path) -> None:
     """planning_district should be preserved as a feature column."""
     _make_coa_parquet(tmp_path)
@@ -730,33 +668,19 @@ def test_enrich_permits_creates_output(tmp_path: Path) -> None:
     assert (tmp_path / "enriched" / "permits_cleared.parquet").exists()
 
 
-def test_enrich_permits_issuance_days(tmp_path: Path) -> None:
-    """permit_issuance_days = issued_date - application_date in calendar days."""
+def test_enrich_permits_no_issuance_label(tmp_path: Path) -> None:
+    """permit_issuance_days model was deleted — no outcome label is written."""
     _make_permits_parquet(tmp_path)
     enrich_permits(data_dir=tmp_path)
     df = pl.read_parquet(tmp_path / "enriched" / "permits_cleared.parquet")
-    assert "permit_issuance_days" in df.columns
-    # Row 0: 2022-01-10 → 2022-04-20 = 100 days
-    row0 = df.filter(pl.col("permit_type") == "New Houses").filter(
-        pl.col("ward_grid") == "W01"
-    )
-    assert row0["permit_issuance_days"][0] == 100
-
-
-def test_enrich_permits_null_issued_date(tmp_path: Path) -> None:
-    """Rows with null issued_date should have null permit_issuance_days."""
-    _make_permits_parquet(tmp_path)
-    enrich_permits(data_dir=tmp_path)
-    df = pl.read_parquet(tmp_path / "enriched" / "permits_cleared.parquet")
-    row = df.filter(pl.col("ward_grid") == "W03")
-    assert row["permit_issuance_days"][0] is None
+    assert "permit_issuance_days" not in df.columns
 
 
 def test_enrich_permits_row_count(tmp_path: Path) -> None:
-    """enrich_permits returns the count of rows written."""
+    """enrich_permits returns the count of rows written (all rows preserved)."""
     _make_permits_parquet(tmp_path)
     count = enrich_permits(data_dir=tmp_path)
-    assert count == 4  # all 4 rows preserved (null issuance_days kept)
+    assert count == 4
 
 
 def test_enrich_permits_application_year(tmp_path: Path) -> None:

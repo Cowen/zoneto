@@ -292,46 +292,38 @@ def train(
         typer.Option(help="Directory to write .joblib model files."),
     ] = Path("models"),
 ) -> None:
-    """Train all outcome-prediction models from enriched Parquet."""
+    """Train the survival model (dev_days_to_decision) from enriched Parquet."""
     console.print("[bold]Training models...[/bold]")
     try:
         counts, metrics = train_all(data_dir=DATA_DIR, model_dir=model_dir)
+
+        if not counts:
+            console.print(
+                "[yellow]No models trained "
+                "(enriched dev_applications.parquet with dev_days_observed required; "
+                "run `just aic` then `just enrich`).[/yellow]"
+            )
+            return
 
         # Build and display metrics table
         table = Table(title="Model Training Results")
         table.add_column("Model", style="bold")
         table.add_column("N rows", justify="right")
         table.add_column("Primary metric", justify="right")
-        table.add_column("Secondary metric", justify="right")
         table.add_column("Status", justify="center")
-
-        _TRACKING_ONLY = {"coa_days_to_approval"}
 
         for name, count in counts.items():
             metric = metrics[name]
-            if "roc_auc_mean" in metric:
-                primary = (
-                    f"AUC {metric['roc_auc_mean']:.3f}±{metric['roc_auc_std']:.3f}"
-                )
-                secondary = f"Brier {metric['brier_score_mean']:.3f}"
-            elif "concordance_index_mean" in metric:
-                primary = (
-                    f"C-index {metric['concordance_index_mean']:.3f}"
-                    f"±{metric['concordance_index_std']:.3f}"
-                )
-                secondary = ""
-            else:
-                primary = f"R² {metric['r2_mean']:.3f}±{metric['r2_std']:.3f}"
-                secondary = f"MAE {metric['mae_mean']:.0f}d"
-
-            if name in _TRACKING_ONLY:
-                status = "[yellow]tracking only[/yellow]"
-            elif metric.get("production_ready"):
-                status = "[green]production[/green]"
-            else:
-                status = "[red]not ready[/red]"
-
-            table.add_row(name, f"{count:,}", primary, secondary, status)
+            primary = (
+                f"C-index {metric['concordance_index_mean']:.3f}"
+                f"±{metric['concordance_index_std']:.3f}"
+            )
+            status = (
+                "[green]production[/green]"
+                if metric.get("production_ready")
+                else "[red]not ready[/red]"
+            )
+            table.add_row(name, f"{count:,}", primary, status)
 
         console.print(table)
         console.print(f"[green]✓[/green] Metrics saved to {model_dir / 'metrics.json'}")
@@ -344,39 +336,21 @@ def train(
 def importance(
     model: Annotated[
         str,
-        typer.Argument(
-            help=(
-                "Model name. One of: dev_applications_approved,"
-                " dev_applications_appealed, coa_approved, coa_days_to_approval."
-            )
-        ),
-    ],
+        typer.Argument(help="Model name. One of: dev_days_to_decision."),
+    ] = "dev_days_to_decision",
     model_dir: Annotated[
         Path,
         typer.Option(help="Directory containing .joblib model files."),
     ] = Path("models"),
-    builtin: Annotated[
-        bool,
-        typer.Option(
-            "--builtin/--permutation",
-            help="Use built-in impurity importance (fast) instead of permutation.",
-        ),
-    ] = False,
 ) -> None:
     """Rank input features by their contribution to a model's predictions."""
     try:
-        df = feature_importance(
-            model,
-            data_dir=DATA_DIR,
-            model_dir=model_dir,
-            builtin=builtin,
-        )
-    except ValueError as exc:
+        df = feature_importance(model, model_dir=model_dir)
+    except (ValueError, FileNotFoundError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
 
-    method = "built-in impurity" if builtin else "permutation (roc_auc/r2)"
-    console.print(f"[bold]Feature importance — {model}[/bold] ({method})\n")
+    console.print(f"[bold]Feature importance — {model}[/bold] (gain-based)\n")
 
     table = Table()
     table.add_column("Rank", justify="right", style="dim")

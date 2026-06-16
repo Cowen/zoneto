@@ -10,27 +10,12 @@ import joblib
 import pandas as pd
 import polars as pl
 
-from zoneto.analytics.features import (
-    COA_CAT_COLS,
-    COA_NUM_COLS,
-    DEV_CAT_COLS,
-    DEV_NUM_COLS,
-    PERMIT_CAT_COLS,
-    PERMIT_NUM_COLS,
-)
+from zoneto.analytics.features import DEV_CAT_COLS, DEV_NUM_COLS
 from zoneto.analytics.planning_act import statutory_timeline_days
 
-# Model registry: dev_applications models only.
-# coa_approved: AUC 0.535 at 94% base rate — retired.
-# coa_days_to_approval: R² < 0 — tracking only, not served.
-# permit_issuance_days: R² 0.039 — retired (queue depth signal absent).
-_DEV_MODELS: list[tuple[str, str, bool]] = [
-    ("dev_applications_appealed", "pred_dev_appealed", False),
-]
-_COA_MODELS: list[tuple[str, str, bool]] = []
-_PERMIT_MODELS: list[tuple[str, str, bool]] = []
-
-
+# The only served predictive model is the dev_days_to_decision survival model.
+# The structured classifier/regressor models were deleted — none ever cleared the
+# quality bar (training-data limitations). See tests/analytics/test_retirement.py.
 _SURVIVAL_TYPES: frozenset[str] = frozenset({"OZ", "SA"})
 
 
@@ -46,19 +31,6 @@ def _load_production_ready(model_dir: Path) -> dict[str, bool]:
     with open(metrics_path) as f:
         metrics: dict[str, Any] = json.load(f)
     return {name: bool(m.get("production_ready", True)) for name, m in metrics.items()}
-
-
-def _predict_classifier(
-    pipe: Any, X: pd.DataFrame, pred_col: str, prob_col: str
-) -> dict[str, list]:
-    preds = pipe.predict(X).tolist()
-    probs = pipe.predict_proba(X)[:, 1].tolist()
-    return {pred_col: preds, prob_col: probs}
-
-
-def _predict_regressor(pipe: Any, X: pd.DataFrame, pred_col: str) -> dict[str, list]:
-    preds = pipe.predict(X).tolist()
-    return {pred_col: preds}
 
 
 def _survival_percentile(times: Any, probs: Any, quantile: float) -> float:
@@ -137,19 +109,8 @@ def score_all(
         df_dev = df_dev.with_columns(_svd_cols)
 
     all_dev_cols = DEV_CAT_COLS + DEV_NUM_COLS
-    # pandas required: sklearn's ColumnTransformer/predict APIs don't accept polars
-    X_dev = df_dev.select(all_dev_cols).to_pandas()
 
     extra: dict[str, list] = {}
-    for model_name, pred_col, is_reg in _DEV_MODELS:
-        if not production_ready.get(model_name, True):
-            continue
-        pipe = _load(model_dir, model_name)
-        prob_col = pred_col.replace("pred_", "prob_")
-        if is_reg:
-            extra.update(_predict_regressor(pipe, X_dev, pred_col))
-        else:
-            extra.update(_predict_classifier(pipe, X_dev, pred_col, prob_col))
 
     # Survival model (optional — skip if .joblib absent or not production_ready).
     # Only scores OZ+SA applications — model trained exclusively on OZ+SA; CD/SB/PL
@@ -209,52 +170,41 @@ def score_one(
 ) -> dict[str, Any]:
     """Score a single application dict. Returns prediction dict.
 
-    source must be 'dev_applications', 'coa', or 'permits_cleared'.
+    source must be 'dev_applications', 'coa', or 'permits_cleared'. Only
+    'dev_applications' has a served model (the dev_days_to_decision survival model,
+    OZ+SA only); 'coa' and 'permits_cleared' return an empty dict — their models
+    were deleted for failing the quality bar.
     """
-    if source == "dev_applications":
-        models = _DEV_MODELS
-        all_cols = DEV_CAT_COLS + DEV_NUM_COLS
-        # Apply NLP vectorizer if available
-        _tfidf_path = model_dir / "desc_tfidf.joblib"
-        if _tfidf_path.exists() and "description" in features:
-            _tfidf_pipe = joblib.load(_tfidf_path)
-            _text = str(features.get("description") or "")
-            _vec = _tfidf_pipe.transform([_text])
-            for i in range(_vec.shape[1]):
-                features = {**features, f"desc_svd_{i}": float(_vec[0, i])}
-    elif source == "coa":
-        models = _COA_MODELS
-        all_cols = COA_CAT_COLS + COA_NUM_COLS
-    elif source == "permits_cleared":
-        models = _PERMIT_MODELS
-        all_cols = PERMIT_CAT_COLS + PERMIT_NUM_COLS
-    else:
+    if source not in ("dev_applications", "coa", "permits_cleared"):
         raise ValueError(
             f"Unknown source: {source!r}. Must be 'dev_applications', 'coa',"
             " or 'permits_cleared'."
         )
 
+    result: dict[str, Any] = {}
+    if source != "dev_applications":
+        return result
+
+    all_cols = DEV_CAT_COLS + DEV_NUM_COLS
+    # Apply NLP vectorizer if available
+    _tfidf_path = model_dir / "desc_tfidf.joblib"
+    if _tfidf_path.exists() and "description" in features:
+        _tfidf_pipe = joblib.load(_tfidf_path)
+        _text = str(features.get("description") or "")
+        _vec = _tfidf_pipe.transform([_text])
+        for i in range(_vec.shape[1]):
+            features = {**features, f"desc_svd_{i}": float(_vec[0, i])}
+
     X = pd.DataFrame([{col: features.get(col) for col in all_cols}])
 
-    result: dict[str, Any] = {}
-    for model_name, pred_col, is_reg in models:
-        pipe = _load(model_dir, model_name)
-        prob_col = pred_col.replace("pred_", "prob_")
-        if is_reg:
-            result[pred_col] = float(pipe.predict(X)[0])
-        else:
-            result[pred_col] = int(pipe.predict(X)[0])
-            result[prob_col] = float(pipe.predict_proba(X)[0, 1])
-
-    # Survival model for dev_applications (OZ+SA only — skip non-OZ/SA types and
-    # skip if .joblib absent; CD/SB/PL have different timelines and were never trained)
+    # Survival model (OZ+SA only — skip non-OZ/SA types and skip if .joblib absent;
+    # CD/SB/PL have different timelines and were never trained).
     # Returns p25/p50/p75 percentiles for project finance timeline planning.
-    if source == "dev_applications":
-        _surv_path = model_dir / "dev_days_to_decision.joblib"
-        if _surv_path.exists() and features.get("application_type") in _SURVIVAL_TYPES:
-            _surv_pipe = _load(model_dir, "dev_days_to_decision")
-            _surv_preds = _predict_survival_percentiles(_surv_pipe, X)
-            for key in ("pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"):
-                result[key] = float(_surv_preds[key][0])
+    _surv_path = model_dir / "dev_days_to_decision.joblib"
+    if _surv_path.exists() and features.get("application_type") in _SURVIVAL_TYPES:
+        _surv_pipe = _load(model_dir, "dev_days_to_decision")
+        _surv_preds = _predict_survival_percentiles(_surv_pipe, X)
+        for key in ("pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"):
+            result[key] = float(_surv_preds[key][0])
 
     return result

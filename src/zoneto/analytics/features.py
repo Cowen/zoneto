@@ -29,32 +29,3 @@ DEV_NUM_COLS: list[str] = [
     "in_greenbelt",
     *[f"desc_svd_{i}" for i in range(20)],
 ]
-
-COA_CAT_COLS: list[str] = [
-    "application_type",
-    "sub_type",
-    "ward_number",
-    "zoning_designation",
-    "planning_district",
-    "work_type",
-]
-
-COA_NUM_COLS: list[str] = [
-    "year_submitted",
-]
-
-PERMIT_CAT_COLS: list[str] = [
-    "permit_type",
-    "structure_type",
-    "ward_grid",
-]
-
-PERMIT_NUM_COLS: list[str] = [
-    "est_const_cost",
-    "dwelling_units_created",
-    "dwelling_units_lost",
-    "residential",
-    "mercantile",
-    "industrial",
-    "institutional",
-]

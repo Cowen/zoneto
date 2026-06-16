@@ -1,4 +1,9 @@
-"""Tests for importance.py."""
+"""Tests for importance.py — survival model only.
+
+feature_importance() serves only the dev_days_to_decision survival model
+(gain-based importance from its public feature_importances_); the structured
+classifier/regressor models were deleted.
+"""
 
 from __future__ import annotations
 
@@ -9,55 +14,10 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
-from sklearn.ensemble import (
-    HistGradientBoostingClassifier,
-    HistGradientBoostingRegressor,
-)
-from sksurv.ensemble import GradientBoostingSurvivalAnalysis
 
-from zoneto.analytics.features import (
-    COA_CAT_COLS,
-    COA_NUM_COLS,
-    DEV_CAT_COLS,
-    DEV_NUM_COLS,
-)
+from zoneto.analytics.features import DEV_CAT_COLS, DEV_NUM_COLS
 from zoneto.analytics.importance import feature_importance
-from zoneto.analytics.train import build_pipeline
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-def _train_dummy_survival_model(
-    model_dir: Path,
-    model_name: str,
-    cat_cols: list[str],
-    num_cols: list[str],
-) -> None:
-    """Train a minimal GradientBoostingSurvivalAnalysis and save as .joblib."""
-    n = 20
-    X = pd.DataFrame({c: [str(i % 3) for i in range(n)] for c in cat_cols})
-    X[num_cols] = pd.DataFrame(
-        np.random.default_rng(1).integers(0, 5, size=(n, len(num_cols))).astype(float),
-        columns=num_cols,
-    )
-    events = np.array([True, False] * 10)
-    times = np.array([365 + i * 20 for i in range(n)], dtype=np.int32)
-    y = np.array(
-        list(zip(events, times)),
-        dtype=[("event", bool), ("time", np.int32)],
-    )
-
-    pipe = build_pipeline(
-        cat_cols=cat_cols,
-        num_cols=num_cols,
-        estimator=GradientBoostingSurvivalAnalysis(random_state=0),
-    )
-    pipe.fit(X, y)
-
-    model_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(pipe, model_dir / f"{model_name}.joblib")
+from zoneto.analytics.train import _build_survival_pipeline
 
 
 @pytest.fixture()
@@ -65,227 +25,48 @@ def model_dir(tmp_path: Path) -> Path:
     d = tmp_path / "models"
     d.mkdir()
 
-    n = 10
-    rng = np.random.default_rng(0)
-    y_binary = np.array([0, 1] * 5)
-
-    # DEV models (classifier)
-    X_dev = pd.DataFrame({c: [str(i % 3) for i in range(n)] for c in DEV_CAT_COLS})
-    X_dev[DEV_NUM_COLS] = pd.DataFrame(
-        rng.integers(0, 5, size=(n, len(DEV_NUM_COLS))).astype(float),
+    n = 20
+    X = pd.DataFrame({c: [str(i % 3) for i in range(n)] for c in DEV_CAT_COLS})
+    X[DEV_NUM_COLS] = pd.DataFrame(
+        np.random.default_rng(1)
+        .integers(0, 5, size=(n, len(DEV_NUM_COLS)))
+        .astype(float),
         columns=DEV_NUM_COLS,
     )
-    dev_pipe = build_pipeline(
-        DEV_CAT_COLS, DEV_NUM_COLS, HistGradientBoostingClassifier(random_state=0)
+    events = np.array([True, False] * 10)
+    times = np.array([365 + i * 20 for i in range(n)], dtype=np.int32)
+    y = np.array(
+        list(zip(events, times)),
+        dtype=[("event", bool), ("time", np.int32)],
     )
-    dev_pipe.fit(X_dev, y_binary)
-    joblib.dump(dev_pipe, d / "dev_applications_appealed.joblib")
-
-    # COA classifier
-    X_coa = pd.DataFrame({c: [str(i % 3) for i in range(n)] for c in COA_CAT_COLS})
-    X_coa[COA_NUM_COLS] = pd.DataFrame(
-        rng.integers(2015, 2023, size=(n, len(COA_NUM_COLS))).astype(float),
-        columns=COA_NUM_COLS,
-    )
-    coa_clf_pipe = build_pipeline(
-        COA_CAT_COLS, COA_NUM_COLS, HistGradientBoostingClassifier(random_state=0)
-    )
-    coa_clf_pipe.fit(X_coa, y_binary)
-    joblib.dump(coa_clf_pipe, d / "coa_approved.joblib")
-
-    # COA regressor
-    y_days = rng.integers(10, 500, size=n).astype(float)
-    coa_reg_pipe = build_pipeline(
-        COA_CAT_COLS, COA_NUM_COLS, HistGradientBoostingRegressor(random_state=0)
-    )
-    coa_reg_pipe.fit(X_coa, y_days)
-    joblib.dump(coa_reg_pipe, d / "coa_days_to_approval.joblib")
-
-    # DEV survival model
-    _train_dummy_survival_model(d, "dev_days_to_decision", DEV_CAT_COLS, DEV_NUM_COLS)
-
+    pipe = _build_survival_pipeline(DEV_CAT_COLS, DEV_NUM_COLS)
+    pipe.fit(X, y)
+    joblib.dump(pipe, d / "dev_days_to_decision.joblib")
     return d
 
 
-@pytest.fixture()
-def enriched_dir(tmp_path: Path) -> Path:
-    n = 10
-    rng = np.random.default_rng(1)
-
-    out = tmp_path / "enriched"
-    out.mkdir()
-
-    # DEV enriched
-    pl.DataFrame(
-        {
-            "application_type": ["Rezoning", "Site Plan"] * 5,
-            "ward_number": ["Ward 1", "Ward 2"] * 5,
-            "zoning_class": ["RS", None] * 5,
-            "secondary_plan_name": [None, "Midtown"] * 5,
-            "proposed_use_category": ["residential", "mixed_use"] * 5,
-            "postal_fsa": ["M5V", "M4K"] * 5,
-            "year_submitted": [2021, 2022] * 5,
-            "in_heritage_register": [0, 1] * 5,
-            "in_heritage_district": [0, 0] * 5,
-            "in_secondary_plan": [0, 1] * 5,
-            "has_community_meeting": [1, 0] * 5,
-            "has_parent_application": [0, 1] * 5,
-            "ward_pct_renters": [45.5, 50.2] * 5,
-            "ward_median_income": [75000.0, 80000.0] * 5,
-            "ward_pop_density": [3500.0, 4200.0] * 5,
-            "ward_pct_detached": [25.5, 20.0] * 5,
-            "is_combined_application": [0, 0] * 5,
-            "proposed_storeys": [12, None] * 5,
-            "proposed_units": [200, None] * 5,
-            "unit_excess_ratio": [2.0, None] * 5,
-            "storey_excess_ratio": [1.2, None] * 5,
-            "ward_appeal_rate_3y": [0.15, None] * 5,
-            "in_mtsa": [1, 0] * 5,
-            "in_trca_regulated_area": [0, 1] * 5,
-            "in_greenbelt": [0, 0] * 5,
-            **{
-                f"desc_svd_{i}": [float(i % 3), float((i + 1) % 3)] * 5
-                for i in range(20)
-            },
-            "dev_approved": [1, 0] * 5,
-            "dev_appealed": [0, 1] * 5,
-        }
-    ).write_parquet(out / "dev_applications.parquet")
-
-    # COA enriched
-    pl.DataFrame(
-        {
-            "application_type": ["Minor Variance", "Consent"] * 5,
-            "sub_type": ["A", "B"] * 5,
-            "ward_number": ["Ward 3", "Ward 4"] * 5,
-            "zoning_designation": ["RS", None] * 5,
-            "planning_district": ["Toronto & East York", "North York"] * 5,
-            "work_type": ["Construction", "Change of Use"] * 5,
-            "year_submitted": [2021, 2022] * 5,
-            "ward_pct_renters": [45.5, 50.2] * 5,
-            "ward_median_income": [75000.0, 80000.0] * 5,
-            "ward_pop_density": [3500.0, 4200.0] * 5,
-            "ward_pct_detached": [25.5, 20.0] * 5,
-            "hearing_month": [3, 9] * 5,
-            "coa_approved": [1, 0] * 5,
-            "coa_days_to_approval": rng.integers(30, 400, size=n)
-            .astype(float)
-            .tolist(),
-        }
-    ).write_parquet(out / "coa.parquet")
-
-    return tmp_path  # return data_dir (parent of enriched/)
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-
-def test_feature_importance_columns(model_dir: Path, enriched_dir: Path) -> None:
-    result = feature_importance(
-        "dev_applications_appealed",
-        data_dir=enriched_dir,
-        model_dir=model_dir,
-    )
+def test_feature_importance_columns(model_dir: Path) -> None:
+    result = feature_importance("dev_days_to_decision", model_dir=model_dir)
     assert isinstance(result, pl.DataFrame)
     assert result.columns == ["feature", "importance_mean", "importance_std"]
 
 
-def test_feature_importance_row_count(model_dir: Path, enriched_dir: Path) -> None:
-    """One row per feature."""
-    result = feature_importance(
-        "dev_applications_appealed",
-        data_dir=enriched_dir,
-        model_dir=model_dir,
-    )
+def test_feature_importance_row_count(model_dir: Path) -> None:
+    result = feature_importance("dev_days_to_decision", model_dir=model_dir)
     assert len(result) == len(DEV_CAT_COLS) + len(DEV_NUM_COLS)
 
 
-def test_feature_importance_sorted_descending(
-    model_dir: Path, enriched_dir: Path
-) -> None:
-    result = feature_importance(
-        "dev_applications_appealed",
-        data_dir=enriched_dir,
-        model_dir=model_dir,
-    )
+def test_feature_importance_sorted_descending(model_dir: Path) -> None:
+    result = feature_importance("dev_days_to_decision", model_dir=model_dir)
     means = result["importance_mean"].to_list()
     assert means == sorted(means, reverse=True)
 
 
-def test_feature_importance_builtin(model_dir: Path, tmp_path: Path) -> None:
-    """Builtin flag works without enriched data."""
-    result = feature_importance(
-        "dev_applications_appealed",
-        data_dir=tmp_path,
-        model_dir=model_dir,
-        builtin=True,
-    )
-    assert len(result) == len(DEV_CAT_COLS) + len(DEV_NUM_COLS)
-    assert result.columns == ["feature", "importance_mean", "importance_std"]
-    # importance_std is always 0.0 for builtin
+def test_feature_importance_std_is_zero(model_dir: Path) -> None:
+    result = feature_importance("dev_days_to_decision", model_dir=model_dir)
     assert result["importance_std"].to_list() == [0.0] * len(result)
-
-
-def test_feature_importance_coa_classifier(model_dir: Path, enriched_dir: Path) -> None:
-    """COA classifier model produces correct output."""
-    result = feature_importance(
-        "coa_approved",
-        data_dir=enriched_dir,
-        model_dir=model_dir,
-    )
-    assert len(result) == len(COA_CAT_COLS) + len(COA_NUM_COLS)
-    means = result["importance_mean"].to_list()
-    assert means == sorted(means, reverse=True)
-
-
-def test_feature_importance_coa_regressor(model_dir: Path, enriched_dir: Path) -> None:
-    """COA regressor model uses r2 scoring and produces correct output."""
-    result = feature_importance(
-        "coa_days_to_approval",
-        data_dir=enriched_dir,
-        model_dir=model_dir,
-    )
-    assert len(result) == len(COA_CAT_COLS) + len(COA_NUM_COLS)
-    means = result["importance_mean"].to_list()
-    assert means == sorted(means, reverse=True)
 
 
 def test_feature_importance_unknown_model(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Unknown model"):
-        feature_importance("nonexistent_model", data_dir=tmp_path, model_dir=tmp_path)
-
-
-def test_feature_importance_survival_builtin(model_dir: Path, tmp_path: Path) -> None:
-    """Builtin importance works for survival model without enriched data."""
-    result = feature_importance(
-        "dev_days_to_decision",
-        data_dir=tmp_path,
-        model_dir=model_dir,
-        builtin=True,
-    )
-    assert isinstance(result, pl.DataFrame)
-    assert result.columns == ["feature", "importance_mean", "importance_std"]
-    assert len(result) == len(DEV_CAT_COLS) + len(DEV_NUM_COLS)
-    # importance_std is always 0.0 for builtin
-    assert result["importance_std"].to_list() == [0.0] * len(result)
-    # importances should be descending
-    means = result["importance_mean"].to_list()
-    assert means == sorted(means, reverse=True)
-
-
-def test_feature_importance_survival_permutation_raises(
-    model_dir: Path, enriched_dir: Path
-) -> None:
-    """Permutation importance raises ValueError for survival model."""
-    with pytest.raises(
-        ValueError,
-        match="Permutation importance is not supported for the survival model",
-    ):
-        feature_importance(
-            "dev_days_to_decision",
-            data_dir=enriched_dir,
-            model_dir=model_dir,
-            builtin=False,
-        )
+        feature_importance("nonexistent_model", model_dir=tmp_path)

@@ -40,15 +40,6 @@ _DEV_ACTIVE_SET: frozenset[str] = frozenset(
         "information requested",
     }
 )
-_COA_APPROVED_SET: frozenset[str] = frozenset(
-    {
-        "approved",
-        "conditional approval",
-        "approved with conditions",
-        "approved on condition",
-    }
-)
-_COA_REFUSED_SET: frozenset[str] = frozenset({"refused"})
 _DEV_SURVIVAL_TYPES: frozenset[str] = frozenset({"OZ", "SA"})
 _DEV_DAYS_CAP = 3650
 

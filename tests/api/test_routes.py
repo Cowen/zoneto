@@ -50,7 +50,7 @@ def data_dir(tmp_path: Path) -> Path:
     # Ensure models_dir and metrics.json exist with at least one production_ready model
     models_dir = tmp_path / "models"
     models_dir.mkdir(exist_ok=True)
-    metrics = {"dev_applications_appealed": {"production_ready": True}}
+    metrics = {"dev_days_to_decision": {"production_ready": True}}
     (models_dir / "metrics.json").write_text(json.dumps(metrics))
 
     return tmp_path
@@ -123,8 +123,8 @@ def test_ready_lists_production_ready_models(tmp_path: Path) -> None:
     models_dir = tmp_path / "models"
     models_dir.mkdir()
     metrics = {
-        "dev_applications_appealed": {"production_ready": True},
-        "coa_approved": {"production_ready": False},
+        "dev_days_to_decision": {"production_ready": True},
+        "dev_days_to_decision_candidate": {"production_ready": False},
     }
     (models_dir / "metrics.json").write_text(json.dumps(metrics))
 
@@ -133,7 +133,7 @@ def test_ready_lists_production_ready_models(tmp_path: Path) -> None:
         response = c.get("/ready")
     assert response.status_code == 200
     body = response.json()
-    assert body["models_loaded"] == ["dev_applications_appealed"]
+    assert body["models_loaded"] == ["dev_days_to_decision"]
 
 
 # --- /comps ---
@@ -178,7 +178,7 @@ def test_score_delegates_to_score_one(
     """POST /score calls score_one and returns its result."""
     monkeypatch.setattr(
         "zoneto.api.routes.score_one",
-        lambda source, features, model_dir: {"prob_dev_appealed": 0.15},
+        lambda source, features, model_dir: {"pred_dev_days_p50": 365.0},
     )
     response = client.post(
         "/score",
@@ -189,7 +189,7 @@ def test_score_delegates_to_score_one(
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["predictions"]["prob_dev_appealed"] == pytest.approx(0.15)
+    assert body["predictions"]["pred_dev_days_p50"] == pytest.approx(365.0)
 
 
 def test_score_invalid_source_returns_422(client: TestClient) -> None:
@@ -231,7 +231,7 @@ def test_score_no_production_ready_models_returns_empty(
     models_dir = tmp_path / "models"
     models_dir.mkdir()
     (models_dir / "metrics.json").write_text(
-        json.dumps({"dev_applications_appealed": {"production_ready": False}})
+        json.dumps({"dev_days_to_decision": {"production_ready": False}})
     )
     app = create_app(data_dir=tmp_path, model_dir=models_dir)
     with TestClient(app) as c:

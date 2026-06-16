@@ -89,10 +89,18 @@ Reference data: zoning boundaries, heritage register, secondary plans, ward prof
 
 ## ML models
 
+`dev_days_to_decision` (survival) is the only predictive model — it is the sole model
+that ever cleared the production quality bar. Five structured classifier/regressor
+models were **deleted**: each failed the bar because of underlying training-data
+limitations, not tunable modelling choices.
+
 | Model | Type | Metric | Status |
 |---|---|---|---|
-| `dev_applications_appealed` | Classifier (CalibratedClassifierCV) | AUC ≥ 0.65 | Production |
 | `dev_days_to_decision` | Survival (GradientBoostingSurvivalAnalysis) | C-index ≥ 0.65 | Production |
-| `coa_days_to_approval` | Regressor | R² (tracking) | Tracking only |
-| `coa_approved` | Classifier | — | Retired (AUC 0.535 @ 94% base rate) |
-| `permit_issuance_days` | Regressor | — | Retired (R² 0.039, no queue signal) |
+| `dev_applications_appealed` | Classifier | AUC 0.559 (< 0.65) | Deleted (survivorship-biased labels) |
+| `coa_days_to_approval` | Regressor | R² −0.27 | Deleted (no signal in structured COA fields) |
+| `dev_applications_approved` | Classifier | 97.3% class imbalance | Deleted (dataset frozen) |
+| `coa_approved` | Classifier | AUC 0.535 @ 94% base rate | Deleted (needs text, not structured) |
+| `permit_issuance_days` | Regressor | R² 0.039 | Deleted (queue depth not in open data) |
+
+`desc_tfidf` (TF-IDF → SVD) remains as a feature extractor for the survival model.

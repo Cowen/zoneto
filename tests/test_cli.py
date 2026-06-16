@@ -123,8 +123,6 @@ def test_summary_shows_score_distributions(
     df = pl.DataFrame(
         {
             "application_type": ["OZ"] * 10,
-            "pred_dev_appealed": [0, 0, 0, 1, 1, 0, 0, 1, 0, 0],
-            "prob_dev_appealed": [0.1, 0.2, 0.3, 0.8, 0.9, 0.15, 0.25, 0.7, 0.05, 0.35],
             "pred_dev_days_p25": [
                 300.0,
                 400.0,
@@ -168,7 +166,6 @@ def test_summary_shows_score_distributions(
     result = runner.invoke(app, ["summary"])
     assert result.exit_code == 0
     assert "dev_applications" in result.output
-    assert "prob_dev_appealed" in result.output
     assert "pred_dev_days_p50" in result.output
 
 

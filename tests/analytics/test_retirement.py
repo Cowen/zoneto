@@ -1,35 +1,43 @@
-"""Tests verifying model retirement gates are enforced."""
+"""Canonical guard that the five quality-bar failures stay deleted.
+
+dev_applications_appealed, dev_applications_approved, coa_approved,
+coa_days_to_approval, and permit_issuance_days were deleted — none ever cleared the
+production quality bar (training-data limitations). The only served predictive model
+is the dev_days_to_decision survival model. These tests ensure the deleted models do
+not creep back into training, scoring, metrics, or feature-importance.
+"""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
 import polars as pl
+import pytest
 
-from zoneto.analytics.features import DEV_CAT_COLS, DEV_NUM_COLS
-from zoneto.analytics.score import score_all
-from zoneto.analytics.train import train_all, train_source
+from zoneto.analytics.importance import feature_importance
+from zoneto.analytics.score import score_all, score_one
+from zoneto.analytics.train import train_all
+
+DELETED_MODELS = [
+    "dev_applications_appealed",
+    "dev_applications_approved",
+    "coa_approved",
+    "coa_days_to_approval",
+    "permit_issuance_days",
+]
 
 
 def _make_dev_parquet(tmp_path: Path) -> Path:
-    """Minimal 50-row dev_applications parquet with dev_appealed labels."""
+    """Minimal dev_applications parquet with survival labels (dev_days_to_decision)."""
     rng = np.random.default_rng(0)
-    n = 50
-    dev_appealed = (rng.uniform(size=n) < 0.15).astype(float).tolist()
-    # make exactly 5 None to test null handling
-    for i in range(5):
-        dev_appealed[i] = None  # type: ignore[call-overload]
+    n = 120
     df = pl.DataFrame(
         {
-            "application_type": rng.choice(["OZ", "SA", "OPA"], size=n).tolist(),
+            "application_type": rng.choice(["OZ", "SA"], size=n).tolist(),
             "ward_number": [str(rng.integers(1, 26)) for _ in range(n)],
             "zoning_class": rng.choice(["RS", "RM", None], size=n).tolist(),
             "secondary_plan_name": [None] * n,
-            "proposed_use_category": rng.choice(
-                ["residential", "mixed_use", "commercial", None], size=n
-            ).tolist(),
             "year_submitted": rng.integers(2018, 2024, size=n).tolist(),
             "in_heritage_register": rng.integers(0, 2, size=n).tolist(),
             "in_heritage_district": rng.integers(0, 2, size=n).tolist(),
@@ -54,7 +62,13 @@ def _make_dev_parquet(tmp_path: Path) -> Path:
             "in_trca_regulated_area": rng.integers(0, 2, size=n).tolist(),
             "in_greenbelt": rng.integers(0, 2, size=n).tolist(),
             **{f"desc_svd_{i}": rng.uniform(-1, 1, size=n).tolist() for i in range(20)},
-            "dev_appealed": pl.Series(dev_appealed, dtype=pl.Float64),
+            "dev_days_observed": pl.Series(
+                rng.integers(30, 1200, size=n).tolist(), dtype=pl.Int32
+            ),
+            "dev_decision_event": pl.Series(
+                (rng.uniform(size=n) < 0.8).astype(int).tolist(), dtype=pl.Int8
+            ),
+            "is_active": [0] * n,
         }
     )
     dest = tmp_path / "enriched" / "dev_applications.parquet"
@@ -63,123 +77,63 @@ def _make_dev_parquet(tmp_path: Path) -> Path:
     return dest
 
 
-def test_retired_models_not_in_train_all_output(tmp_path: Path) -> None:
-    """coa_approved and permit_issuance_days must not appear in train_all() results."""
+def test_deleted_models_not_trained(tmp_path: Path) -> None:
+    """train_all() trains only the survival model; none of the deleted models."""
     _make_dev_parquet(tmp_path)
+    # Stub COA + permits parquet to confirm they no longer trigger any model.
+    for name in ("coa", "permits_cleared"):
+        stub = tmp_path / "enriched" / f"{name}.parquet"
+        pl.DataFrame({"placeholder": [1]}).write_parquet(stub)
+
     counts, metrics = train_all(data_dir=tmp_path, model_dir=tmp_path / "models")
 
-    assert "coa_approved" not in counts, "coa_approved must be retired from train_all()"
-    assert "permit_issuance_days" not in counts, (
-        "permit_issuance_days must be retired from train_all()"
-    )
+    for name in DELETED_MODELS:
+        assert name not in counts, f"{name} must not be trained"
+        assert name not in metrics, f"{name} must not appear in metrics"
+    assert "dev_days_to_decision" in counts, "survival model must still train"
 
 
-def test_coa_days_to_approval_is_tracking_only(tmp_path: Path) -> None:
-    """coa_days_to_approval must train but production_ready must be False."""
-    # Create minimal COA parquet so the model can train
-    rng = np.random.default_rng(1)
-    n = 30
-    coa_approved = (rng.uniform(size=n) < 0.94).astype(int)
-    coa_days: list[float | None] = [
-        float(rng.uniform(30, 400)) if coa_approved[i] == 1 else None for i in range(n)
-    ]
-    coa_df = pl.DataFrame(
-        {
-            "application_type": rng.choice(
-                ["Minor Variance", "Consent"], size=n
-            ).tolist(),
-            "sub_type": rng.choice(["A", "B"], size=n).tolist(),
-            "ward_number": [str(rng.integers(1, 26)) for _ in range(n)],
-            "zoning_designation": rng.choice(["RS", "RM", None], size=n).tolist(),
-            "planning_district": ["Toronto & East York"] * n,
-            "work_type": rng.choice(["Variance", "Consent"], size=n).tolist(),
-            "year_submitted": rng.integers(2018, 2024, size=n).tolist(),
-            "coa_approved": pl.Series(coa_approved.tolist(), dtype=pl.Int8),
-            "coa_days_to_approval": pl.Series(coa_days, dtype=pl.Float64),
-        }
-    )
-    coa_path = tmp_path / "enriched" / "coa.parquet"
-    coa_path.parent.mkdir(parents=True, exist_ok=True)
-    coa_df.write_parquet(coa_path)
-
+def test_deleted_models_not_scored(tmp_path: Path) -> None:
+    """score_all() writes only dev_applications.parquet, with no appeal columns."""
     _make_dev_parquet(tmp_path)
-    counts, metrics = train_all(data_dir=tmp_path, model_dir=tmp_path / "models")
-
-    assert "coa_days_to_approval" in counts, (
-        "coa_days_to_approval must still train for metric tracking"
-    )
-    assert metrics["coa_days_to_approval"]["production_ready"] is False, (
-        "coa_days_to_approval must be production_ready=False regardless of R²"
-    )
-
-
-def test_permits_parquet_does_not_trigger_permit_training(tmp_path: Path) -> None:
-    """Even when permits_cleared.parquet exists, permit_issuance_days must not train."""
-    rng = np.random.default_rng(2)
-    n = 30
-    permits_df = pl.DataFrame(
-        {
-            "permit_type": rng.choice(["New Houses", "Commercial"], size=n).tolist(),
-            "structure_type": rng.choice(["Detached House", "Office"], size=n).tolist(),
-            "ward_grid": [f"W{rng.integers(1, 30):02d}" for _ in range(n)],
-            "est_const_cost": rng.uniform(50_000, 5_000_000, size=n).tolist(),
-            "dwelling_units_created": rng.integers(0, 5, size=n).tolist(),
-            "dwelling_units_lost": rng.integers(0, 2, size=n).tolist(),
-            "residential": rng.integers(0, 2, size=n).tolist(),
-            "mercantile": rng.integers(0, 2, size=n).tolist(),
-            "industrial": rng.integers(0, 2, size=n).tolist(),
-            "institutional": rng.integers(0, 2, size=n).tolist(),
-            "permit_issuance_days": rng.integers(10, 300, size=n).tolist(),
-        }
-    )
-    permits_path = tmp_path / "enriched" / "permits_cleared.parquet"
-    permits_path.parent.mkdir(parents=True, exist_ok=True)
-    permits_df.write_parquet(permits_path)
-
-    _make_dev_parquet(tmp_path)
-    counts, metrics = train_all(data_dir=tmp_path, model_dir=tmp_path / "models")
-
-    assert "permit_issuance_days" not in counts, (
-        "permit_issuance_days must not train even when enriched parquet exists"
-    )
-
-
-def test_score_all_only_produces_dev_applications_output(tmp_path: Path) -> None:
-    """score_all() only writes dev_applications.parquet — no coa or permits output."""
-    dev_path = _make_dev_parquet(tmp_path)
     model_dir = tmp_path / "models"
-    model_dir.mkdir(parents=True, exist_ok=True)
+    train_all(data_dir=tmp_path, model_dir=model_dir)
 
-    # Train only the appeal model
-    train_source(
-        enriched_path=dev_path,
-        label_col="dev_appealed",
-        cat_cols=DEV_CAT_COLS,
-        num_cols=DEV_NUM_COLS,
-        model_name="dev_applications_appealed",
-        model_dir=model_dir,
-        regressor=False,
-    )
-    # Write minimal metrics.json with production_ready=True for the appeal model
-    (model_dir / "metrics.json").write_text(
-        json.dumps({"dev_applications_appealed": {"production_ready": True}})
-    )
-
-    # Create stub COA and permits enriched parquet to verify they are NOT scored
-    coa_stub = tmp_path / "enriched" / "coa.parquet"
-    permits_stub = tmp_path / "enriched" / "permits_cleared.parquet"
-    pl.DataFrame({"placeholder": [1]}).write_parquet(coa_stub)
-    pl.DataFrame({"placeholder": [1]}).write_parquet(permits_stub)
+    # Stub COA + permits enriched parquet to verify they are not scored.
+    for name in ("coa", "permits_cleared"):
+        stub = tmp_path / "enriched" / f"{name}.parquet"
+        pl.DataFrame({"placeholder": [1]}).write_parquet(stub)
 
     score_all(data_dir=tmp_path, model_dir=model_dir)
 
     scores_dir = tmp_path / "scores"
-    assert (scores_dir / "dev_applications.parquet").exists(), (
-        "dev_applications.parquet must be written"
+    assert (scores_dir / "dev_applications.parquet").exists()
+    assert not (scores_dir / "coa.parquet").exists()
+    assert not (scores_dir / "permits_cleared.parquet").exists()
+
+    scored_cols = pl.read_parquet(scores_dir / "dev_applications.parquet").columns
+    assert "pred_dev_appealed" not in scored_cols
+    assert "prob_dev_appealed" not in scored_cols
+
+
+def test_score_one_no_appeal_predictions(tmp_path: Path) -> None:
+    """score_one() never returns appeal predictions; coa/permits return empty."""
+    _make_dev_parquet(tmp_path)
+    model_dir = tmp_path / "models"
+    train_all(data_dir=tmp_path, model_dir=model_dir)
+
+    result = score_one(
+        "dev_applications", {"application_type": "OZ"}, model_dir=model_dir
     )
-    assert not (scores_dir / "coa.parquet").exists(), (
-        "coa.parquet must NOT be written — model retired"
-    )
-    assert not (scores_dir / "permits_cleared.parquet").exists(), (
-        "permits_cleared.parquet must NOT be written — model retired"
-    )
+    assert "pred_dev_appealed" not in result
+    assert "prob_dev_appealed" not in result
+
+    assert score_one("coa", {}, model_dir=model_dir) == {}
+    assert score_one("permits_cleared", {}, model_dir=model_dir) == {}
+
+
+@pytest.mark.parametrize("model_name", DELETED_MODELS)
+def test_feature_importance_rejects_deleted_models(model_name: str) -> None:
+    """feature_importance() only knows the survival model."""
+    with pytest.raises(ValueError):
+        feature_importance(model_name)

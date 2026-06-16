@@ -9,8 +9,6 @@ from pathlib import Path
 import polars as pl
 
 from zoneto.analytics.labels import (
-    _COA_APPROVED_SET,
-    _COA_REFUSED_SET,
     _DEV_ACTIVE_SET,
     _DEV_APPEALED_SET,
     _DEV_APPROVED_SET,
@@ -72,7 +70,10 @@ def _compute_ward_appeal_rate_3y(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def enrich_coa(data_dir: Path = Path("data")) -> int:
-    """Enrich COA parquet with outcome labels; write data/enriched/coa.parquet.
+    """Enrich COA parquet with ward features; write data/enriched/coa.parquet.
+
+    No outcome labels are computed: the coa_approved and coa_days_to_approval
+    models were deleted (AUC 0.535 / R² < 0 — no signal in structured COA fields).
 
     Returns row count written.
     """
@@ -90,29 +91,6 @@ def enrich_coa(data_dir: Path = Path("data")) -> int:
     # year_submitted from in_date
     df = df.with_columns(
         pl.col("in_date").dt.year().cast(pl.Int32).alias("year_submitted")
-    )
-
-    # coa_approved label
-    df = df.with_columns(
-        pl.col("c_of_a_descision")
-        .map_elements(
-            lambda v: _label_from_sets(v, _COA_APPROVED_SET, _COA_REFUSED_SET),
-            return_dtype=pl.Int8,
-        )
-        .alias("coa_approved")
-    )
-
-    # coa_days_to_approval — only for approved rows with both dates present.
-    # Cap at 730 days (2 years): outliers beyond this are almost certainly data
-    # errors (legacy applications closed years after filing) that destabilize
-    # the regression across CV folds.
-    _CAP_DAYS = 730
-    days = (pl.col("finaldate") - pl.col("in_date")).dt.total_days().cast(pl.Int32)
-    df = df.with_columns(
-        pl.when((pl.col("coa_approved") == 1) & (days <= _CAP_DAYS))
-        .then(days)
-        .otherwise(None)
-        .alias("coa_days_to_approval")
     )
 
     # Enrich with ward profiles
@@ -464,11 +442,10 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
 
 
 def enrich_permits(data_dir: Path = Path("data")) -> int:
-    """Enrich permits_cleared parquet with issuance timeline label.
+    """Normalize the permits_cleared parquet (numeric coercion + application_year).
 
-    Computes permit_issuance_days = issued_date - application_date (calendar days).
-    Rows with null issued_date or application_date get null permit_issuance_days.
-    Rows where issuance_days <= 0 are dropped (data quality).
+    The permit_issuance_days outcome model was deleted (R² 0.039 — queue depth, the
+    real driver, is not in open data), so no outcome label is computed here.
 
     Writes data/enriched/permits_cleared.parquet. Returns row count written.
     """
@@ -482,27 +459,8 @@ def enrich_permits(data_dir: Path = Path("data")) -> int:
                 pl.col(_col).str.replace_all(",", "").cast(pl.Float64, strict=False)
             )
 
-    # application_year captures temporal queue-depth signal (permit office staffing
-    # and backlog vary strongly by year — COVID slowdowns, policy changes, etc.)
     df = df.with_columns(
         pl.col("application_date").dt.year().cast(pl.Int32).alias("application_year")
-    )
-
-    days = (
-        (pl.col("issued_date") - pl.col("application_date"))
-        .dt.total_days()
-        .cast(pl.Int32)
-    )
-    has_both = (
-        pl.col("issued_date").is_not_null() & pl.col("application_date").is_not_null()
-    )
-    df = df.with_columns(
-        pl.when(has_both).then(days).otherwise(None).alias("permit_issuance_days")
-    )
-
-    # Drop rows where issuance days is computed but non-positive (bad data)
-    df = df.filter(
-        pl.col("permit_issuance_days").is_null() | (pl.col("permit_issuance_days") > 0)
     )
 
     out = data_dir / "enriched"

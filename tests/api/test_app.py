@@ -18,13 +18,16 @@ def test_load_production_ready_reads_flags(tmp_path: Path) -> None:
     import json
 
     metrics = {
-        "dev_applications_appealed": {"production_ready": True, "n": 100},
-        "coa_approved": {"production_ready": False, "n": 50},
+        "dev_days_to_decision": {"production_ready": True, "n": 100},
+        "dev_days_to_decision_candidate": {"production_ready": False, "n": 50},
     }
     (tmp_path / "metrics.json").write_text(json.dumps(metrics))
 
     result = _load_production_ready(tmp_path)
-    assert result == {"dev_applications_appealed": True, "coa_approved": False}
+    assert result == {
+        "dev_days_to_decision": True,
+        "dev_days_to_decision_candidate": False,
+    }
 
 
 def test_create_app_returns_fastapi(tmp_path: Path) -> None:

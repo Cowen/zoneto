@@ -10,6 +10,19 @@ Metrics are cross-validated (not training-set scores):
 
 ---
 
+## 2026-06-15 — classifier/regressor models deleted
+
+The five structured classifier/regressor models were **deleted** — none ever cleared the
+production quality bar, in every case because of underlying training-data limitations:
+`dev_applications_appealed` (AUC 0.559, survivorship-biased labels), `coa_days_to_approval`
+(R² −0.27), `dev_applications_approved` (97.3% class imbalance), `coa_approved`
+(AUC 0.535 @ 94% base rate), `permit_issuance_days` (R² 0.039 — queue depth not in open data).
+The generic classifier/regressor training machinery was removed with them. `dev_days_to_decision`
+(survival, C-index 0.71) is now the only predictive model. The dated snapshots below are
+retained as a historical record of those models' measured performance.
+
+---
+
 ## 2026-03-04
 
 **Data snapshot:**

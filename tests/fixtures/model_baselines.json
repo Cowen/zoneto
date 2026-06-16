@@ -1,31 +1,9 @@
 {
   "_meta": {
-    "updated": "2026-06-12",
-    "notes": "rebaselined after AIC merge fix (enrich.py): AIC records now enrich CKAN rows rather than replacing them, restoring 1,750 dev_appealed=1 labels (was 114). Appeal model AUC reflects fresh June 2026 data with higher post-2022 appeal rates. dev_approved AUC improved due to corrected training set."
+    "updated": "2026-06-15",
+    "notes": "Survival model (dev_days_to_decision) is the only served predictive model. The five structured classifier/regressor models were deleted for failing the quality bar (training-data limitations); their baselines were removed. Regenerate with scripts/update_baselines.py."
   },
-  "dev_applications_approved": {
-    "roc_auc_mean": 0.5968,
-    "brier_score_mean": 0.0226,
-    "avg_precision_mean": 0.9883
-  },
-  "dev_applications_appealed": {
-    "roc_auc_mean": 0.5592,
-    "brier_score_mean": 0.0959,
-    "avg_precision_mean": 0.1848
-  },
-  "coa_approved": {
-    "roc_auc_mean": 0.5105,
-    "brier_score_mean": 0.0348,
-    "avg_precision_mean": 0.973
-  },
-  "coa_days_to_approval": {
-    "r2_mean": -0.3512,
-    "mae_mean": 56.716,
-    "rmse_mean": 72.1551
-  },
-  "permit_issuance_days": {
-    "r2_mean": 0.0386,
-    "mae_mean": 48.9936,
-    "rmse_mean": 93.5635
+  "dev_days_to_decision": {
+    "concordance_index_mean": 0.7104
   }
 }

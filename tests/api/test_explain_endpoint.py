@@ -48,7 +48,7 @@ def test_score_without_explain_has_no_explanations_key(
     """Without ?explain=true, response does not include 'explanations' key."""
     monkeypatch.setattr(
         "zoneto.api.routes.score_one",
-        lambda source, features, model_dir: {"prob_dev_appealed": 0.12},
+        lambda source, features, model_dir: {"pred_dev_days_p50": 365.0},
     )
     response = client.post(
         "/score",
@@ -64,7 +64,7 @@ def test_score_with_explain_true_includes_explanations(
     """With ?explain=true, response includes 'explanations' key."""
     monkeypatch.setattr(
         "zoneto.api.routes.score_one",
-        lambda source, features, model_dir: {"prob_dev_appealed": 0.12},
+        lambda source, features, model_dir: {"pred_dev_days_p50": 365.0},
     )
     monkeypatch.setattr(
         "zoneto.api.routes.explain_one",
