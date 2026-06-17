@@ -113,14 +113,14 @@ def _analyze(
         description,
         data_dir=data_dir,
         model_dir=model_dir,
-        zoning_class=site.get("zoning_class"),
+        zoning_class=site.zoning_class,
         lat=lat,
         lon=lon,
         radius_m=2000.0,
     )
     low = _apply_confidence_overrides(5, violations, site, extracted, sim)
     high = _apply_confidence_overrides(95, violations, site, extracted, sim)
-    precedent = _has_approved_precedent(sim, site.get("zoning_class"))
+    precedent = _has_approved_precedent(sim, site.zoning_class)
     return {
         "site": site,
         "extracted": extracted,
@@ -152,7 +152,7 @@ def _ratios(extracted, site) -> str:
         ("proposed_height_m", "zoning_max_height_m"),
     ):
         prop = getattr(extracted, attr) or 0
-        limit = site.get(key) or 0
+        limit = getattr(site, key) or 0
         if prop and limit:
             parts.append(
                 f"{attr.removeprefix('proposed_')} {prop}/{limit} ({prop / limit:.1f}x)"
@@ -163,14 +163,11 @@ def _ratios(extracted, site) -> str:
 
 
 def _top_match(sim) -> str:
-    matches = (sim or {}).get("top_matches") or []
+    matches = sim.top_matches if sim else []
     if not matches:
         return "none"
     best = matches[0]
-    return (
-        f"{best.get('folderrsn')} sim={best.get('similarity', 0):.2f}"
-        f" approved={best.get('dev_approved')}"
-    )
+    return f"{best.folderrsn} sim={best.similarity:.2f} approved={best.dev_approved}"
 
 
 def _narrate(app: dict, analysis: dict, agents) -> int | None:
@@ -190,20 +187,20 @@ def _narrate(app: dict, analysis: dict, agents) -> int | None:
 
 def _emit_case(app: dict, analysis: dict) -> None:
     """Print a fixture stanza skeleton for tests/fixtures/narrator_eval_cases.json."""
-    site_snapshot = {k: analysis["site"].get(k) for k in _SITE_SNAPSHOT_KEYS}
-    matches = (analysis["sim"] or {}).get("top_matches") or []
+    site_snapshot = {k: getattr(analysis["site"], k) for k in _SITE_SNAPSHOT_KEYS}
+    matches = analysis["sim"].top_matches if analysis["sim"] else []
     sim_stub = None
     unverified = analysis["bucket"] == "floor-55-unverified"
     if analysis["bucket"] == "precedent-55" and matches:
         best = matches[0]
         sim_stub = {
-            "n_similar": analysis["sim"].get("n_similar"),
-            "appeal_rate": analysis["sim"].get("appeal_rate"),
+            "n_similar": analysis["sim"].n_similar,
+            "appeal_rate": analysis["sim"].appeal_rate,
             "query_lat": app["lat"],
             "query_lon": app["lon"],
             "top_matches": [
                 {
-                    k: best.get(k)
+                    k: getattr(best, k)
                     for k in (
                         "folderrsn",
                         "application_type",

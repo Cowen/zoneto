@@ -11,6 +11,7 @@ from zoneto.analytics.compliance import (
 )
 from zoneto.analytics.extract import ProjectFeatures, extract_project_features
 from zoneto.analytics.use_classifier import classify_use
+from zoneto.api.site_context import SiteContext
 
 # ---------------------------------------------------------------------------
 # extract_project_features
@@ -99,7 +100,7 @@ class TestExtractProjectFeatures:
 
 
 class TestComplianceStoreys:
-    def _site(self, **kwargs: object) -> dict:
+    def _site(self, **kwargs: object) -> SiteContext:
         base: dict = {
             "zoning_max_storeys": 8,
             "zoning_max_units": None,
@@ -111,7 +112,7 @@ class TestComplianceStoreys:
             "zoning_holding": 0,
         }
         base.update(kwargs)
-        return base
+        return SiteContext.model_validate(base)
 
     def test_no_violation_when_within_limit(self) -> None:
         """Given: Proposed storeys equal to max.
@@ -178,7 +179,7 @@ class TestComplianceStoreys:
 
 
 class TestComplianceUnits:
-    def _site(self, **kwargs: object) -> dict:
+    def _site(self, **kwargs: object) -> SiteContext:
         base: dict = {
             "zoning_max_storeys": None,
             "zoning_max_units": 50,
@@ -190,7 +191,7 @@ class TestComplianceUnits:
             "zoning_holding": 0,
         }
         base.update(kwargs)
-        return base
+        return SiteContext.model_validate(base)
 
     def test_no_violation_when_within_limit(self) -> None:
         """Given: Proposed units equal to max.
@@ -228,7 +229,7 @@ class TestComplianceUnits:
 
 
 class TestComplianceUse:
-    def _site(self, **kwargs: object) -> dict:
+    def _site(self, **kwargs: object) -> SiteContext:
         base: dict = {
             "zoning_max_storeys": None,
             "zoning_max_units": None,
@@ -240,7 +241,7 @@ class TestComplianceUse:
             "zoning_holding": 0,
         }
         base.update(kwargs)
-        return base
+        return SiteContext.model_validate(base)
 
     def test_no_violation_for_permitted_use(self) -> None:
         """Given: Proposed use matches zone category.
@@ -292,7 +293,7 @@ class TestComplianceUse:
 
 
 class TestComplianceOpConformity:
-    def _site(self, designation: str | None, **kwargs: object) -> dict:
+    def _site(self, designation: str | None, **kwargs: object) -> SiteContext:
         base: dict = {
             "zoning_max_storeys": None,
             "zoning_max_units": None,
@@ -305,7 +306,7 @@ class TestComplianceOpConformity:
             "zoning_holding": 0,
         }
         base.update(kwargs)
-        return base
+        return SiteContext.model_validate(base)
 
     def test_nonconforming_use_flags_informational(self) -> None:
         """Given: residential proposed on a Core Employment Areas site.
@@ -353,7 +354,7 @@ class TestComplianceOpConformity:
 
 
 class TestComplianceUnitLimitAdvisory:
-    def _site(self, max_units: int | None, **kwargs: object) -> dict:
+    def _site(self, max_units: int | None, **kwargs: object) -> SiteContext:
         base: dict = {
             "zoning_max_storeys": None,
             "zoning_max_units": max_units,
@@ -365,7 +366,7 @@ class TestComplianceUnitLimitAdvisory:
             "zoning_holding": 0,
         }
         base.update(kwargs)
-        return base
+        return SiteContext.model_validate(base)
 
     def test_advisory_fires_for_low_limit_with_no_count(self) -> None:
         """Given: Residential proposal with no explicit unit count in a 4-unit zone.
@@ -452,7 +453,7 @@ class TestComplianceUnitLimitAdvisory:
 
 
 class TestComplianceContextualFlags:
-    def _site(self, **kwargs: object) -> dict:
+    def _site(self, **kwargs: object) -> SiteContext:
         base: dict = {
             "zoning_max_storeys": None,
             "zoning_max_units": None,
@@ -464,7 +465,7 @@ class TestComplianceContextualFlags:
             "zoning_holding": 0,
         }
         base.update(kwargs)
-        return base
+        return SiteContext.model_validate(base)
 
     def test_heritage_register_flag(self) -> None:
         """Given: Site is on the Heritage Register.
@@ -622,16 +623,16 @@ class TestComplianceContextualFlags:
             proposed_use=None,
             has_ground_floor_retail=False,
         )
-        site = {
-            "zoning_max_storeys": 8,
-            "zoning_max_units": None,
-            "zoning_max_density": None,
-            "permitted_use_category": None,
-            "in_heritage_register": 0,
-            "in_heritage_district": 0,
-            "in_mtsa": 0,
-            "zoning_holding": 0,
-        }
+        site = SiteContext(
+            zoning_max_storeys=8,
+            zoning_max_units=None,
+            zoning_max_density=None,
+            permitted_use_category=None,
+            in_heritage_register=0,
+            in_heritage_district=0,
+            in_mtsa=0,
+            zoning_holding=0,
+        )
         violations = check_compliance(extracted, site)
         assert len(violations) == 1
         v = violations[0]
@@ -687,7 +688,7 @@ class TestUseClassifierHeavyIndustrial:
 
 
 class TestComplianceProhibitedUses:
-    def _employment_site(self, **kwargs: object) -> dict:
+    def _employment_site(self, **kwargs: object) -> SiteContext:
         base: dict = {
             "zoning_max_storeys": None,
             "zoning_max_units": None,
@@ -699,7 +700,7 @@ class TestComplianceProhibitedUses:
             "zoning_holding": 0,
         }
         base.update(kwargs)
-        return base
+        return SiteContext.model_validate(base)
 
     def test_coal_mine_fires_prohibited_use(self) -> None:
         """Given: A coal mine proposal on an employment-zoned site.
@@ -936,20 +937,22 @@ class TestExtractHeightM:
 
 
 class TestComplianceHeightM:
-    def _site(self, zoning_max_height_m: float | None = None) -> dict:
-        return {
-            "zoning_class": "RM",
-            "zoning_max_units": None,
-            "zoning_max_storeys": None,
-            "zoning_max_height_m": zoning_max_height_m,
-            "zoning_max_density": None,
-            "permitted_use_category": "Residential",
-            "in_heritage_register": 0,
-            "in_heritage_district": 0,
-            "in_mtsa": 0,
-            "in_secondary_plan": 0,
-            "zoning_holding": 0,
-        }
+    def _site(self, zoning_max_height_m: float | None = None) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "zoning_class": "RM",
+                "zoning_max_units": None,
+                "zoning_max_storeys": None,
+                "zoning_max_height_m": zoning_max_height_m,
+                "zoning_max_density": None,
+                "permitted_use_category": "Residential",
+                "in_heritage_register": 0,
+                "in_heritage_district": 0,
+                "in_mtsa": 0,
+                "in_secondary_plan": 0,
+                "zoning_holding": 0,
+            }
+        )
 
     def _features(self, height_m: float | None) -> ProjectFeatures:
         return ProjectFeatures(
@@ -1056,15 +1059,17 @@ class TestComplianceInferredHeight:
         self,
         max_height: float | None,
         max_storeys: int | None = None,
-    ) -> dict:
-        return {
-            "zoning_class": "CR",
-            "zoning_max_storeys": max_storeys,
-            "zoning_max_units": None,
-            "zoning_max_height_m": max_height,
-            "zoning_max_density": None,
-            "permitted_use_category": "Commercial Residential (mixed)",
-        }
+    ) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "zoning_class": "CR",
+                "zoning_max_storeys": max_storeys,
+                "zoning_max_units": None,
+                "zoning_max_height_m": max_height,
+                "zoning_max_density": None,
+                "permitted_use_category": "Commercial Residential (mixed)",
+            }
+        )
 
     def test_violation_when_storeys_imply_height_far_over_limit(self) -> None:
         """Given: 28 storeys stated, no metres, 18m limit, no storey limit
@@ -1110,15 +1115,17 @@ class TestComplianceInferredHeight:
 
 
 class TestComplianceFSI:
-    def _site(self, max_density: float | None) -> dict:
-        return {
-            "zoning_class": "RM",
-            "zoning_max_storeys": None,
-            "zoning_max_units": None,
-            "zoning_max_height_m": None,
-            "zoning_max_density": max_density,
-            "permitted_use_category": "Residential",
-        }
+    def _site(self, max_density: float | None) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "zoning_class": "RM",
+                "zoning_max_storeys": None,
+                "zoning_max_units": None,
+                "zoning_max_height_m": None,
+                "zoning_max_density": max_density,
+                "permitted_use_category": "Residential",
+            }
+        )
 
     def test_violation_when_fsi_exceeds_limit(self) -> None:
         """Given: Stated FSI 5.4 against a 0.85 density limit.
@@ -1167,7 +1174,7 @@ class TestComplianceZeroLimits:
     positives a 0 storey/unit limit would otherwise produce.
     """
 
-    def _site(self, **overrides) -> dict:
+    def _site(self, **overrides) -> SiteContext:
         site = {
             "zoning_class": "RM",
             "zoning_max_storeys": None,
@@ -1177,7 +1184,7 @@ class TestComplianceZeroLimits:
             "permitted_use_category": "Residential",
         }
         site.update(overrides)
-        return site
+        return SiteContext.model_validate(site)
 
     def test_zero_density_does_not_crash_or_flag(self) -> None:
         features = extract_project_features("a Floor Space Index (FSI) of 5.4")

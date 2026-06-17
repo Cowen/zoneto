@@ -86,7 +86,7 @@ class TestDefaultRadiusBert:
             lon=-79.38,
         )
         assert result is not None
-        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        folder_ids = [m.folderrsn for m in result.top_matches]
         assert "0" in folder_ids
         assert "1" not in folder_ids
 
@@ -115,7 +115,7 @@ class TestSelfExclusionBert:
             min_dist_m=200.0,
         )
         assert result is not None
-        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        folder_ids = [m.folderrsn for m in result.top_matches]
         assert "0" not in folder_ids
         assert "1" in folder_ids
 
@@ -143,8 +143,8 @@ class TestZoneDeranking:
             zoning_class="R",
         )
         assert result is not None
-        assert len(result["top_matches"]) >= 1
-        assert result["top_matches"][0]["folderrsn"] == "0"
+        assert len(result.top_matches) >= 1
+        assert result.top_matches[0].folderrsn == "0"
 
 
 class TestScoreDescriptionSimilarityBert:
@@ -174,10 +174,10 @@ class TestScoreDescriptionSimilarityBert:
             model=_FakeBertModel(),
         )
         assert result is not None
-        assert "top_matches" in result
-        assert "appeal_rate" in result
-        assert "approval_rate" in result
-        assert "n_similar" in result
+        assert result.top_matches is not None
+        assert result.appeal_rate is None or isinstance(result.appeal_rate, float)
+        assert result.approval_rate is None or isinstance(result.approval_rate, float)
+        assert result.n_similar is not None
 
     def test_approval_rate_computed_from_index(self, tmp_path: Path) -> None:
         """Given: Index with dev_approved=[1, 0, 1, None].
@@ -191,8 +191,8 @@ class TestScoreDescriptionSimilarityBert:
         )
         assert result is not None
         # 2 approved of 3 labelled
-        assert result["approval_rate"] is not None
-        assert abs(result["approval_rate"] - 2 / 3) < 1e-6
+        assert result.approval_rate is not None
+        assert abs(result.approval_rate - 2 / 3) < 1e-6
 
     def test_zone_matched_filtering(self, tmp_path: Path) -> None:
         """Given: Corpus with R and RM zones. Query zone='RM'.
@@ -209,9 +209,9 @@ class TestScoreDescriptionSimilarityBert:
             top_n=4,
         )
         assert result is not None
-        assert "zone_matched_n_similar" in result
+        assert result.zone_matched_n_similar is not None
         # Only 1 RM application in the fixture
-        assert result["zone_matched_n_similar"] == 1
+        assert result.zone_matched_n_similar == 1
 
     def test_zone_matched_absent_without_zoning_class(self, tmp_path: Path) -> None:
         """Given: No zoning_class provided.
@@ -224,7 +224,7 @@ class TestScoreDescriptionSimilarityBert:
             "test", data_dir=tmp_path, model=_FakeBertModel()
         )
         assert result is not None
-        assert "zone_matched_n_similar" not in result
+        assert result.zone_matched_n_similar is None
 
     def test_far_apps_excluded_when_lat_lon_provided(self, tmp_path: Path) -> None:
         """Given: One Toronto app (43.65, -79.38) and one NYC app (40.71, -74.01).
@@ -246,7 +246,7 @@ class TestScoreDescriptionSimilarityBert:
             radius_m=1000.0,
         )
         assert result is not None
-        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        folder_ids = [m.folderrsn for m in result.top_matches]
         assert "0" in folder_ids
         assert "1" not in folder_ids
 
@@ -267,7 +267,7 @@ class TestScoreDescriptionSimilarityBert:
             model=_FakeBertModel(),
         )
         assert result is not None
-        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        folder_ids = [m.folderrsn for m in result.top_matches]
         assert "0" in folder_ids
         assert "1" in folder_ids
 
@@ -287,7 +287,7 @@ class TestScoreDescriptionSimilarityBert:
             radius_m=1000.0,
         )
         assert result is not None
-        assert result["n_similar"] >= 0
+        assert result.n_similar >= 0
 
     def test_zone_base_keys_absent(self, tmp_path: Path) -> None:
         """Given: zone_base_* was removed (survivorship-biased approval rate).
@@ -304,5 +304,5 @@ class TestScoreDescriptionSimilarityBert:
             top_n=4,
         )
         assert result is not None
-        assert "zone_base_approval_rate" not in result
-        assert "zone_base_n" not in result
+        assert not hasattr(result, "zone_base_approval_rate")
+        assert not hasattr(result, "zone_base_n")

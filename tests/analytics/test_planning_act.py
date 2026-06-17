@@ -17,6 +17,7 @@ from zoneto.analytics.planning_act import (
     statutory_processes,
     statutory_timeline_days,
 )
+from zoneto.api.site_context import SiteContext
 
 
 def _violation(severity: Severity, rule_id: str = "x") -> Violation:
@@ -182,7 +183,7 @@ def test_variance_remedy_cites_s45_not_ten_percent() -> None:
         proposed_use=None,
         has_ground_floor_retail=False,
     )
-    vios = check_compliance(extracted, {"zoning_max_storeys": 3})
+    vios = check_compliance(extracted, SiteContext(zoning_max_storeys=3))
     remedy = vios[0].suggested_remedy
     assert "s.45(1)" in remedy
     assert "typically considered minor" not in remedy
@@ -191,7 +192,7 @@ def test_variance_remedy_cites_s45_not_ten_percent() -> None:
 
 def test_rezoning_violation_section_ref_cites_s34() -> None:
     extracted = extract_project_features("a 40-storey tower")
-    vios = check_compliance(extracted, {"zoning_max_storeys": 3})
+    vios = check_compliance(extracted, SiteContext(zoning_max_storeys=3))
     assert any("Planning Act s.34" in v.section_ref for v in vios)
 
 
@@ -241,7 +242,7 @@ def test_statutory_processes_primary_first_then_orthogonal() -> None:
     ex = extract_project_features(
         "Demolish rental apartments; build a 40-storey condominium, 400 units"
     )
-    vios = check_compliance(ex, {"zoning_max_storeys": 3})
+    vios = check_compliance(ex, SiteContext(zoning_max_storeys=3))
     pairs = statutory_processes(vios, ex)
     keys = [k for k, _ in pairs]
     assert keys[0] == "rezoning"  # primary zoning path first

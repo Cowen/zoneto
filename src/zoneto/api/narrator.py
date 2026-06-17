@@ -20,6 +20,8 @@ from zoneto.analytics.bylaw_index import Chunk
 from zoneto.analytics.compliance import Severity, Violation, effective_height_m
 from zoneto.analytics.extract import ProjectFeatures
 from zoneto.analytics.use_classifier import use_matches_zone
+from zoneto.api.desc_similarity import DescriptionSimilarity
+from zoneto.api.site_context import SiteContext
 from zoneto.llm.schemas import NarrationResult
 
 _SYSTEM_PROMPT = """\
@@ -134,7 +136,7 @@ _MAGNITUDE_LABELS = {
 def _format_statutory_process(
     violations: list[Violation],
     extracted: ProjectFeatures,
-    description_similarity: dict[str, Any] | None = None,
+    description_similarity: DescriptionSimilarity | None = None,
     description: str | None = None,
 ) -> str:
     """Render the Planning Act process/appeal/timeline block for the prompt.
@@ -152,9 +154,9 @@ def _format_statutory_process(
     # back to the pooled rate only when no same-zone rate is available.
     appeal_rate = None
     if description_similarity:
-        appeal_rate = description_similarity.get("zone_matched_appeal_rate")
+        appeal_rate = description_similarity.zone_matched_appeal_rate
         if appeal_rate is None:
-            appeal_rate = description_similarity.get("appeal_rate")
+            appeal_rate = description_similarity.appeal_rate
     # OZ filings can be a standalone ZBA (90-day clock) or combined with an OPA
     # (120). An OPA is signalled by either an explicit mention in the description or
     # an Official-Plan non-conformity (op_use_nonconforming) — the latter *is* the
@@ -188,10 +190,10 @@ def _format_chunks(chunks: list[Chunk]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def _format_site(site: dict[str, Any], proposed_use: str | None = None) -> str:
-    zone = site.get("zoning_class") or "unknown"
-    use_cat = site.get("permitted_use_category") or "unknown"
-    match = use_matches_zone(proposed_use, site.get("permitted_use_category"))
+def _format_site(site: SiteContext, proposed_use: str | None = None) -> str:
+    zone = site.zoning_class or "unknown"
+    use_cat = site.permitted_use_category or "unknown"
+    match = use_matches_zone(proposed_use, site.permitted_use_category)
     if match == 1:
         use_compat = f"permitted ('{proposed_use}' is allowed in this zone)"
     elif match == 0:
@@ -202,29 +204,29 @@ def _format_site(site: dict[str, Any], proposed_use: str | None = None) -> str:
     else:
         use_compat = "unknown (insufficient data to determine compatibility)"
     flags = []
-    if site.get("in_heritage_register"):
+    if site.in_heritage_register:
         flags.append("Heritage Register")
-    if site.get("in_heritage_district"):
+    if site.in_heritage_district:
         flags.append("Heritage Conservation District")
-    if site.get("in_mtsa"):
+    if site.in_mtsa:
         flags.append("Major Transit Station Area (MTSA)")
-    if site.get("in_secondary_plan"):
-        flags.append(f"Secondary Plan: {site.get('secondary_plan_name')}")
-    if site.get("zoning_holding"):
+    if site.in_secondary_plan:
+        flags.append(f"Secondary Plan: {site.secondary_plan_name}")
+    if site.zoning_holding:
         flags.append("Holding (H) symbol")
-    if site.get("zoning_exception"):
-        exc_no = site.get("zoning_exception_no")
+    if site.zoning_exception:
+        exc_no = site.zoning_exception_no
         exc_label = f"No. {exc_no}" if exc_no else "site-specific"
         flags.append(f"Site-specific Zoning Exception ({exc_label})")
     limits = []
-    if site.get("zoning_max_storeys"):
-        limits.append(f"max {site['zoning_max_storeys']} storeys")
-    if site.get("zoning_max_height_m"):
-        limits.append(f"max {site['zoning_max_height_m']}m height")
-    if site.get("zoning_max_units"):
-        limits.append(f"max {site['zoning_max_units']} units")
-    if site.get("zoning_max_density"):
-        limits.append(f"max FSI {site['zoning_max_density']}")
+    if site.zoning_max_storeys:
+        limits.append(f"max {site.zoning_max_storeys} storeys")
+    if site.zoning_max_height_m:
+        limits.append(f"max {site.zoning_max_height_m}m height")
+    if site.zoning_max_units:
+        limits.append(f"max {site.zoning_max_units} units")
+    if site.zoning_max_density:
+        limits.append(f"max FSI {site.zoning_max_density}")
     return (
         f"Zone: {zone} | Permitted use category: {use_cat}\n"
         f"Use compatibility: {use_compat}\n"
@@ -251,7 +253,7 @@ def _format_extracted(extracted: ProjectFeatures) -> str:
 
 
 def _format_description_similarity(
-    sim: dict[str, Any] | None,
+    sim: DescriptionSimilarity | None,
     *,
     site_zoning_class: str | None = None,
 ) -> str:
@@ -269,7 +271,7 @@ def _format_description_similarity(
     """
     if not sim:
         return ""
-    n = sim.get("n_similar", 0)
+    n = sim.n_similar
     if not n:
         return ""
     parts = [
@@ -284,12 +286,12 @@ def _format_description_similarity(
     #   - comparable zone matches query site zone (or is unknown)
     # Cross-zone comparables show zone only (no outcome), since the outcome
     # from a different zone type is not directly applicable.
-    top_matches = sim.get("top_matches") or []
+    top_matches = sim.top_matches
     if top_matches:
         best = top_matches[0]
-        if best.get("similarity", 0) >= 0.90:
-            app_type = best.get("application_type", "OZ")
-            best_zone = best.get("zoning_class")
+        if best.similarity >= 0.90:
+            app_type = best.application_type or "OZ"
+            best_zone = best.zoning_class
             zone_note = f" (zoning: {best_zone})" if best_zone else ""
             # Only surface outcome when zone matches or is unknown (no cross-zone noise)
             zone_matches = (
@@ -298,8 +300,8 @@ def _format_description_similarity(
                 or best_zone == site_zoning_class
             )
             if zone_matches:
-                approved = best.get("dev_approved")
-                appealed = best.get("dev_appealed")
+                approved = best.dev_approved
+                appealed = best.dev_appealed
                 if approved == 1:
                     outcome: str | None = "Council-approved"
                     if appealed == 0:
@@ -313,11 +315,11 @@ def _format_description_similarity(
                 outcome_note = ""
             parts.append(
                 f"The closest comparable is {app_type}{zone_note} "
-                f"with similarity {best['similarity']:.0%}{outcome_note}. "
+                f"with similarity {best.similarity:.0%}{outcome_note}. "
                 "Use the zone of this comparable to judge cross-zone relevance."
             )
     # Appeal rate is the differentiable signal — not subject to survivorship bias.
-    appeal_rate = sim.get("appeal_rate")
+    appeal_rate = sim.appeal_rate
     if appeal_rate is not None:
         pct = round(appeal_rate * 100)
         parts.append(
@@ -328,7 +330,7 @@ def _format_description_similarity(
     # Zone-matched analysis: count + appeal rate for same-zone comparables.
     # Zone-matched appeal rate is more targeted than overall — filters to the
     # same zone type, removing cross-zone noise. Not subject to survivorship bias.
-    zone_n = sim.get("zone_matched_n_similar")
+    zone_n = sim.zone_matched_n_similar
     if zone_n is not None:
         if zone_n == 0:
             parts.append(
@@ -337,9 +339,9 @@ def _format_description_similarity(
                 "different zone types — they do not establish same-zone precedent."
             )
         else:
-            zm_appeal = sim.get("zone_matched_appeal_rate")
-            zm_type = sim.get("zone_matched_application_type")
-            zm_mag = sim.get("zone_matched_magnitude")
+            zm_appeal = sim.zone_matched_appeal_rate
+            zm_type = sim.zone_matched_application_type
+            zm_mag = sim.zone_matched_magnitude
             if zm_appeal is not None:
                 zm_pct = round(zm_appeal * 100)
                 # Build the comparability qualifier from whichever axes were
@@ -411,7 +413,7 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _has_approved_precedent(
-    description_similarity: dict[str, Any] | None,
+    description_similarity: DescriptionSimilarity | None,
     site_zone: str | None,
 ) -> bool:
     """True when top_matches has a same-zone Council-approved OZ at ≥ 90% similarity
@@ -429,20 +431,20 @@ def _has_approved_precedent(
     """
     if not description_similarity:
         return False
-    query_lat: float | None = description_similarity.get("query_lat")
-    query_lon: float | None = description_similarity.get("query_lon")
-    for m in description_similarity.get("top_matches", []):
-        if m.get("similarity", 0) < 0.90:
+    query_lat: float | None = description_similarity.query_lat
+    query_lon: float | None = description_similarity.query_lon
+    for m in description_similarity.top_matches:
+        if m.similarity < 0.90:
             break  # list is sorted desc — no point continuing
-        if m.get("dev_approved") != 1:
+        if m.dev_approved != 1:
             continue
-        comp_zone = m.get("zoning_class")
+        comp_zone = m.zoning_class
         zone_matches = comp_zone is None or site_zone is None or comp_zone == site_zone
         if not zone_matches:
             continue
         if query_lat is not None and query_lon is not None:
-            comp_lat: float | None = m.get("lat")
-            comp_lon: float | None = m.get("lon")
+            comp_lat: float | None = m.lat
+            comp_lon: float | None = m.lon
             if comp_lat is None or comp_lon is None:
                 continue  # comparable not geocoded — can't confirm proximity
             if (
@@ -454,7 +456,7 @@ def _has_approved_precedent(
     return False
 
 
-def _limits_verified(extracted: ProjectFeatures, site: dict[str, Any]) -> bool:
+def _limits_verified(extracted: ProjectFeatures, site: SiteContext) -> bool:
     """True when at least one encoded zoning limit was checked against the proposal.
 
     Zero violations only means "as-of-right" when something was actually
@@ -463,10 +465,10 @@ def _limits_verified(extracted: ProjectFeatures, site: dict[str, Any]) -> bool:
     limits verifies nothing, no matter what the proposal says.
     """
     pairs = (
-        (extracted.proposed_storeys, site.get("zoning_max_storeys")),
-        (effective_height_m(extracted), site.get("zoning_max_height_m")),
-        (extracted.proposed_units, site.get("zoning_max_units")),
-        (extracted.proposed_fsi, site.get("zoning_max_density")),
+        (extracted.proposed_storeys, site.zoning_max_storeys),
+        (effective_height_m(extracted), site.zoning_max_height_m),
+        (extracted.proposed_units, site.zoning_max_units),
+        (extracted.proposed_fsi, site.zoning_max_density),
     )
     return any(prop is not None and limit for prop, limit in pairs)
 
@@ -474,9 +476,9 @@ def _limits_verified(extracted: ProjectFeatures, site: dict[str, Any]) -> bool:
 def _apply_confidence_overrides(
     score: int,
     violations: list[Violation],
-    site: dict[str, Any],
+    site: SiteContext,
     extracted: ProjectFeatures,
-    description_similarity: dict[str, Any] | None = None,
+    description_similarity: DescriptionSimilarity | None = None,
 ) -> int:
     """Apply deterministic floor/cap rules after LLM scoring.
 
@@ -499,28 +501,25 @@ def _apply_confidence_overrides(
     structural = [v for v in violations if v.severity != Severity.INFORMATIONAL]
     as_of_right_floor = 70 if _limits_verified(extracted, site) else 55
     if (
-        use_matches_zone(extracted.proposed_use, site.get("permitted_use_category"))
-        == 1
+        use_matches_zone(extracted.proposed_use, site.permitted_use_category) == 1
         and not structural
     ):
         score = max(score, as_of_right_floor)
 
-    permitted = (site.get("permitted_use_category") or "").lower()
+    permitted = (site.permitted_use_category or "").lower()
     if not violations and any(
         k in permitted for k in ("mixed", "commercial residential")
     ):
         score = max(score, as_of_right_floor)
 
-    has_precedent = _has_approved_precedent(
-        description_similarity, site.get("zoning_class")
-    )
+    has_precedent = _has_approved_precedent(description_similarity, site.zoning_class)
     if has_precedent:
         score = max(score, 55)
 
-    max_storeys = site.get("zoning_max_storeys") or 0
-    max_units = site.get("zoning_max_units") or 0
-    max_height = site.get("zoning_max_height_m") or 0
-    max_fsi = site.get("zoning_max_density") or 0
+    max_storeys = site.zoning_max_storeys or 0
+    max_units = site.zoning_max_units or 0
+    max_height = site.zoning_max_height_m or 0
+    max_fsi = site.zoning_max_density or 0
     prop_storeys = extracted.proposed_storeys or 0
     prop_units = extracted.proposed_units or 0
     prop_height = effective_height_m(extracted) or 0
@@ -538,7 +537,7 @@ def _apply_confidence_overrides(
 
 
 def narrate_evaluation(
-    site: dict[str, Any],
+    site: SiteContext,
     extracted: ProjectFeatures,
     violations: list[Violation],
     chunks: list[Chunk],
@@ -546,7 +545,7 @@ def narrate_evaluation(
     *,
     description: str | None = None,
     data_gaps: list[str] | None = None,
-    description_similarity: dict[str, Any] | None = None,
+    description_similarity: DescriptionSimilarity | None = None,
     community_benefits: dict[str, Any] | None = None,
 ) -> tuple[str, int]:
     """Generate a markdown compliance summary and confidence score.
@@ -560,7 +559,7 @@ def narrate_evaluation(
         (summary_markdown, confidence_score) where confidence_score is 0–100.
     """
     gaps_section = _format_data_gaps(data_gaps or [])
-    site_zone = site.get("zoning_class") if site else None
+    site_zone = site.zoning_class
     statutory_section = _format_statutory_process(
         violations, extracted, description_similarity, description
     )
@@ -650,7 +649,7 @@ Return the summary in `summary_md` and the score in `confidence`.
 
 def narrate_question(
     question: str,
-    site: dict[str, Any],
+    site: SiteContext,
     extracted: ProjectFeatures,
     violations: list[Violation],
     retrieved_chunks: list[Chunk],

@@ -25,11 +25,16 @@ from zoneto.analytics.retrieval_eval import magnitude_band
 from zoneto.analytics.score import score_one
 from zoneto.api.comps import query_comps
 from zoneto.api.desc_similarity import (
+    DescriptionSimilarity,
     score_description_similarity,
     score_description_similarity_bert,
 )
 from zoneto.api.narrator import narrate_evaluation, narrate_question
-from zoneto.api.site_context import lookup_site_context, nearby_applications
+from zoneto.api.site_context import (
+    SiteContext,
+    lookup_site_context,
+    nearby_applications,
+)
 
 router = APIRouter()
 
@@ -92,32 +97,6 @@ class GeocodeResult(BaseModel):
     display_name: str
 
 
-class SiteContextResult(BaseModel):
-    zoning_class: str | None = None
-    zoning_max_units: int | None = None
-    zoning_max_density: float | None = None
-    zoning_max_storeys: int | None = None
-    zoning_max_height_m: float | None = None
-    permitted_use_category: str | None = None
-    zoning_min_frontage_m: float | None = None
-    zoning_min_lot_area_sqm: float | None = None
-    zoning_max_coverage_pct: float | None = None
-    zoning_min_sqm_per_unit: float | None = None
-    zoning_holding: int = 0
-    zoning_exception: int = 0
-    zoning_exception_no: str | None = None
-    zoning_pct_res: float | None = None
-    zoning_pct_comm: float | None = None
-    zoning_pct_emp: float | None = None
-    in_heritage_register: int = 0
-    in_heritage_district: int = 0
-    secondary_plan_name: str | None = None
-    in_secondary_plan: int = 0
-    in_mtsa: int = 0
-    in_trca_regulated_area: int = 0
-    in_greenbelt: int = 0
-
-
 # --- endpoints ---
 
 
@@ -153,13 +132,12 @@ def geocode(address: str) -> GeocodeResult:
     )
 
 
-@router.get("/site-context", response_model=SiteContextResult)
-def site_context(request: Request, lat: float, lon: float) -> SiteContextResult:
+@router.get("/site-context", response_model=SiteContext)
+def site_context(request: Request, lat: float, lon: float) -> SiteContext:
     """Look up zoning, heritage, MTSA, and secondary plan at a point."""
     data_dir: Path = getattr(request.app.state, "data_dir", Path("data"))
     ref_dir = data_dir / "reference"
-    result = lookup_site_context(lat, lon, ref_dir)
-    return SiteContextResult(**result)
+    return lookup_site_context(lat, lon, ref_dir)
 
 
 @router.get("/ready")
@@ -308,7 +286,7 @@ class EvaluateRequest(BaseModel):
 class EvaluateResponse(BaseModel):
     lat: float | None = None
     lon: float | None = None
-    site_context: dict[str, Any]
+    site_context: SiteContext
     extracted: dict[str, Any]
     violations: list[ViolationResult]
     relevant_sections: list[RelevantSection]
@@ -316,7 +294,7 @@ class EvaluateResponse(BaseModel):
     suggestions: list[str]
     confidence_score: int | None = None
     data_gaps: list[str] = []
-    description_similarity: dict[str, Any] | None = None
+    description_similarity: DescriptionSimilarity | None = None
     community_benefits_context: dict[str, Any] | None = None
     statutory_process: StatutoryProcessResult | None = None
     additional_processes: list[StatutoryProcessResult] = []
@@ -411,7 +389,7 @@ def _zone_prefixes(zoning_class: str | None) -> list[str] | None:
 
 def _retrieve_chunks(
     bylaw_index: Any,
-    site: dict[str, Any],
+    site: SiteContext,
     description: str,
     extracted_use: str | None,
     *,
@@ -426,10 +404,10 @@ def _retrieve_chunks(
     """
     from zoneto.analytics.bylaw_index import Chunk  # noqa: PLC0415
 
-    zones = _zone_prefixes(site.get("zoning_class"))
-    zone_class = site.get("zoning_class") or ""
-    use_cat = site.get("permitted_use_category") or ""
-    exception_no = site.get("zoning_exception_no")
+    zones = _zone_prefixes(site.zoning_class)
+    zone_class = site.zoning_class or ""
+    use_cat = site.permitted_use_category or ""
+    exception_no = site.zoning_exception_no
 
     # 0. Direct exception lookup — guarantees the exact exception schedule
     # surfaces first when the site has a known exception number. Score=1.0.
@@ -471,15 +449,12 @@ def _expected_app_type(path: str) -> str | None:
     return "OZ" if path == "rezoning" else None
 
 
-def _compute_data_gaps(site: dict[str, Any], extracted: Any) -> list[str]:
+def _compute_data_gaps(site: SiteContext, extracted: Any) -> list[str]:
     """Identify what information is unavailable and would improve the assessment."""
     gaps: list[str] = []
     # Height overlay: absent when site is outside Schedule B coverage (~85% of city)
-    if (
-        site.get("zoning_max_storeys") is None
-        and site.get("zoning_max_height_m") is None
-    ):
-        if site.get("zoning_class"):
+    if site.zoning_max_storeys is None and site.zoning_max_height_m is None:
+        if site.zoning_class:
             gaps.append(
                 "Height overlay (By-law 569-2013 Schedule B): this site is outside the "
                 "height overlay area (~85% of the city). Base zone regulations govern "
@@ -488,7 +463,7 @@ def _compute_data_gaps(site: dict[str, Any], extracted: Any) -> list[str]:
     # Official Plan designation: needed for the s.24/s.22 conformity read. Absent
     # when the site falls outside the interim layer's coverage or the layer isn't
     # installed — the OPA-conformity check can't run without it.
-    if site.get("op_land_use_designation") is None and site.get("zoning_class"):
+    if site.op_land_use_designation is None and site.zoning_class:
         gaps.append(
             "Official Plan land-use designation: not available for this site "
             "(interim reconstruction layer; pending an authoritative City source). "
@@ -559,7 +534,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
             body.description or "",
             data_dir=data_dir,
             model=bert_model,
-            zoning_class=site.get("zoning_class"),
+            zoning_class=site.zoning_class,
             application_type=expected_type,
             magnitude_band=query_magnitude,
             lat=lat,
@@ -571,7 +546,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
             body.description or "",
             data_dir=data_dir,
             model_dir=model_dir,
-            zoning_class=site.get("zoning_class"),
+            zoning_class=site.zoning_class,
             application_type=expected_type,
             magnitude_band=query_magnitude,
             lat=lat,

@@ -5,13 +5,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING
 
 from zoneto.analytics.extract import ProjectFeatures
 from zoneto.analytics.use_classifier import (
     op_use_matches_designation,
     use_matches_zone,
 )
+
+if TYPE_CHECKING:
+    from zoneto.api.site_context import SiteContext
 
 # By-law 569-2013 §60.20.20.10(1): uses explicitly excluded from all zones,
 # including Employment Industrial. These cannot be permitted through rezoning.
@@ -111,7 +114,7 @@ def _minor_variance_note() -> str:
 
 def check_compliance(
     extracted: ProjectFeatures,
-    site: dict[str, Any],
+    site: SiteContext,
 ) -> list[Violation]:
     """Run deterministic compliance checks against site zoning limits.
 
@@ -121,7 +124,7 @@ def check_compliance(
 
     Args:
         extracted: ProjectFeatures from extract_project_features().
-        site: Site context dict from lookup_site_context() with keys such as
+        site: SiteContext from lookup_site_context() carrying fields such as
             zoning_class, zoning_max_storeys, zoning_max_units, zoning_max_density,
             permitted_use_category, in_heritage_register, in_heritage_district,
             in_mtsa, zoning_exception, zoning_holding.
@@ -184,8 +187,8 @@ def _check_prohibited_uses(extracted: ProjectFeatures) -> list[Violation]:
     return []
 
 
-def _check_storeys(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
-    max_storeys = site.get("zoning_max_storeys")
+def _check_storeys(extracted: ProjectFeatures, site: SiteContext) -> list[Violation]:
+    max_storeys = site.zoning_max_storeys
     proposed = extracted.proposed_storeys
     if proposed is None or not max_storeys or max_storeys <= 0:
         return []
@@ -224,10 +227,8 @@ def _check_storeys(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Vio
     ]
 
 
-def _check_height_m(
-    extracted: ProjectFeatures, site: dict[str, Any]
-) -> list[Violation]:
-    max_height = site.get("zoning_max_height_m")
+def _check_height_m(extracted: ProjectFeatures, site: SiteContext) -> list[Violation]:
+    max_height = site.zoning_max_height_m
     proposed = extracted.proposed_height_m
     if proposed is None or not max_height or max_height <= 0:
         return []
@@ -265,7 +266,7 @@ def _check_height_m(
 
 
 def _check_height_inferred(
-    extracted: ProjectFeatures, site: dict[str, Any]
+    extracted: ProjectFeatures, site: SiteContext
 ) -> list[Violation]:
     """Check the height limit against a storeys-derived height estimate.
 
@@ -276,12 +277,12 @@ def _check_height_inferred(
     and only when the estimate exceeds the limit by >25% — beyond both the
     minor-variance threshold and the slack in the 3m/storey assumption.
     """
-    max_height = site.get("zoning_max_height_m")
+    max_height = site.zoning_max_height_m
     if max_height is None:
         return []
     if extracted.proposed_height_m is not None:
         return []
-    if site.get("zoning_max_storeys") is not None:
+    if site.zoning_max_storeys is not None:
         return []
     storeys = extracted.proposed_storeys
     if storeys is None:
@@ -313,8 +314,8 @@ def _check_height_inferred(
     ]
 
 
-def _check_units(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
-    max_units = site.get("zoning_max_units")
+def _check_units(extracted: ProjectFeatures, site: SiteContext) -> list[Violation]:
+    max_units = site.zoning_max_units
     proposed = extracted.proposed_units
     if proposed is None or not max_units or max_units <= 0:
         return []
@@ -341,8 +342,8 @@ def _check_units(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Viola
     ]
 
 
-def _check_fsi(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
-    max_density = site.get("zoning_max_density")
+def _check_fsi(extracted: ProjectFeatures, site: SiteContext) -> list[Violation]:
+    max_density = site.zoning_max_density
     proposed = extracted.proposed_fsi
     if proposed is None or not max_density or max_density <= 0:
         return []
@@ -382,7 +383,7 @@ def _check_fsi(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violati
 
 
 def _check_unit_limit_advisory(
-    extracted: ProjectFeatures, site: dict[str, Any]
+    extracted: ProjectFeatures, site: SiteContext
 ) -> list[Violation]:
     """Warn when a zone has a very low unit ceiling and no explicit count was given.
 
@@ -391,7 +392,7 @@ def _check_unit_limit_advisory(
     ceiling is clearly a barrier (e.g. "14-storey rental" in a 4-unit RM zone).
     Only fires when max_units <= 6 and the proposed use is residential or mixed.
     """
-    max_units = site.get("zoning_max_units")
+    max_units = site.zoning_max_units
     if not max_units or max_units <= 0 or max_units > 6:
         return []
     if extracted.proposed_units is not None:
@@ -421,9 +422,9 @@ def _check_unit_limit_advisory(
     ]
 
 
-def _check_use(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violation]:
+def _check_use(extracted: ProjectFeatures, site: SiteContext) -> list[Violation]:
     proposed_use = extracted.proposed_use
-    permitted_category = site.get("permitted_use_category")
+    permitted_category = site.permitted_use_category
     match = use_matches_zone(proposed_use, permitted_category)
     if match is None or match == 1:
         return []
@@ -450,7 +451,7 @@ def _check_use(extracted: ProjectFeatures, site: dict[str, Any]) -> list[Violati
 
 
 def _check_op_conformity(
-    extracted: ProjectFeatures, site: dict[str, Any]
+    extracted: ProjectFeatures, site: SiteContext
 ) -> list[Violation]:
     """Flag a proposed use that does not conform to the Official Plan designation.
 
@@ -467,7 +468,7 @@ def _check_op_conformity(
     an authoritative City designation layer replaces the interim source.
     """
     proposed_use = extracted.proposed_use
-    designation = site.get("op_land_use_designation")
+    designation = site.op_land_use_designation
     match = op_use_matches_designation(proposed_use, designation)
     if match is None or match == 1:
         return []
@@ -494,10 +495,10 @@ def _check_op_conformity(
     ]
 
 
-def _check_heritage(site: dict[str, Any]) -> list[Violation]:
+def _check_heritage(site: SiteContext) -> list[Violation]:
     violations = []
 
-    if site.get("in_heritage_register"):
+    if site.in_heritage_register:
         violations.append(
             Violation(
                 rule_id="heritage_register",
@@ -514,7 +515,7 @@ def _check_heritage(site: dict[str, Any]) -> list[Violation]:
             )
         )
 
-    if site.get("in_heritage_district"):
+    if site.in_heritage_district:
         violations.append(
             Violation(
                 rule_id="heritage_district",
@@ -539,8 +540,8 @@ def _check_heritage(site: dict[str, Any]) -> list[Violation]:
     return violations
 
 
-def _check_mtsa(site: dict[str, Any]) -> list[Violation]:
-    if not site.get("in_mtsa"):
+def _check_mtsa(site: SiteContext) -> list[Violation]:
+    if not site.in_mtsa:
         return []
     return [
         Violation(
@@ -565,8 +566,8 @@ def _check_mtsa(site: dict[str, Any]) -> list[Violation]:
     ]
 
 
-def _check_trca(site: dict[str, Any]) -> list[Violation]:
-    if not site.get("in_trca_regulated_area"):
+def _check_trca(site: SiteContext) -> list[Violation]:
+    if not site.in_trca_regulated_area:
         return []
     return [
         Violation(
@@ -584,8 +585,8 @@ def _check_trca(site: dict[str, Any]) -> list[Violation]:
     ]
 
 
-def _check_greenbelt(site: dict[str, Any]) -> list[Violation]:
-    if not site.get("in_greenbelt"):
+def _check_greenbelt(site: SiteContext) -> list[Violation]:
+    if not site.in_greenbelt:
         return []
     return [
         Violation(
@@ -607,8 +608,8 @@ def _check_greenbelt(site: dict[str, Any]) -> list[Violation]:
     ]
 
 
-def _check_holding(site: dict[str, Any]) -> list[Violation]:
-    if not site.get("zoning_holding"):
+def _check_holding(site: SiteContext) -> list[Violation]:
+    if not site.zoning_holding:
         return []
     return [
         Violation(
@@ -630,10 +631,10 @@ def _check_holding(site: dict[str, Any]) -> list[Violation]:
     ]
 
 
-def _check_exception(site: dict[str, Any]) -> list[Violation]:
-    if not site.get("zoning_exception"):
+def _check_exception(site: SiteContext) -> list[Violation]:
+    if not site.zoning_exception:
         return []
-    exc_no = site.get("zoning_exception_no")
+    exc_no = site.zoning_exception_no
     exc_label = f"Exception No. {exc_no}" if exc_no else "a site-specific exception"
     return [
         Violation(

@@ -42,17 +42,29 @@ from zoneto.analytics.planning_act import (
     additional_processes,
     path_for_violations,
 )
+from zoneto.api.desc_similarity import DescriptionSimilarity
 from zoneto.api.narrator import (
     _apply_confidence_overrides,
     _format_statutory_process,
     narrate_evaluation,
 )
+from zoneto.api.site_context import SiteContext
 
 _FIXTURE_PATH = Path(__file__).parents[1] / "fixtures" / "narrator_eval_cases.json"
 _FIXTURE = json.loads(_FIXTURE_PATH.read_text())
 _CASES = {c["id"]: c for c in _FIXTURE["cases"]}
 _CASE_IDS = list(_CASES)
 _ORDERINGS = _FIXTURE["orderings"]
+
+# The fixture snapshots site context / similarity stubs as plain JSON dicts;
+# coerce them to the typed models the pipeline now consumes.
+for _case in _CASES.values():
+    _ci = _case.get("ci")
+    if _ci is not None:
+        if isinstance(_ci.get("site"), dict):
+            _ci["site"] = SiteContext.model_validate(_ci["site"])
+        if isinstance(_ci.get("sim_stub"), dict):
+            _ci["sim_stub"] = DescriptionSimilarity.model_validate(_ci["sim_stub"])
 
 _REF_DIR = Path("data/reference")
 _DATA_DIR = Path("data")
@@ -164,20 +176,20 @@ def test_op_nonconformity_selects_combined_120_day_clock() -> None:
     )
     # Residential in an employment zone (use_not_permitted → rezoning path) on a
     # Core Employment Areas OP site (residential nonconforming → op_use_nonconforming).
-    site_combined = {
-        "permitted_use_category": "Employment Industrial",
-        "op_land_use_designation": "Core Employment Areas",
-    }
+    site_combined = SiteContext(
+        permitted_use_category="Employment Industrial",
+        op_land_use_designation="Core Employment Areas",
+    )
     viols_combined = check_compliance(extracted, site_combined)
     assert any(v.rule_id == "op_use_nonconforming" for v in viols_combined)
     text_combined = _format_statutory_process(viols_combined, extracted)
     assert "120 days" in text_combined
 
     # Same rezoning trigger, but the OP designation conforms → standalone ZBA, 90 days.
-    site_standalone = {
-        "permitted_use_category": "Employment Industrial",
-        "op_land_use_designation": "Mixed Use Areas",
-    }
+    site_standalone = SiteContext(
+        permitted_use_category="Employment Industrial",
+        op_land_use_designation="Mixed Use Areas",
+    )
     viols_standalone = check_compliance(extracted, site_standalone)
     assert not any(v.rule_id == "op_use_nonconforming" for v in viols_standalone)
     text_standalone = _format_statutory_process(viols_standalone, extracted)
@@ -190,10 +202,10 @@ def _rezoning_violations() -> tuple:
     extracted = extract_project_features(
         "A 12-storey residential apartment building with 90 dwelling units"
     )
-    site = {
-        "permitted_use_category": "Employment Industrial",
-        "op_land_use_designation": "Mixed Use Areas",
-    }
+    site = SiteContext(
+        permitted_use_category="Employment Industrial",
+        op_land_use_designation="Mixed Use Areas",
+    )
     violations = check_compliance(extracted, site)
     return violations, extracted
 
@@ -205,13 +217,13 @@ def test_statutory_appeal_rate_prefers_zone_matched() -> None:
     """
     violations, extracted = _rezoning_violations()
     assert path_for_violations(violations) == "rezoning"
-    sim = {
-        "appeal_rate": 0.40,  # pooled, zone-diluted
-        "zone_matched_appeal_rate": 0.10,  # same-zone, sound
-        "zone_matched_n_similar": 5,
-        "n_similar": 20,
-        "top_matches": [],
-    }
+    sim = DescriptionSimilarity(
+        appeal_rate=0.40,  # pooled, zone-diluted
+        zone_matched_appeal_rate=0.10,  # same-zone, sound
+        zone_matched_n_similar=5,
+        n_similar=20,
+        top_matches=[],
+    )
     text = _format_statutory_process(violations, extracted, description_similarity=sim)
     assert "10% comparable appeal rate" in text
     assert "40%" not in text
@@ -221,13 +233,13 @@ def test_statutory_appeal_rate_falls_back_to_pooled_when_no_zone_match() -> None
     """Given no same-zone appeal rate, When the statutory block renders, Then it
     falls back to the pooled rate rather than dropping the appeal-risk note."""
     violations, extracted = _rezoning_violations()
-    sim = {
-        "appeal_rate": 0.40,
-        "zone_matched_appeal_rate": None,
-        "zone_matched_n_similar": 0,
-        "n_similar": 20,
-        "top_matches": [],
-    }
+    sim = DescriptionSimilarity(
+        appeal_rate=0.40,
+        zone_matched_appeal_rate=None,
+        zone_matched_n_similar=0,
+        n_similar=20,
+        top_matches=[],
+    )
     text = _format_statutory_process(violations, extracted, description_similarity=sim)
     assert "40% comparable appeal rate" in text
 
@@ -306,7 +318,7 @@ def _narration_for(case_id: str, api_key: str) -> tuple[str, int | None]:
             case["description"],
             data_dir=_DATA_DIR,
             model_dir=_MODEL_DIR,
-            zoning_class=site.get("zoning_class"),
+            zoning_class=site.zoning_class,
             lat=case["lat"],
             lon=case["lon"],
             radius_m=2000.0,

@@ -155,52 +155,52 @@ def client_with_ref(data_dir_with_ref: Path) -> Iterator[TestClient]:
 def test_lookup_returns_zoning_class(ref_dir: Path) -> None:
     """Point inside the test polygon returns zoning_class=CR."""
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["zoning_class"] == "CR"
+    assert result.zoning_class == "CR"
 
 
 def test_lookup_returns_zoning_limits(ref_dir: Path) -> None:
     """Point inside the test polygon returns zoning limits."""
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["zoning_max_units"] == 200
-    assert result["zoning_max_density"] == 3.5
+    assert result.zoning_max_units == 200
+    assert result.zoning_max_density == 3.5
 
 
 def test_lookup_returns_secondary_plan(ref_dir: Path) -> None:
     """Point inside secondary plan polygon returns plan name."""
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["secondary_plan_name"] == "King-Spadina"
-    assert result["in_secondary_plan"] == 1
+    assert result.secondary_plan_name == "King-Spadina"
+    assert result.in_secondary_plan == 1
 
 
 def test_lookup_returns_op_designation(ref_dir: Path) -> None:
     """Point inside the OP polygon returns its land-use designation."""
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["op_land_use_designation"] == "Mixed Use Areas"
+    assert result.op_land_use_designation == "Mixed Use Areas"
 
 
 def test_lookup_outside_all_polygons(ref_dir: Path) -> None:
     """Point far outside all polygons returns nulls and zeros."""
     result = lookup_site_context(44.0, -80.0, ref_dir)
-    assert result["op_land_use_designation"] is None
-    assert result["zoning_class"] is None
-    assert result["zoning_max_units"] is None
-    assert result["zoning_max_density"] is None
-    assert result["in_secondary_plan"] == 0
-    assert result["in_heritage_register"] == 0
-    assert result["in_heritage_district"] == 0
-    assert result["in_mtsa"] == 0
+    assert result.op_land_use_designation is None
+    assert result.zoning_class is None
+    assert result.zoning_max_units is None
+    assert result.zoning_max_density is None
+    assert result.in_secondary_plan == 0
+    assert result.in_heritage_register == 0
+    assert result.in_heritage_district == 0
+    assert result.in_mtsa == 0
     # New zoning fields default to None / 0 outside any polygon
-    assert result["permitted_use_category"] is None
-    assert result["zoning_min_frontage_m"] is None
-    assert result["zoning_min_lot_area_sqm"] is None
-    assert result["zoning_max_coverage_pct"] is None
-    assert result["zoning_min_sqm_per_unit"] is None
-    assert result["zoning_holding"] == 0
-    assert result["zoning_exception"] == 0
-    assert result["zoning_exception_no"] is None
-    assert result["zoning_pct_res"] is None
-    assert result["zoning_pct_comm"] is None
-    assert result["zoning_pct_emp"] is None
+    assert result.permitted_use_category is None
+    assert result.zoning_min_frontage_m is None
+    assert result.zoning_min_lot_area_sqm is None
+    assert result.zoning_max_coverage_pct is None
+    assert result.zoning_min_sqm_per_unit is None
+    assert result.zoning_holding == 0
+    assert result.zoning_exception == 0
+    assert result.zoning_exception_no is None
+    assert result.zoning_pct_res is None
+    assert result.zoning_pct_comm is None
+    assert result.zoning_pct_emp is None
 
 
 def _write_zoning_geojson(ref: Path, properties: dict) -> None:
@@ -239,7 +239,7 @@ def test_lookup_returns_permitted_use_category_residential(ref_dir: Path) -> Non
         {"ZN_ZONE": "R", "UNITS": -1, "DENSITY": -1, "GEN_ZONE": 0},
     )
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["permitted_use_category"] == "Residential"
+    assert result.permitted_use_category == "Residential"
 
 
 @pytest.mark.parametrize(
@@ -263,7 +263,7 @@ def test_lookup_maps_all_gen_zone_codes(
         ref_dir, {"ZN_ZONE": "Z", "UNITS": -1, "DENSITY": -1, "GEN_ZONE": code}
     )
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["permitted_use_category"] == expected
+    assert result.permitted_use_category == expected
 
 
 def test_lookup_returns_physical_constraints(ref_dir: Path) -> None:
@@ -282,10 +282,10 @@ def test_lookup_returns_physical_constraints(ref_dir: Path) -> None:
         },
     )
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["zoning_min_frontage_m"] == 7.5
-    assert result["zoning_min_lot_area_sqm"] == 220.0
-    assert result["zoning_max_coverage_pct"] == 35.0
-    assert result["zoning_min_sqm_per_unit"] == 200.0
+    assert result.zoning_min_frontage_m == 7.5
+    assert result.zoning_min_lot_area_sqm == 220.0
+    assert result.zoning_max_coverage_pct == 35.0
+    assert result.zoning_min_sqm_per_unit == 200.0
 
 
 @pytest.mark.parametrize("sentinel", [-1, 0])
@@ -307,10 +307,10 @@ def test_lookup_physical_constraint_sentinels_become_none(
         },
     )
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["zoning_min_frontage_m"] is None
-    assert result["zoning_min_lot_area_sqm"] is None
-    assert result["zoning_max_coverage_pct"] is None
-    assert result["zoning_min_sqm_per_unit"] is None
+    assert result.zoning_min_frontage_m is None
+    assert result.zoning_min_lot_area_sqm is None
+    assert result.zoning_max_coverage_pct is None
+    assert result.zoning_min_sqm_per_unit is None
 
 
 def test_lookup_holding_and_exception_flags(ref_dir: Path) -> None:
@@ -328,9 +328,9 @@ def test_lookup_holding_and_exception_flags(ref_dir: Path) -> None:
         },
     )
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["zoning_holding"] == 1
-    assert result["zoning_exception"] == 1
-    assert result["zoning_exception_no"] == "42"
+    assert result.zoning_holding == 1
+    assert result.zoning_exception == 1
+    assert result.zoning_exception_no == "42"
 
 
 def test_lookup_holding_and_exception_off(ref_dir: Path) -> None:
@@ -347,9 +347,9 @@ def test_lookup_holding_and_exception_off(ref_dir: Path) -> None:
         },
     )
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["zoning_holding"] == 0
-    assert result["zoning_exception"] == 0
-    assert result["zoning_exception_no"] is None
+    assert result.zoning_holding == 0
+    assert result.zoning_exception == 0
+    assert result.zoning_exception_no is None
 
 
 def test_lookup_mixed_use_fsi_splits(ref_dir: Path) -> None:
@@ -367,9 +367,9 @@ def test_lookup_mixed_use_fsi_splits(ref_dir: Path) -> None:
         },
     )
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["zoning_pct_res"] == 2.5
-    assert result["zoning_pct_comm"] == 1.5
-    assert result["zoning_pct_emp"] is None  # -1 sentinel
+    assert result.zoning_pct_res == 2.5
+    assert result.zoning_pct_comm == 1.5
+    assert result.zoning_pct_emp is None  # -1 sentinel
 
 
 def test_lookup_nearby_polygon_fallback(ref_dir: Path) -> None:
@@ -379,7 +379,7 @@ def test_lookup_nearby_polygon_fallback(ref_dir: Path) -> None:
     # The test polygon covers (-79.39,-79.37) × (43.64,43.66)
     # A point at 43.6601 is just outside the polygon's northern edge (43.66)
     result = lookup_site_context(43.6601, -79.38, ref_dir)
-    assert result["zoning_class"] == "CR"
+    assert result.zoning_class == "CR"
 
 
 def test_lookup_far_point_not_snapped(ref_dir: Path) -> None:
@@ -387,7 +387,7 @@ def test_lookup_far_point_not_snapped(ref_dir: Path) -> None:
     When: Lookup.
     Then: No snap occurs — returns None (too far for the fallback threshold)."""
     result = lookup_site_context(43.71, -79.38, ref_dir)
-    assert result["zoning_class"] is None
+    assert result.zoning_class is None
 
 
 def test_lookup_missing_reference_files(tmp_path: Path) -> None:
@@ -396,11 +396,11 @@ def test_lookup_missing_reference_files(tmp_path: Path) -> None:
     ref.mkdir()
     result = lookup_site_context(43.65, -79.38, ref)
     # Should return defaults, not crash
-    assert result["zoning_class"] is None
-    assert result["in_heritage_register"] == 0
-    assert result["permitted_use_category"] is None
-    assert result["zoning_holding"] == 0
-    assert result["zoning_exception"] == 0
+    assert result.zoning_class is None
+    assert result.in_heritage_register == 0
+    assert result.permitted_use_category is None
+    assert result.zoning_holding == 0
+    assert result.zoning_exception == 0
 
 
 # --- endpoint tests ---
@@ -434,8 +434,8 @@ def test_lookup_outside_all_polygons_includes_height_defaults(
 ) -> None:
     """Point outside all polygons returns None for height overlay fields."""
     result = lookup_site_context(44.0, -80.0, ref_dir)
-    assert result["zoning_max_storeys"] is None
-    assert result["zoning_max_height_m"] is None
+    assert result.zoning_max_storeys is None
+    assert result.zoning_max_height_m is None
 
 
 def _write_height_geojson(ref: Path, properties: dict) -> None:
@@ -473,7 +473,7 @@ def test_lookup_returns_height_overlay_storeys(ref_dir: Path) -> None:
     Then: zoning_max_storeys=6 is returned."""
     _write_height_geojson(ref_dir, {"HT_STORIES": 6, "HT_LABEL": 18.5})
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["zoning_max_storeys"] == 6
+    assert result.zoning_max_storeys == 6
 
 
 def test_lookup_returns_height_overlay_height_m(ref_dir: Path) -> None:
@@ -482,7 +482,7 @@ def test_lookup_returns_height_overlay_height_m(ref_dir: Path) -> None:
     Then: zoning_max_height_m=18.5 is returned."""
     _write_height_geojson(ref_dir, {"HT_STORIES": 6, "HT_LABEL": 18.5})
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["zoning_max_height_m"] == pytest.approx(18.5)
+    assert result.zoning_max_height_m == pytest.approx(18.5)
 
 
 @pytest.mark.parametrize("sentinel", [-1, 0])
@@ -494,8 +494,8 @@ def test_lookup_height_overlay_sentinel_becomes_none(
     Then: Both fields are None."""
     _write_height_geojson(ref_dir, {"HT_STORIES": sentinel, "HT_LABEL": sentinel})
     result = lookup_site_context(43.65, -79.38, ref_dir)
-    assert result["zoning_max_storeys"] is None
-    assert result["zoning_max_height_m"] is None
+    assert result.zoning_max_storeys is None
+    assert result.zoning_max_height_m is None
 
 
 def test_lookup_no_height_overlay_returns_none_defaults(tmp_path: Path) -> None:
@@ -505,8 +505,8 @@ def test_lookup_no_height_overlay_returns_none_defaults(tmp_path: Path) -> None:
     ref = tmp_path / "reference"
     ref.mkdir()
     result = lookup_site_context(43.65, -79.38, ref)
-    assert result["zoning_max_storeys"] is None
-    assert result["zoning_max_height_m"] is None
+    assert result.zoning_max_storeys is None
+    assert result.zoning_max_height_m is None
 
 
 def test_site_context_endpoint_exposes_new_zoning_keys(
@@ -530,8 +530,21 @@ def test_site_context_endpoint_exposes_new_zoning_keys(
         "zoning_pct_emp",
         "zoning_max_storeys",
         "zoning_max_height_m",
+        # op_land_use_designation was silently dropped by the old SiteContextResult
+        # (it lacked the field); the endpoint now returns SiteContext directly.
+        "op_land_use_designation",
     ):
         assert key in body, f"Missing key {key} in /site-context response"
+
+
+def test_site_context_endpoint_exposes_op_designation_value(
+    client_with_ref: TestClient,
+) -> None:
+    """The OP land-use designation is surfaced in the endpoint body (regression:
+    the former SiteContextResult model omitted the field, dropping its value)."""
+    response = client_with_ref.get("/site-context?lat=43.65&lon=-79.38")
+    assert response.status_code == 200
+    assert response.json()["op_land_use_designation"] == "Mixed Use Areas"
 
 
 # --- nearby_applications tests ---

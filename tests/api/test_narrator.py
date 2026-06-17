@@ -5,6 +5,7 @@ from __future__ import annotations
 from tests.stubs import capturing_eval_agent, stub_eval_agent
 from zoneto.analytics.compliance import Severity, Violation
 from zoneto.analytics.extract import ProjectFeatures
+from zoneto.api.desc_similarity import DescriptionSimilarity
 from zoneto.api.narrator import (
     _apply_confidence_overrides,
     _format_community_benefits,
@@ -12,24 +13,27 @@ from zoneto.api.narrator import (
     _format_site,
     narrate_evaluation,
 )
+from zoneto.api.site_context import SiteContext
 
 
 class TestNarrateEvaluationDataGaps:
-    def _minimal_site(self) -> dict:
-        return {
-            "zoning_class": "RM",
-            "permitted_use_category": "Residential",
-            "zoning_max_storeys": None,
-            "zoning_max_height_m": None,
-            "zoning_max_units": None,
-            "zoning_max_density": None,
-            "in_heritage_register": 0,
-            "in_heritage_district": 0,
-            "in_mtsa": 0,
-            "in_secondary_plan": 0,
-            "secondary_plan_name": None,
-            "zoning_holding": 0,
-        }
+    def _minimal_site(self) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "zoning_class": "RM",
+                "permitted_use_category": "Residential",
+                "zoning_max_storeys": None,
+                "zoning_max_height_m": None,
+                "zoning_max_units": None,
+                "zoning_max_density": None,
+                "in_heritage_register": 0,
+                "in_heritage_district": 0,
+                "in_mtsa": 0,
+                "in_secondary_plan": 0,
+                "secondary_plan_name": None,
+                "zoning_holding": 0,
+            }
+        )
 
     def test_data_gaps_accepted_without_error(self) -> None:
         """Given: narrate_evaluation called with a non-empty data_gaps list.
@@ -69,20 +73,22 @@ class TestNarrateEvaluationDataGaps:
 
 
 class TestNarrateEvaluationReturnType:
-    def _minimal_site(self) -> dict:
-        return {
-            "zoning_class": "RM",
-            "permitted_use_category": "Residential",
-            "zoning_max_storeys": None,
-            "zoning_max_units": None,
-            "zoning_max_density": None,
-            "in_heritage_register": 0,
-            "in_heritage_district": 0,
-            "in_mtsa": 0,
-            "in_secondary_plan": 0,
-            "secondary_plan_name": None,
-            "zoning_holding": 0,
-        }
+    def _minimal_site(self) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "zoning_class": "RM",
+                "permitted_use_category": "Residential",
+                "zoning_max_storeys": None,
+                "zoning_max_units": None,
+                "zoning_max_density": None,
+                "in_heritage_register": 0,
+                "in_heritage_district": 0,
+                "in_mtsa": 0,
+                "in_secondary_plan": 0,
+                "secondary_plan_name": None,
+                "zoning_holding": 0,
+            }
+        )
 
     def test_returns_tuple_of_str_and_int(self) -> None:
         """Given: a stub evaluation agent.
@@ -122,7 +128,9 @@ class TestFormatDescriptionSimilarity:
         """Given: description_similarity with appeal_rate=0.0.
         When: Formatting.
         Then: Output contains appeal rate."""
-        sim = {"appeal_rate": 0.0, "n_similar": 15, "top_matches": []}
+        sim = DescriptionSimilarity.model_validate(
+            {"appeal_rate": 0.0, "n_similar": 15, "top_matches": []}
+        )
         out = _format_description_similarity(sim)
         assert "0%" in out or "0.0" in out
         assert "15" in out
@@ -131,7 +139,9 @@ class TestFormatDescriptionSimilarity:
         """Given: description_similarity with appeal_rate=0.25.
         When: Formatting.
         Then: Output contains 25%."""
-        sim = {"appeal_rate": 0.25, "n_similar": 20, "top_matches": []}
+        sim = DescriptionSimilarity.model_validate(
+            {"appeal_rate": 0.25, "n_similar": 20, "top_matches": []}
+        )
         out = _format_description_similarity(sim)
         assert "25%" in out
 
@@ -140,12 +150,14 @@ class TestFormatDescriptionSimilarity:
         When: Formatting.
         Then: Approval rate is NOT shown — it has survivorship bias (only labelled
         completions, ~97% across all zones). Appeal rate is the honest signal."""
-        sim = {
-            "appeal_rate": 0.0,
-            "approval_rate": 0.80,
-            "n_similar": 20,
-            "top_matches": [],
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.0,
+                "approval_rate": 0.80,
+                "n_similar": 20,
+                "top_matches": [],
+            }
+        )
         out = _format_description_similarity(sim)
         assert "80%" not in out
         assert "approval" not in out.lower() or "appeal" in out.lower()
@@ -154,19 +166,21 @@ class TestFormatDescriptionSimilarity:
         """Given: Top match has similarity >= 0.95 with known zoning_class.
         When: Formatting.
         Then: Output surfaces zone of closest comparable for zone-mismatch detection."""
-        sim = {
-            "appeal_rate": 0.0,
-            "n_similar": 5,
-            "top_matches": [
-                {
-                    "similarity": 1.0,
-                    "dev_approved": 1,
-                    "dev_appealed": 0,
-                    "application_type": "OZ",
-                    "zoning_class": "R",
-                }
-            ],
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.0,
+                "n_similar": 5,
+                "top_matches": [
+                    {
+                        "similarity": 1.0,
+                        "dev_approved": 1,
+                        "dev_appealed": 0,
+                        "application_type": "OZ",
+                        "zoning_class": "R",
+                    }
+                ],
+            }
+        )
         out = _format_description_similarity(sim)
         assert "R" in out or "zone" in out.lower()
 
@@ -174,19 +188,21 @@ class TestFormatDescriptionSimilarity:
         """Given: Best match has dev_approved=1, dev_appealed=0, similarity=0.95.
         When: Formatting.
         Then: Outcome 'Council-approved' and 'not appealed' appear in output."""
-        sim = {
-            "appeal_rate": 0.2,
-            "n_similar": 10,
-            "top_matches": [
-                {
-                    "similarity": 0.95,
-                    "dev_approved": 1,
-                    "dev_appealed": 0,
-                    "application_type": "OZ",
-                    "zoning_class": "CR",
-                }
-            ],
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.2,
+                "n_similar": 10,
+                "top_matches": [
+                    {
+                        "similarity": 0.95,
+                        "dev_approved": 1,
+                        "dev_appealed": 0,
+                        "application_type": "OZ",
+                        "zoning_class": "CR",
+                    }
+                ],
+            }
+        )
         out = _format_description_similarity(sim)
         assert "council-approved" in out.lower() or "approved" in out.lower()
         assert "not appealed" in out.lower()
@@ -195,18 +211,20 @@ class TestFormatDescriptionSimilarity:
         """Given: Best match has dev_approved=None (unlabelled).
         When: Formatting.
         Then: No outcome note in output for the best comparable."""
-        sim = {
-            "appeal_rate": 0.0,
-            "n_similar": 5,
-            "top_matches": [
-                {
-                    "similarity": 0.95,
-                    "dev_approved": None,
-                    "application_type": "OZ",
-                    "zoning_class": "CR",
-                }
-            ],
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.0,
+                "n_similar": 5,
+                "top_matches": [
+                    {
+                        "similarity": 0.95,
+                        "dev_approved": None,
+                        "application_type": "OZ",
+                        "zoning_class": "CR",
+                    }
+                ],
+            }
+        )
         out = _format_description_similarity(sim)
         assert "council-approved" not in out.lower()
         assert "outcome" not in out.lower()
@@ -215,34 +233,40 @@ class TestFormatDescriptionSimilarity:
         """Given: description_similarity with n_similar=0 (no comparables found).
         When: Formatting.
         Then: Returns empty string (no useful data to show)."""
-        sim = {"appeal_rate": None, "n_similar": 0, "top_matches": []}
+        sim = DescriptionSimilarity.model_validate(
+            {"appeal_rate": None, "n_similar": 0, "top_matches": []}
+        )
         assert _format_description_similarity(sim) == ""
 
     def test_appeal_rate_none_does_not_crash(self) -> None:
         """Given: description_similarity with appeal_rate=None.
         When: Formatting.
         Then: Does not crash; returns a non-empty string with n_similar."""
-        sim = {"appeal_rate": None, "n_similar": 5, "top_matches": []}
+        sim = DescriptionSimilarity.model_validate(
+            {"appeal_rate": None, "n_similar": 5, "top_matches": []}
+        )
         out = _format_description_similarity(sim)
         assert isinstance(out, str)
 
 
 class TestNarrateEvaluationDescriptionSimilarity:
-    def _minimal_site(self) -> dict:
-        return {
-            "zoning_class": "CR",
-            "permitted_use_category": "Commercial Residential (mixed)",
-            "zoning_max_storeys": None,
-            "zoning_max_height_m": None,
-            "zoning_max_units": None,
-            "zoning_max_density": None,
-            "in_heritage_register": 0,
-            "in_heritage_district": 0,
-            "in_mtsa": 0,
-            "in_secondary_plan": 0,
-            "secondary_plan_name": None,
-            "zoning_holding": 0,
-        }
+    def _minimal_site(self) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "zoning_class": "CR",
+                "permitted_use_category": "Commercial Residential (mixed)",
+                "zoning_max_storeys": None,
+                "zoning_max_height_m": None,
+                "zoning_max_units": None,
+                "zoning_max_density": None,
+                "in_heritage_register": 0,
+                "in_heritage_district": 0,
+                "in_mtsa": 0,
+                "in_secondary_plan": 0,
+                "secondary_plan_name": None,
+                "zoning_holding": 0,
+            }
+        )
 
     def test_description_similarity_none_does_not_affect_output(self) -> None:
         """Given: description_similarity=None, no violations, compatible zone,
@@ -268,11 +292,13 @@ class TestNarrateEvaluationDescriptionSimilarity:
         Then: The LLM user message includes appeal rate context."""
         agent, captured = capturing_eval_agent(summary="Summary.", confidence=72)
         extracted = ProjectFeatures(17, 258, "mixed_use", False)
-        sim = {
-            "appeal_rate": 0.0,
-            "n_similar": 20,
-            "top_matches": [{"similarity": 1.0, "dev_appealed": 0}],
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.0,
+                "n_similar": 20,
+                "top_matches": [{"similarity": 1.0, "dev_appealed": 0}],
+            }
+        )
         narrate_evaluation(
             self._minimal_site(),
             extracted,
@@ -303,14 +329,16 @@ class TestFormatDescriptionSimilarityZoneMatched:
         """Given: Overall approval=1.0 but zone_matched_n_similar=0.
         When: Formatting description similarity.
         Then: Output includes a specific zone-mismatch warning phrase."""
-        sim = {
-            "appeal_rate": 0.0,
-            "approval_rate": 1.0,
-            "n_similar": 5,
-            "top_matches": [],
-            "zone_matched_n_similar": 0,
-            "zone_matched_approval_rate": None,
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.0,
+                "approval_rate": 1.0,
+                "n_similar": 5,
+                "top_matches": [],
+                "zone_matched_n_similar": 0,
+                "zone_matched_approval_rate": None,
+            }
+        )
         out = _format_description_similarity(sim)
         # Must explicitly warn about zone mismatch — not just incidentally mention "no"
         assert (
@@ -324,13 +352,15 @@ class TestFormatDescriptionSimilarityZoneMatched:
         When: Formatting.
         Then: Count of zone-matched apps is surfaced; approval rate is NOT shown
         (survivorship bias: only completed applications are labelled)."""
-        sim = {
-            "appeal_rate": 0.0,
-            "n_similar": 5,
-            "top_matches": [],
-            "zone_matched_n_similar": 3,
-            "zone_matched_approval_rate": 0.0,
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.0,
+                "n_similar": 5,
+                "top_matches": [],
+                "zone_matched_n_similar": 3,
+                "zone_matched_approval_rate": 0.0,
+            }
+        )
         out = _format_description_similarity(sim)
         assert "3" in out
         assert "0%" not in out or "appeal" in out.lower()
@@ -338,14 +368,16 @@ class TestFormatDescriptionSimilarityZoneMatched:
     def test_zone_matched_line_names_application_type_when_present(self) -> None:
         """Given a zone-matched rate restricted to a process type, When formatting,
         Then the line names that type so the rate isn't read as all-process."""
-        sim = {
-            "appeal_rate": 0.0,
-            "n_similar": 5,
-            "top_matches": [],
-            "zone_matched_n_similar": 4,
-            "zone_matched_appeal_rate": 0.25,
-            "zone_matched_application_type": "OZ",
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.0,
+                "n_similar": 5,
+                "top_matches": [],
+                "zone_matched_n_similar": 4,
+                "zone_matched_appeal_rate": 0.25,
+                "zone_matched_application_type": "OZ",
+            }
+        )
         out = _format_description_similarity(sim)
         assert "same zone and process type" in out
         assert "OZ application" in out
@@ -354,15 +386,17 @@ class TestFormatDescriptionSimilarityZoneMatched:
         """Given a zone-matched rate also restricted to a built-form scale, When
         formatting, Then the line names that scale (mapped to a plain term) so the
         rate isn't read as all-scale."""
-        sim = {
-            "appeal_rate": 0.0,
-            "n_similar": 5,
-            "top_matches": [],
-            "zone_matched_n_similar": 4,
-            "zone_matched_appeal_rate": 0.25,
-            "zone_matched_application_type": "OZ",
-            "zone_matched_magnitude": "xlarge",
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.0,
+                "n_similar": 5,
+                "top_matches": [],
+                "zone_matched_n_similar": 4,
+                "zone_matched_appeal_rate": 0.25,
+                "zone_matched_application_type": "OZ",
+                "zone_matched_magnitude": "xlarge",
+            }
+        )
         out = _format_description_similarity(sim)
         assert "built-form scale" in out
         assert "tower" in out  # xlarge -> tower
@@ -372,11 +406,13 @@ class TestFormatDescriptionSimilarityZoneMatched:
         """Given: zone_matched keys absent (callers without zone context).
         When: Formatting.
         Then: No crash and normal output unchanged."""
-        sim = {
-            "appeal_rate": 0.0,
-            "n_similar": 5,
-            "top_matches": [],
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.0,
+                "n_similar": 5,
+                "top_matches": [],
+            }
+        )
         out = _format_description_similarity(sim)
         assert isinstance(out, str)
         assert len(out) > 0
@@ -386,14 +422,16 @@ class TestFormatDescriptionSimilarityZoneMatched:
         """Given: zone_matched_n_similar=5, zone_matched_appeal_rate=0.1.
         When: Formatting description similarity.
         Then: Zone-matched appeal rate is shown as a percentage."""
-        sim = {
-            "appeal_rate": 0.25,
-            "n_similar": 20,
-            "top_matches": [],
-            "zone_matched_n_similar": 5,
-            "zone_matched_approval_rate": None,
-            "zone_matched_appeal_rate": 0.1,
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.25,
+                "n_similar": 20,
+                "top_matches": [],
+                "zone_matched_n_similar": 5,
+                "zone_matched_approval_rate": None,
+                "zone_matched_appeal_rate": 0.1,
+            }
+        )
         out = _format_description_similarity(sim)
         assert "10%" in out
         assert "appeal rate" in out.lower()
@@ -403,13 +441,15 @@ class TestFormatDescriptionSimilarityZoneMatched:
         """Given: zone_matched_n_similar=5, zone_matched_appeal_rate absent.
         When: Formatting.
         Then: Count is shown but no appeal rate percentage for zone-matched section."""
-        sim = {
-            "appeal_rate": 0.0,
-            "n_similar": 5,
-            "top_matches": [],
-            "zone_matched_n_similar": 5,
-            "zone_matched_approval_rate": None,
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.0,
+                "n_similar": 5,
+                "top_matches": [],
+                "zone_matched_n_similar": 5,
+                "zone_matched_approval_rate": None,
+            }
+        )
         out = _format_description_similarity(sim)
         assert "5" in out
         assert "zone-matched appeal rate" not in out.lower()
@@ -421,15 +461,17 @@ class TestFormatDescriptionSimilarityZoneBaseRate:
         When: Formatting description similarity.
         Then: Approval rate is NOT shown — survivorship bias makes it meaningless
         (~97% across all zones because only labelled completions are counted)."""
-        sim = {
-            "appeal_rate": 0.0,
-            "n_similar": 20,
-            "top_matches": [],
-            "zone_matched_n_similar": 20,
-            "zone_matched_approval_rate": None,
-            "zone_base_n": 280,
-            "zone_base_approval_rate": 0.968,
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.0,
+                "n_similar": 20,
+                "top_matches": [],
+                "zone_matched_n_similar": 20,
+                "zone_matched_approval_rate": None,
+                "zone_base_n": 280,
+                "zone_base_approval_rate": 0.968,
+            }
+        )
         out = _format_description_similarity(sim)
         assert "96%" not in out
         assert "97%" not in out
@@ -439,15 +481,17 @@ class TestFormatDescriptionSimilarityZoneBaseRate:
         """Given: zone_base_n=280 apps in zone.
         When: Formatting description similarity.
         Then: No crash regardless of whether count is shown or not."""
-        sim = {
-            "appeal_rate": 0.05,
-            "n_similar": 20,
-            "top_matches": [],
-            "zone_matched_n_similar": 20,
-            "zone_matched_approval_rate": None,
-            "zone_base_n": 280,
-            "zone_base_approval_rate": 0.968,
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "appeal_rate": 0.05,
+                "n_similar": 20,
+                "top_matches": [],
+                "zone_matched_n_similar": 20,
+                "zone_matched_approval_rate": None,
+                "zone_base_n": 280,
+                "zone_base_approval_rate": 0.968,
+            }
+        )
         out = _format_description_similarity(sim)
         assert isinstance(out, str)
         assert len(out) > 0
@@ -456,35 +500,39 @@ class TestFormatDescriptionSimilarityZoneBaseRate:
 class TestProgrammaticCap:
     """Programmatic ≤30 cap for extreme violations (≥3× zone limit)."""
 
-    def _site_with_max_storeys(self, max_storeys: int | None) -> dict:
-        return {
-            "zoning_class": "RM",
-            "permitted_use_category": "Residential Multiple",
-            "zoning_max_storeys": max_storeys,
-            "zoning_max_units": None,
-            "zoning_max_density": None,
-            "in_heritage_register": 0,
-            "in_heritage_district": 0,
-            "in_mtsa": 0,
-            "in_secondary_plan": 0,
-            "secondary_plan_name": None,
-            "zoning_holding": 0,
-        }
+    def _site_with_max_storeys(self, max_storeys: int | None) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "zoning_class": "RM",
+                "permitted_use_category": "Residential Multiple",
+                "zoning_max_storeys": max_storeys,
+                "zoning_max_units": None,
+                "zoning_max_density": None,
+                "in_heritage_register": 0,
+                "in_heritage_district": 0,
+                "in_mtsa": 0,
+                "in_secondary_plan": 0,
+                "secondary_plan_name": None,
+                "zoning_holding": 0,
+            }
+        )
 
-    def _site_with_max_units(self, max_units: int | None) -> dict:
-        return {
-            "zoning_class": "RM",
-            "permitted_use_category": "Residential Multiple",
-            "zoning_max_storeys": None,
-            "zoning_max_units": max_units,
-            "zoning_max_density": None,
-            "in_heritage_register": 0,
-            "in_heritage_district": 0,
-            "in_mtsa": 0,
-            "in_secondary_plan": 0,
-            "secondary_plan_name": None,
-            "zoning_holding": 0,
-        }
+    def _site_with_max_units(self, max_units: int | None) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "zoning_class": "RM",
+                "permitted_use_category": "Residential Multiple",
+                "zoning_max_storeys": None,
+                "zoning_max_units": max_units,
+                "zoning_max_density": None,
+                "in_heritage_register": 0,
+                "in_heritage_district": 0,
+                "in_mtsa": 0,
+                "in_secondary_plan": 0,
+                "secondary_plan_name": None,
+                "zoning_holding": 0,
+            }
+        )
 
     def test_storey_ratio_3x_caps_score_at_30(self) -> None:
         """Given: 12 proposed storeys, max 3 storeys (4× limit).
@@ -613,21 +661,23 @@ class TestFormatCommunityBenefits:
 
 
 class TestNarrateEvaluationCommunityBenefits:
-    def _minimal_site(self) -> dict:
-        return {
-            "zoning_class": "CR",
-            "permitted_use_category": "Commercial Residential (mixed)",
-            "zoning_max_storeys": None,
-            "zoning_max_height_m": None,
-            "zoning_max_units": None,
-            "zoning_max_density": None,
-            "in_heritage_register": 0,
-            "in_heritage_district": 0,
-            "in_mtsa": 0,
-            "in_secondary_plan": 0,
-            "secondary_plan_name": None,
-            "zoning_holding": 0,
-        }
+    def _minimal_site(self) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "zoning_class": "CR",
+                "permitted_use_category": "Commercial Residential (mixed)",
+                "zoning_max_storeys": None,
+                "zoning_max_height_m": None,
+                "zoning_max_units": None,
+                "zoning_max_density": None,
+                "in_heritage_register": 0,
+                "in_heritage_district": 0,
+                "in_mtsa": 0,
+                "in_secondary_plan": 0,
+                "secondary_plan_name": None,
+                "zoning_holding": 0,
+            }
+        )
 
     def test_community_benefits_injected_into_prompt(self) -> None:
         """Given: community_benefits dict with n_comps=5 and median 250_000.
@@ -687,14 +737,16 @@ class TestApplyConfidenceOverrides:
         zoning_max_units: int | None = None,
         zoning_max_height_m: float | None = None,
         zoning_class: str | None = None,
-    ) -> dict:
-        return {
-            "permitted_use_category": permitted_use_category,
-            "zoning_max_storeys": zoning_max_storeys,
-            "zoning_max_units": zoning_max_units,
-            "zoning_max_height_m": zoning_max_height_m,
-            "zoning_class": zoning_class,
-        }
+    ) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "permitted_use_category": permitted_use_category,
+                "zoning_max_storeys": zoning_max_storeys,
+                "zoning_max_units": zoning_max_units,
+                "zoning_max_height_m": zoning_max_height_m,
+                "zoning_class": zoning_class,
+            }
+        )
 
     def _extracted(
         self,
@@ -836,11 +888,13 @@ class TestApplyConfidenceOverrides:
         """Given: height 5x limit + same-zone approved comparable at 95% similarity.
         When: LLM returns score of 28 (was capped by Step 1 in LLM).
         Then: programmatic cap not applied; floor lifts score to >= 55."""
-        sim = {
-            "top_matches": [
-                {"similarity": 0.95, "zoning_class": "R", "dev_approved": 1},
-            ]
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "top_matches": [
+                    {"similarity": 0.95, "zoning_class": "R", "dev_approved": 1},
+                ]
+            }
+        )
         score = _apply_confidence_overrides(
             28,
             [self._violation()],
@@ -867,11 +921,13 @@ class TestApplyConfidenceOverrides:
         """Given: height 5x limit + approved comparable in CR zone (site zone is R).
         When: score is 72.
         Then: cap fires — different zone does not establish same-zone precedent."""
-        sim = {
-            "top_matches": [
-                {"similarity": 0.95, "zoning_class": "CR", "dev_approved": 1},
-            ]
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "top_matches": [
+                    {"similarity": 0.95, "zoning_class": "CR", "dev_approved": 1},
+                ]
+            }
+        )
         score = _apply_confidence_overrides(
             72,
             [],
@@ -885,11 +941,13 @@ class TestApplyConfidenceOverrides:
         """Given: height 5x limit + approved same-zone comparable at 85% similarity.
         When: score is 72.
         Then: cap fires — threshold is 90%."""
-        sim = {
-            "top_matches": [
-                {"similarity": 0.85, "zoning_class": "R", "dev_approved": 1},
-            ]
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "top_matches": [
+                    {"similarity": 0.85, "zoning_class": "R", "dev_approved": 1},
+                ]
+            }
+        )
         score = _apply_confidence_overrides(
             72,
             [],
@@ -903,11 +961,13 @@ class TestApplyConfidenceOverrides:
         """Given: height 5x limit + similar comparable that was NOT approved.
         When: score is 72.
         Then: cap fires — only Council-approved comparables exempt the cap."""
-        sim = {
-            "top_matches": [
-                {"similarity": 0.95, "zoning_class": "R", "dev_approved": 0},
-            ]
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "top_matches": [
+                    {"similarity": 0.95, "zoning_class": "R", "dev_approved": 0},
+                ]
+            }
+        )
         score = _apply_confidence_overrides(
             72,
             [],
@@ -996,7 +1056,7 @@ class TestApplyConfidenceOverrides:
         When: score is 70.
         Then: FSI joins the cap trio — score capped to 30."""
         site = self._site(zoning_class="RM")
-        site["zoning_max_density"] = 0.85
+        site.zoning_max_density = 0.85
         extracted = ProjectFeatures(None, None, "residential", False, proposed_fsi=5.4)
         score = _apply_confidence_overrides(70, [], site, extracted)
         assert score == 30
@@ -1039,19 +1099,21 @@ class TestApplyConfidenceOverrides:
         but comparable is ~1.1km away (query at Boon Ave, comparable at St Clair).
         When: score is 72.
         Then: cap fires — comparable is too far to establish same-site precedent."""
-        sim = {
-            "query_lat": 43.66384,  # Boon Ave
-            "query_lon": -79.45013,
-            "top_matches": [
-                {
-                    "similarity": 0.95,
-                    "zoning_class": "R",
-                    "dev_approved": 1,
-                    "lat": 43.67290,  # St Clair, ~1.08km away
-                    "lon": -79.45543,
-                },
-            ],
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "query_lat": 43.66384,  # Boon Ave
+                "query_lon": -79.45013,
+                "top_matches": [
+                    {
+                        "similarity": 0.95,
+                        "zoning_class": "R",
+                        "dev_approved": 1,
+                        "lat": 43.67290,  # St Clair, ~1.08km away
+                        "lon": -79.45543,
+                    },
+                ],
+            }
+        )
         score = _apply_confidence_overrides(
             72,
             [],
@@ -1066,19 +1128,21 @@ class TestApplyConfidenceOverrides:
         comparable is ~55m from query (same site).
         When: LLM returned score 28 (had applied its own cap).
         Then: programmatic cap skipped; floor lifts score to >= 55."""
-        sim = {
-            "query_lat": 43.67290,  # St Clair
-            "query_lon": -79.45543,
-            "top_matches": [
-                {
-                    "similarity": 0.95,
-                    "zoning_class": "R",
-                    "dev_approved": 1,
-                    "lat": 43.67295,  # ~55m away — same site
-                    "lon": -79.45548,
-                },
-            ],
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "query_lat": 43.67290,  # St Clair
+                "query_lon": -79.45543,
+                "top_matches": [
+                    {
+                        "similarity": 0.95,
+                        "zoning_class": "R",
+                        "dev_approved": 1,
+                        "lat": 43.67295,  # ~55m away — same site
+                        "lon": -79.45548,
+                    },
+                ],
+            }
+        )
         score = _apply_confidence_overrides(
             28,
             [self._violation()],
@@ -1093,18 +1157,20 @@ class TestApplyConfidenceOverrides:
         on the comparable row (older application without geocoding).
         When: query lat/lon is provided.
         Then: cap fires — cannot confirm same-site proximity without coords."""
-        sim = {
-            "query_lat": 43.67290,
-            "query_lon": -79.45543,
-            "top_matches": [
-                {
-                    "similarity": 0.95,
-                    "zoning_class": "R",
-                    "dev_approved": 1,
-                    # no lat/lon keys
-                },
-            ],
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "query_lat": 43.67290,
+                "query_lon": -79.45543,
+                "top_matches": [
+                    {
+                        "similarity": 0.95,
+                        "zoning_class": "R",
+                        "dev_approved": 1,
+                        # no lat/lon keys
+                    },
+                ],
+            }
+        )
         score = _apply_confidence_overrides(
             72,
             [],
@@ -1118,17 +1184,19 @@ class TestApplyConfidenceOverrides:
         """Given: approved same-zone comparable at 95% similarity.
         When: sim dict has no query_lat/query_lon (caller didn't pass coords).
         Then: cap not applied — distance unknown, cannot filter out the exemption."""
-        sim = {
-            "top_matches": [
-                {
-                    "similarity": 0.95,
-                    "zoning_class": "R",
-                    "dev_approved": 1,
-                    "lat": 43.67290,
-                    "lon": -79.45543,
-                },
-            ],
-        }
+        sim = DescriptionSimilarity.model_validate(
+            {
+                "top_matches": [
+                    {
+                        "similarity": 0.95,
+                        "zoning_class": "R",
+                        "dev_approved": 1,
+                        "lat": 43.67290,
+                        "lon": -79.45543,
+                    },
+                ],
+            }
+        )
         score = _apply_confidence_overrides(
             28,
             [self._violation()],
@@ -1140,21 +1208,23 @@ class TestApplyConfidenceOverrides:
 
 
 class TestNarrateEvaluationDescription:
-    def _minimal_site(self) -> dict:
-        return {
-            "zoning_class": "RM",
-            "permitted_use_category": "Residential",
-            "zoning_max_storeys": None,
-            "zoning_max_height_m": None,
-            "zoning_max_units": None,
-            "zoning_max_density": None,
-            "in_heritage_register": 0,
-            "in_heritage_district": 0,
-            "in_mtsa": 0,
-            "in_secondary_plan": 0,
-            "secondary_plan_name": None,
-            "zoning_holding": 0,
-        }
+    def _minimal_site(self) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "zoning_class": "RM",
+                "permitted_use_category": "Residential",
+                "zoning_max_storeys": None,
+                "zoning_max_height_m": None,
+                "zoning_max_units": None,
+                "zoning_max_density": None,
+                "in_heritage_register": 0,
+                "in_heritage_district": 0,
+                "in_mtsa": 0,
+                "in_secondary_plan": 0,
+                "secondary_plan_name": None,
+                "zoning_holding": 0,
+            }
+        )
 
     def test_raw_description_appears_in_narrator_prompt(self) -> None:
         """Given: narrate_evaluation called with a rich description.
@@ -1214,22 +1284,24 @@ class TestNarrateEvaluationDescription:
 
 
 class TestFormatSiteUseCompatibility:
-    def _site(self, permitted_use_category: str) -> dict:
-        return {
-            "zoning_class": "R",
-            "permitted_use_category": permitted_use_category,
-            "zoning_max_storeys": None,
-            "zoning_max_height_m": None,
-            "zoning_max_units": None,
-            "zoning_max_density": None,
-            "in_heritage_register": 0,
-            "in_heritage_district": 0,
-            "in_mtsa": 0,
-            "in_secondary_plan": 0,
-            "secondary_plan_name": None,
-            "zoning_holding": 0,
-            "zoning_exception": 0,
-        }
+    def _site(self, permitted_use_category: str) -> SiteContext:
+        return SiteContext.model_validate(
+            {
+                "zoning_class": "R",
+                "permitted_use_category": permitted_use_category,
+                "zoning_max_storeys": None,
+                "zoning_max_height_m": None,
+                "zoning_max_units": None,
+                "zoning_max_density": None,
+                "in_heritage_register": 0,
+                "in_heritage_district": 0,
+                "in_mtsa": 0,
+                "in_secondary_plan": 0,
+                "secondary_plan_name": None,
+                "zoning_holding": 0,
+                "zoning_exception": 0,
+            }
+        )
 
     def test_compatible_use_shows_permitted(self) -> None:
         """Given: recreational in Residential zone (permitted per _ZONE_ALLOWED).

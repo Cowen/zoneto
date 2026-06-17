@@ -81,7 +81,7 @@ def _narrate_case(
         case["description"],
         data_dir=data_dir,
         model_dir=model_dir,
-        zoning_class=site.get("zoning_class"),
+        zoning_class=site.zoning_class,
         lat=case["lat"],
         lon=case["lon"],
         radius_m=2000.0,
@@ -113,29 +113,28 @@ def _mechanism_trace(result: dict) -> str:
     structural = [v for v in violations if v.severity != Severity.INFORMATIONAL]
     parts = []
     if (
-        use_matches_zone(extracted.proposed_use, site.get("permitted_use_category"))
-        == 1
+        use_matches_zone(extracted.proposed_use, site.permitted_use_category) == 1
         and not structural
     ):
         if _limits_verified(extracted, site):
             parts.append("floor-70 (as-of-right)")
         else:
             parts.append("floor-55 (compatible use, limits unverified)")
-    if _has_approved_precedent(result["sim"], site.get("zoning_class")):
+    if _has_approved_precedent(result["sim"], site.zoning_class):
         parts.append("precedent floor-55")
         precedent = True
     else:
         precedent = False
     inferred = extracted.proposed_height_m is None
     for name, prop, limit in (
-        ("storeys", extracted.proposed_storeys, site.get("zoning_max_storeys")),
-        ("units", extracted.proposed_units, site.get("zoning_max_units")),
+        ("storeys", extracted.proposed_storeys, site.zoning_max_storeys),
+        ("units", extracted.proposed_units, site.zoning_max_units),
         (
             "height_m (inferred)" if inferred else "height_m",
             effective_height_m(extracted),
-            site.get("zoning_max_height_m"),
+            site.zoning_max_height_m,
         ),
-        ("fsi", extracted.proposed_fsi, site.get("zoning_max_density")),
+        ("fsi", extracted.proposed_fsi, site.zoning_max_density),
     ):
         if prop and limit and prop / limit >= 3.0:
             label = f"{name} {prop:g}/{limit:g}"

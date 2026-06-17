@@ -15,6 +15,7 @@ from pytest_httpx import HTTPXMock
 from starlette.testclient import TestClient
 
 from zoneto.api.app import create_app
+from zoneto.api.site_context import SiteContext
 
 
 @pytest.fixture
@@ -370,7 +371,7 @@ class TestRetrieveChunks:
         index = self._index(
             zone_results=[shared], desc_results=[shared, _make_chunk(2)]
         )
-        site = {"zoning_class": "RM", "permitted_use_category": "Residential"}
+        site = SiteContext(zoning_class="RM", permitted_use_category="Residential")
         result = _retrieve_chunks(index, site, "a rental building", None, k=6)
         ids = [c.chunk_id for c in result]
         assert ids.count(1) == 1
@@ -385,7 +386,7 @@ class TestRetrieveChunks:
             zone_results=[_make_chunk(10)],
             desc_results=[_make_chunk(20)],
         )
-        site = {"zoning_class": "RM", "permitted_use_category": "Residential"}
+        site = SiteContext(zoning_class="RM", permitted_use_category="Residential")
         result = _retrieve_chunks(index, site, "a rental building", None, k=6)
         assert result[0].chunk_id == 10
         assert result[1].chunk_id == 20
@@ -400,7 +401,7 @@ class TestRetrieveChunks:
             zone_results=[_make_chunk(i) for i in range(5)],
             desc_results=[_make_chunk(i + 10) for i in range(5)],
         )
-        site = {"zoning_class": "RM", "permitted_use_category": "Residential"}
+        site = SiteContext(zoning_class="RM", permitted_use_category="Residential")
         result = _retrieve_chunks(index, site, "rental", None, k=4)
         assert len(result) <= 4
 
@@ -411,7 +412,7 @@ class TestRetrieveChunks:
         from zoneto.api.routes import _retrieve_chunks
 
         index = self._index(zone_results=[], desc_results=[])
-        site = {"zoning_class": "RM", "permitted_use_category": "Residential"}
+        site = SiteContext(zoning_class="RM", permitted_use_category="Residential")
         _retrieve_chunks(index, site, "rental", None, k=6)
         first_query = index.search.call_args_list[0][0][0]
         assert "RM" in first_query

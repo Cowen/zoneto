@@ -31,6 +31,7 @@ import polars as pl
 from zoneto.analytics.compliance import check_compliance
 from zoneto.analytics.extract import extract_project_features
 from zoneto.analytics.planning_act import additional_processes, path_for_violations
+from zoneto.api.site_context import SiteContext
 
 # Enriched columns that map onto the site dict check_compliance reads. The
 # enriched batch set lacks zoning_max_height_m, permitted_use_category, holding
@@ -64,7 +65,9 @@ _LIMIT_COLS = ("zoning_max_storeys", "zoning_max_units", "zoning_max_density")
 
 def _derive(row: dict) -> tuple[str, list[str], bool]:
     """Return (primary zoning path, additional process keys, op_nonconforming)."""
-    site = {dst: row.get(src) for src, dst in _SITE_COLS.items()}
+    site = SiteContext.model_validate(
+        {dst: row.get(src) for src, dst in _SITE_COLS.items()}
+    )
     extracted = extract_project_features(row.get("description"))
     violations = check_compliance(extracted, site)
     path = path_for_violations(violations)

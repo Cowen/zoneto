@@ -133,14 +133,12 @@ def run_eval(
             lat=None,
             lon=None,
         )
-        if not sim or not sim.get("top_matches"):
+        if not sim or not sim.top_matches:
             continue
-        matches = [m for m in sim["top_matches"] if str(m.get("folderrsn")) != q_rsn][
-            :k
-        ]
+        matches = [m for m in sim.top_matches if str(m.folderrsn) != q_rsn][:k]
         if not matches:
             continue
-        retrieved = [attr_by_rsn.get(str(m.get("folderrsn")), {}) for m in matches]
+        retrieved = [attr_by_rsn.get(str(m.folderrsn), {}) for m in matches]
         real_scores.append(concordance_at_k(q_attrs, retrieved, _AXES))
 
         # Random baseline: k comps drawn uniformly (excluding self), same lookup.

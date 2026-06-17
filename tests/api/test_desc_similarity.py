@@ -96,8 +96,8 @@ class TestZoneAndTypeMatched:
             application_type="OZ",
         )
         assert result is not None
-        assert result["zone_matched_appeal_rate"] == 1.0  # OZ-only: both appealed
-        assert result["zone_matched_application_type"] == "OZ"
+        assert result.zone_matched_appeal_rate == 1.0  # OZ-only: both appealed
+        assert result.zone_matched_application_type == "OZ"
 
     def test_bert_zone_matched_rate_restricted_to_application_type(
         self, tmp_path: Path
@@ -118,8 +118,8 @@ class TestZoneAndTypeMatched:
             application_type="OZ",
         )
         assert result is not None
-        assert result["zone_matched_appeal_rate"] == 1.0
-        assert result["zone_matched_application_type"] == "OZ"
+        assert result.zone_matched_appeal_rate == 1.0
+        assert result.zone_matched_application_type == "OZ"
 
 
 def _write_fixture_zone_magnitude(
@@ -193,8 +193,8 @@ class TestZoneMagnitudeMatched:
             magnitude_band="xlarge",
         )
         assert result is not None
-        assert result["zone_matched_appeal_rate"] == 1.0  # towers only
-        assert result["zone_matched_magnitude"] == "xlarge"
+        assert result.zone_matched_appeal_rate == 1.0  # towers only
+        assert result.zone_matched_magnitude == "xlarge"
 
     def test_tfidf_magnitude_filter_falls_back_when_too_few(
         self, tmp_path: Path
@@ -218,8 +218,8 @@ class TestZoneMagnitudeMatched:
             magnitude_band="xlarge",
         )
         assert result is not None
-        assert "zone_matched_magnitude" not in result
-        assert result["zone_matched_appeal_rate"] == 2 / 5  # full zone set
+        assert result.zone_matched_magnitude is None
+        assert result.zone_matched_appeal_rate == 2 / 5  # full zone set
 
     def test_bert_zone_matched_rate_restricted_to_magnitude(
         self, tmp_path: Path
@@ -239,8 +239,8 @@ class TestZoneMagnitudeMatched:
             magnitude_band="xlarge",
         )
         assert result is not None
-        assert result["zone_matched_appeal_rate"] == 1.0
-        assert result["zone_matched_magnitude"] == "xlarge"
+        assert result.zone_matched_appeal_rate == 1.0
+        assert result.zone_matched_magnitude == "xlarge"
 
 
 class _FakePipeline:
@@ -312,11 +312,11 @@ class TestScoreDescriptionSimilarity:
         )
 
         assert result is not None
-        assert "top_matches" in result
-        assert "appeal_rate" in result
-        assert "n_similar" in result
-        assert isinstance(result["n_similar"], int)
-        assert result["n_similar"] >= 0
+        assert result.top_matches is not None
+        assert result.appeal_rate is None or isinstance(result.appeal_rate, float)
+        assert result.n_similar is not None
+        assert isinstance(result.n_similar, int)
+        assert result.n_similar >= 0
 
     def test_appeal_rate_is_fraction(self, tmp_path: Path) -> None:
         """Given: Applications with known appeal labels.
@@ -333,8 +333,8 @@ class TestScoreDescriptionSimilarity:
         )
 
         assert result is not None
-        if result["appeal_rate"] is not None:
-            assert 0.0 <= result["appeal_rate"] <= 1.0
+        if result.appeal_rate is not None:
+            assert 0.0 <= result.appeal_rate <= 1.0
 
 
 def _write_fixture_with_zones(
@@ -398,9 +398,9 @@ class TestApprovalRate:
             "test", data_dir=data_dir, model_dir=model_dir
         )
         assert result is not None
-        assert "approval_rate" in result
-        assert result["approval_rate"] is not None
-        assert 0.0 <= result["approval_rate"] <= 1.0
+        assert result.approval_rate is None or isinstance(result.approval_rate, float)
+        assert result.approval_rate is not None
+        assert 0.0 <= result.approval_rate <= 1.0
 
     def test_top_matches_include_dev_approved(self, tmp_path: Path) -> None:
         """Given: Enriched data includes dev_approved column.
@@ -413,8 +413,8 @@ class TestApprovalRate:
             "test", data_dir=data_dir, model_dir=model_dir
         )
         assert result is not None
-        for match in result["top_matches"]:
-            assert "dev_approved" in match
+        for match in result.top_matches:
+            assert match.dev_approved in (0, 1, None)
 
     def test_approval_rate_none_when_all_labels_missing(self, tmp_path: Path) -> None:
         """Given: All dev_approved labels are None.
@@ -429,7 +429,7 @@ class TestApprovalRate:
             "test", data_dir=data_dir, model_dir=model_dir
         )
         assert result is not None
-        assert result.get("approval_rate") is None
+        assert result.approval_rate is None
 
     def test_approval_rate_absent_when_no_dev_approved_col(
         self, tmp_path: Path
@@ -445,7 +445,7 @@ class TestApprovalRate:
         )
         assert result is not None
         # approval_rate may be absent or None — both are acceptable
-        assert result.get("approval_rate") is None
+        assert result.approval_rate is None
 
 
 def _write_fixture_with_locations(
@@ -519,7 +519,7 @@ class TestDefaultRadius:
             lon=-79.38,
         )
         assert result is not None
-        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        folder_ids = [m.folderrsn for m in result.top_matches]
         assert "0" in folder_ids
         assert "1" not in folder_ids
 
@@ -549,7 +549,7 @@ class TestSelfExclusion:
             min_dist_m=200.0,
         )
         assert result is not None
-        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        folder_ids = [m.folderrsn for m in result.top_matches]
         assert "0" not in folder_ids
         assert "1" in folder_ids
 
@@ -581,8 +581,8 @@ class TestZoneDeranking:
             zoning_class="R",
         )
         assert result is not None
-        assert len(result["top_matches"]) >= 1
-        assert result["top_matches"][0]["folderrsn"] == "0"
+        assert len(result.top_matches) >= 1
+        assert result.top_matches[0].folderrsn == "0"
 
 
 class TestProximityFilter:
@@ -607,7 +607,7 @@ class TestProximityFilter:
             radius_m=1000.0,
         )
         assert result is not None
-        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        folder_ids = [m.folderrsn for m in result.top_matches]
         assert "0" in folder_ids
         assert "1" not in folder_ids
 
@@ -629,7 +629,7 @@ class TestProximityFilter:
             model_dir=model_dir,
         )
         assert result is not None
-        folder_ids = [m["folderrsn"] for m in result["top_matches"]]
+        folder_ids = [m.folderrsn for m in result.top_matches]
         assert "0" in folder_ids
         assert "1" in folder_ids
 
@@ -649,7 +649,7 @@ class TestProximityFilter:
             radius_m=1000.0,
         )
         assert result is not None
-        assert result["n_similar"] >= 0
+        assert result.n_similar >= 0
 
 
 class TestDeduplicateMatches:
@@ -736,7 +736,7 @@ class TestDeduplicationInScorer:
             "test", data_dir=data_dir, model_dir=model_dir
         )
         assert result is not None
-        assert result["n_similar"] == 2
+        assert result.n_similar == 2
 
     def test_top_matches_has_no_duplicate_folderrsn(self, tmp_path: Path) -> None:
         """Given a corpus with duplicate folderrsns, when scoring,
@@ -748,7 +748,7 @@ class TestDeduplicationInScorer:
             "test", data_dir=data_dir, model_dir=model_dir
         )
         assert result is not None
-        rsns = [m["folderrsn"] for m in result["top_matches"] if m.get("folderrsn")]
+        rsns = [m.folderrsn for m in result.top_matches if m.folderrsn]
         assert len(rsns) == len(set(rsns))
 
 
@@ -771,8 +771,8 @@ class TestZoneMatchedSimilarity:
             "test", data_dir=data_dir, model_dir=model_dir, zoning_class="R"
         )
         assert result is not None
-        assert "zone_matched_n_similar" in result
-        assert "zone_matched_approval_rate" in result
+        assert result.zone_matched_n_similar is not None
+        assert result.zone_matched_approval_rate is not None
 
     def test_zone_matched_filters_to_same_zone(self, tmp_path: Path) -> None:
         """Given: Corpus with R and RM applications. Query zone=RM.
@@ -792,7 +792,7 @@ class TestZoneMatchedSimilarity:
         )
         assert result is not None
         # Overall includes R apps; zone-matched should only show RM apps: 0%
-        assert result["zone_matched_approval_rate"] == 0.0
+        assert result.zone_matched_approval_rate == 0.0
 
     def test_zone_matched_none_when_no_same_zone_apps(self, tmp_path: Path) -> None:
         """Given: Corpus has no applications in the query zone.
@@ -810,8 +810,8 @@ class TestZoneMatchedSimilarity:
             "test", data_dir=data_dir, model_dir=model_dir, zoning_class="CR"
         )
         assert result is not None
-        assert result["zone_matched_n_similar"] == 0
-        assert result["zone_matched_approval_rate"] is None
+        assert result.zone_matched_n_similar == 0
+        assert result.zone_matched_approval_rate is None
 
     def test_zone_matched_absent_when_no_zoning_class_param(
         self, tmp_path: Path
@@ -831,8 +831,8 @@ class TestZoneMatchedSimilarity:
             "test", data_dir=data_dir, model_dir=model_dir
         )
         assert result is not None
-        assert "zone_matched_n_similar" not in result
-        assert "zone_matched_approval_rate" not in result
+        assert result.zone_matched_n_similar is None
+        assert result.zone_matched_approval_rate is None
 
     def test_zone_matched_appeal_rate_returned(self, tmp_path: Path) -> None:
         """Given: Corpus with R and RM zones, mixed appeal labels.
@@ -863,6 +863,6 @@ class TestZoneMatchedSimilarity:
             "test", data_dir=data_dir, model_dir=model_dir, zoning_class="RM"
         )
         assert result is not None
-        assert "zone_matched_appeal_rate" in result
+        assert result.zone_matched_appeal_rate is not None
         # RM apps: both appealed=0 → rate = 0.0
-        assert result["zone_matched_appeal_rate"] == 0.0
+        assert result.zone_matched_appeal_rate == 0.0

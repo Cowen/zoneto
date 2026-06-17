@@ -573,7 +573,7 @@ def evaluate(
             description,
             data_dir=data_dir,
             model=bert_model,
-            zoning_class=site.get("zoning_class"),
+            zoning_class=site.zoning_class,
             lat=lat,
             lon=lon,
             min_dist_m=300.0,
@@ -583,7 +583,7 @@ def evaluate(
             description,
             data_dir=data_dir,
             model_dir=model_dir,
-            zoning_class=site.get("zoning_class"),
+            zoning_class=site.zoning_class,
             lat=lat,
             lon=lon,
             min_dist_m=300.0,
@@ -603,7 +603,7 @@ def evaluate(
     result: dict[str, object] = {
         "lat": lat,
         "lon": lon,
-        "site_context": site,
+        "site_context": site.model_dump(),
         "extracted": {
             "proposed_storeys": extracted.proposed_storeys,
             "proposed_units": extracted.proposed_units,
@@ -636,7 +636,7 @@ def evaluate(
         "confidence_score": confidence_score,
         "suggestions": [v.suggested_remedy for v in violations if v.suggested_remedy],
         "data_gaps": data_gaps,
-        "description_similarity": desc_sim,
+        "description_similarity": desc_sim.model_dump() if desc_sim else None,
         "community_benefits_context": cb_context,
         "nearby_active_applications": nearby,
     }

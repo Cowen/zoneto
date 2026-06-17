@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from pydantic import BaseModel, ConfigDict
 
 from zoneto.analytics.retrieval_eval import magnitude_band as _compute_band
 
@@ -17,6 +18,49 @@ if TYPE_CHECKING:
 # this, fall back to the broader zone(+type) set rather than report a rate over
 # a noisy handful.
 _MIN_MAGNITUDE_COMPS = 3
+
+
+class SimilarMatch(BaseModel):
+    """A single comparable application surfaced by description similarity.
+
+    All columns beyond ``similarity`` are optional — the scorers attach whichever
+    are present in the enriched corpus. ``extra="ignore"`` lets the BERT path's
+    dynamic index columns that aren't modelled here pass through harmlessly.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    similarity: float
+    folderrsn: str | None = None
+    application_type: str | None = None
+    dev_appealed: int | None = None
+    dev_approved: int | None = None
+    zoning_class: str | None = None
+    street_address: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    proposed_storeys: int | None = None
+    proposed_units: int | None = None
+
+
+class DescriptionSimilarity(BaseModel):
+    """Aggregate description-similarity result returned by the scorers.
+
+    The ``zone_matched_*`` fields are populated only when the caller supplies a
+    ``zoning_class`` (and, for the magnitude axis, enough same-scale comps).
+    """
+
+    top_matches: list[SimilarMatch]
+    appeal_rate: float | None = None
+    approval_rate: float | None = None
+    n_similar: int = 0
+    query_lat: float | None = None
+    query_lon: float | None = None
+    zone_matched_application_type: str | None = None
+    zone_matched_magnitude: str | None = None
+    zone_matched_n_similar: int | None = None
+    zone_matched_approval_rate: float | None = None
+    zone_matched_appeal_rate: float | None = None
 
 
 def _deduplicate_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -55,7 +99,7 @@ def score_description_similarity(
     lon: float | None = None,
     radius_m: float = 2000.0,
     min_dist_m: float = 0.0,
-) -> dict[str, Any] | None:
+) -> DescriptionSimilarity | None:
     """Score a description against the enriched application corpus.
 
     Uses the trained TF-IDF + SVD pipeline (desc_tfidf.joblib) to vectorize
@@ -310,7 +354,7 @@ def score_description_similarity(
                 result["zone_matched_approval_rate"] = None
                 result["zone_matched_appeal_rate"] = None
 
-        return result
+        return DescriptionSimilarity.model_validate(result)
 
     except Exception:  # noqa: BLE001
         return None
@@ -330,7 +374,7 @@ def score_description_similarity_bert(
     lon: float | None = None,
     radius_m: float = 2000.0,
     min_dist_m: float = 0.0,
-) -> dict[str, Any] | None:
+) -> DescriptionSimilarity | None:
     """Score a description against the BERT-encoded application corpus.
 
     Uses pre-computed BERT embeddings (desc_bert_embeddings.npy) from the
@@ -516,7 +560,7 @@ def score_description_similarity_bert(
                 result["zone_matched_approval_rate"] = None
                 result["zone_matched_appeal_rate"] = None
 
-        return result
+        return DescriptionSimilarity.model_validate(result)
 
     except Exception:  # noqa: BLE001
         return None

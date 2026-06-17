@@ -8,6 +8,41 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+from pydantic import BaseModel
+
+
+class SiteContext(BaseModel):
+    """Structured spatial context for a point (zoning, heritage, MTSA, OP).
+
+    Returned by :func:`lookup_site_context`. Optional values default to ``None``;
+    the boolean-style flag/count fields default to ``0`` (absent / not in area).
+    """
+
+    zoning_class: str | None = None
+    zoning_max_units: int | None = None
+    zoning_max_density: float | None = None
+    zoning_max_storeys: int | None = None
+    zoning_max_height_m: float | None = None
+    permitted_use_category: str | None = None
+    zoning_min_frontage_m: float | None = None
+    zoning_min_lot_area_sqm: float | None = None
+    zoning_max_coverage_pct: float | None = None
+    zoning_min_sqm_per_unit: float | None = None
+    zoning_holding: int = 0
+    zoning_exception: int = 0
+    zoning_exception_no: str | None = None
+    zoning_pct_res: float | None = None
+    zoning_pct_comm: float | None = None
+    zoning_pct_emp: float | None = None
+    in_heritage_register: int = 0
+    in_heritage_district: int = 0
+    secondary_plan_name: str | None = None
+    in_secondary_plan: int = 0
+    in_mtsa: int = 0
+    in_trca_regulated_area: int = 0
+    in_greenbelt: int = 0
+    op_land_use_designation: str | None = None
+
 
 # By-law 569-2013 GEN_ZONE numeric codes → human-readable category.
 # Source: docs/zoning_readme.txt.
@@ -35,7 +70,7 @@ def _positive_or_none(value: Any) -> float | None:
     return v if v > 0 else None
 
 
-def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]:
+def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> SiteContext:
     """Look up spatial context for a single lat/lon point against reference geodata.
 
     Performs point-in-polygon queries against:
@@ -45,8 +80,8 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
     - secondary_plans.geojson → secondary_plan_name, in_secondary_plan
     - mtsa.shp → in_mtsa
 
-    Returns a dict with all spatial flags. Missing reference files are handled
-    gracefully (defaults to None/0).
+    Returns a :class:`SiteContext` with all spatial flags. Missing reference
+    files are handled gracefully (defaults to None/0).
     """
     result: dict[str, Any] = {
         "zoning_class": None,
@@ -298,7 +333,7 @@ def lookup_site_context(lat: float, lon: float, ref_dir: Path) -> dict[str, Any]
                 result["zoning_max_height_m"] = height_val
 
     con.close()
-    return result
+    return SiteContext.model_validate(result)
 
 
 def nearby_applications(
