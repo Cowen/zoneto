@@ -21,6 +21,7 @@ from zoneto.analytics.planning_act import (
     additional_processes,
     path_for_violations,
 )
+from zoneto.analytics.retrieval_eval import magnitude_band
 from zoneto.analytics.score import score_one
 from zoneto.api.comps import query_comps
 from zoneto.api.desc_similarity import (
@@ -545,9 +546,12 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
     bert_model = getattr(request.app.state, "bert_model", None)
 
     # Restrict the zone-matched outcome stats to the proposal's likely process
-    # type (rezoning -> OZ), so its appeal exposure is read against comparable
-    # filings rather than a mix of OZ and site-plan applications.
+    # type (rezoning -> OZ) and its built-form scale, so its appeal exposure is
+    # read against comparable filings rather than a mix of process types/scales.
     expected_type = _expected_app_type(_path)
+    query_magnitude = magnitude_band(
+        extracted.proposed_storeys, extracted.proposed_units
+    )
 
     # BERT similarity preferred; fall back to TF-IDF+SVD when embeddings absent
     if bert_model is not None:
@@ -557,6 +561,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
             model=bert_model,
             zoning_class=site.get("zoning_class"),
             application_type=expected_type,
+            magnitude_band=query_magnitude,
             lat=lat,
             lon=lon,
             min_dist_m=300.0,
@@ -568,6 +573,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
             model_dir=model_dir,
             zoning_class=site.get("zoning_class"),
             application_type=expected_type,
+            magnitude_band=query_magnitude,
             lat=lat,
             lon=lon,
             min_dist_m=300.0,

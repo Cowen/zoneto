@@ -122,6 +122,127 @@ class TestZoneAndTypeMatched:
         assert result["zone_matched_application_type"] == "OZ"
 
 
+def _write_fixture_zone_magnitude(
+    data_dir: Path,
+    model_dir: Path,
+    *,
+    storeys: list[int | None],
+    appeal_labels: list[int | None],
+) -> None:
+    (data_dir / "enriched").mkdir(parents=True, exist_ok=True)
+    model_dir.mkdir(parents=True, exist_ok=True)
+    n = len(storeys)
+    svd_cols = {f"desc_svd_{i}": [float(i % 3 + 1) * 0.1] * n for i in range(20)}
+    pl.DataFrame(
+        {
+            **svd_cols,
+            "dev_appealed": appeal_labels,
+            "dev_approved": [1] * n,
+            "folderrsn": [str(i) for i in range(n)],
+            "application_type": ["OZ"] * n,
+            "zoning_class": ["RM"] * n,
+            "proposed_storeys": storeys,
+            "proposed_units": [None] * n,
+        }
+    ).write_parquet(str(data_dir / "enriched" / "dev_applications.parquet"))
+    joblib.dump(_FakePipeline(), model_dir / "desc_tfidf.joblib")
+
+
+def _write_bert_fixture_magnitude(
+    data_dir: Path, *, storeys: list[int | None], appeal_labels: list[int | None]
+) -> None:
+    (data_dir / "enriched").mkdir(parents=True, exist_ok=True)
+    n = len(storeys)
+    np.save(
+        str(data_dir / "enriched" / "desc_bert_embeddings.npy"),
+        np.ones((n, 8), dtype=np.float32),
+    )
+    pl.DataFrame(
+        {
+            "folderrsn": [str(i) for i in range(n)],
+            "application_type": ["OZ"] * n,
+            "zoning_class": ["RM"] * n,
+            "dev_appealed": appeal_labels,
+            "dev_approved": [1] * n,
+            "proposed_storeys": storeys,
+            "proposed_units": [None] * n,
+        }
+    ).write_parquet(str(data_dir / "enriched" / "desc_bert_index.parquet"))
+
+
+class TestZoneMagnitudeMatched:
+    def test_tfidf_zone_matched_rate_restricted_to_magnitude(
+        self, tmp_path: Path
+    ) -> None:
+        """Given same-zone comps of mixed built-form scale (towers appealed,
+        low-rise not), When a magnitude band is supplied, Then the zone-matched
+        appeal rate is computed over that scale class only."""
+        data_dir = tmp_path / "d"
+        model_dir = tmp_path / "m"
+        _write_fixture_zone_magnitude(
+            data_dir,
+            model_dir,
+            storeys=[40, 40, 40, 40, 3, 3, 3],  # 4 towers, 3 low-rise
+            appeal_labels=[1, 1, 1, 1, 0, 0, 0],
+        )
+        result = score_description_similarity(
+            "test",
+            data_dir=data_dir,
+            model_dir=model_dir,
+            zoning_class="RM",
+            magnitude_band="xlarge",
+        )
+        assert result is not None
+        assert result["zone_matched_appeal_rate"] == 1.0  # towers only
+        assert result["zone_matched_magnitude"] == "xlarge"
+
+    def test_tfidf_magnitude_filter_falls_back_when_too_few(
+        self, tmp_path: Path
+    ) -> None:
+        """Given fewer than the minimum same-magnitude comps, When a band is
+        supplied, Then the filter is NOT applied (rate over the zone set) rather
+        than reporting a rate over 1-2 comps."""
+        data_dir = tmp_path / "d2"
+        model_dir = tmp_path / "m2"
+        _write_fixture_zone_magnitude(
+            data_dir,
+            model_dir,
+            storeys=[40, 40, 3, 3, 3],  # only 2 towers (< minimum)
+            appeal_labels=[1, 1, 0, 0, 0],
+        )
+        result = score_description_similarity(
+            "test",
+            data_dir=data_dir,
+            model_dir=model_dir,
+            zoning_class="RM",
+            magnitude_band="xlarge",
+        )
+        assert result is not None
+        assert "zone_matched_magnitude" not in result
+        assert result["zone_matched_appeal_rate"] == 2 / 5  # full zone set
+
+    def test_bert_zone_matched_rate_restricted_to_magnitude(
+        self, tmp_path: Path
+    ) -> None:
+        """Same as the TF-IDF primary case for the BERT scorer path."""
+        data_dir = tmp_path / "db"
+        _write_bert_fixture_magnitude(
+            data_dir,
+            storeys=[40, 40, 40, 40, 3, 3, 3],
+            appeal_labels=[1, 1, 1, 1, 0, 0, 0],
+        )
+        result = score_description_similarity_bert(
+            "test",
+            data_dir=data_dir,
+            model=_FakeBertModel(),
+            zoning_class="RM",
+            magnitude_band="xlarge",
+        )
+        assert result is not None
+        assert result["zone_matched_appeal_rate"] == 1.0
+        assert result["zone_matched_magnitude"] == "xlarge"
+
+
 class _FakePipeline:
     """Minimal sklearn-compatible pipeline stub that can be pickled."""
 

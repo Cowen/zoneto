@@ -50,6 +50,36 @@ def client(app):
     return TestClient(app, raise_server_exceptions=True)
 
 
+class TestEvaluateThreadsMagnitude:
+    def test_evaluate_passes_query_magnitude_band(self, client: TestClient) -> None:
+        """Given a 12-storey proposal, When /evaluate runs, Then the derived
+        built-form band ('large' = high-rise) is passed to the similarity scorer so
+        the surfaced rate is read against same-scale comps."""
+        from unittest.mock import MagicMock
+
+        captured = MagicMock(return_value=None)
+        with (
+            patch(
+                "zoneto.api.routes._geocode_address",
+                return_value=(43.644, -79.402),
+            ),
+            patch(
+                "zoneto.api.routes.lookup_site_context",
+                return_value={"zoning_class": "RM7"},
+            ),
+            patch("zoneto.api.routes.score_description_similarity", captured),
+        ):
+            resp = client.post(
+                "/evaluate",
+                json={
+                    "address": "441 King St W, Toronto",
+                    "description": "A 12-storey residential building with 80 units.",
+                },
+            )
+        assert resp.status_code == 200
+        assert captured.call_args.kwargs["magnitude_band"] == "large"
+
+
 class TestEvaluateEndpoint:
     def test_evaluate_returns_structured_response(self, client: TestClient) -> None:
         """Given: A valid address and description.

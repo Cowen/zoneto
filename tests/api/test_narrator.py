@@ -350,6 +350,24 @@ class TestFormatDescriptionSimilarityZoneMatched:
         assert "same zone and process type" in out
         assert "OZ application" in out
 
+    def test_zone_matched_line_names_built_form_scale_when_present(self) -> None:
+        """Given a zone-matched rate also restricted to a built-form scale, When
+        formatting, Then the line names that scale (mapped to a plain term) so the
+        rate isn't read as all-scale."""
+        sim = {
+            "appeal_rate": 0.0,
+            "n_similar": 5,
+            "top_matches": [],
+            "zone_matched_n_similar": 4,
+            "zone_matched_appeal_rate": 0.25,
+            "zone_matched_application_type": "OZ",
+            "zone_matched_magnitude": "xlarge",
+        }
+        out = _format_description_similarity(sim)
+        assert "built-form scale" in out
+        assert "tower" in out  # xlarge -> tower
+        assert "OZ application" in out  # process type still named
+
     def test_zone_matched_keys_absent_does_not_crash(self) -> None:
         """Given: zone_matched keys absent (callers without zone context).
         When: Formatting.

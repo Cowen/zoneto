@@ -122,6 +122,14 @@ def _format_violations(violations: list[Violation]) -> str:
 
 _OPA_RE = re.compile(r"official plan amendment|\bOPA\b", re.I)
 
+# Plain-language labels for the magnitude_band ordinal classes (retrieval_eval).
+_MAGNITUDE_LABELS = {
+    "small": "low-rise",
+    "medium": "mid-rise",
+    "large": "high-rise",
+    "xlarge": "tower",
+}
+
 
 def _format_statutory_process(
     violations: list[Violation],
@@ -331,21 +339,26 @@ def _format_description_similarity(
         else:
             zm_appeal = sim.get("zone_matched_appeal_rate")
             zm_type = sim.get("zone_matched_application_type")
+            zm_mag = sim.get("zone_matched_magnitude")
             if zm_appeal is not None:
                 zm_pct = round(zm_appeal * 100)
+                # Build the comparability qualifier from whichever axes were
+                # applied: always zone, plus process type and/or built-form scale.
+                type_word = f"{zm_type} " if zm_type else ""
+                quals = ["zone"]
                 if zm_type:
-                    parts.append(
-                        f"Zone-matched analysis: {zone_n} similar {zm_type} "
-                        f"application(s) in the same zone and process type, appeal "
-                        f"rate {zm_pct}% (more representative than the overall rate "
-                        "— same zone and process)."
-                    )
+                    quals.append("process type")
+                if zm_mag:
+                    quals.append(f"built-form scale ({_MAGNITUDE_LABELS.get(zm_mag)})")
+                if len(quals) == 1:
+                    qual_phrase = quals[0]
                 else:
-                    parts.append(
-                        f"Zone-matched analysis: {zone_n} similar application(s) "
-                        f"in the same zone, appeal rate {zm_pct}% "
-                        "(more representative than the overall rate — same zone type)."
-                    )
+                    qual_phrase = ", ".join(quals[:-1]) + " and " + quals[-1]
+                parts.append(
+                    f"Zone-matched analysis: {zone_n} similar {type_word}"
+                    f"application(s) in the same {qual_phrase}, appeal rate "
+                    f"{zm_pct}% (more representative than the overall rate)."
+                )
             else:
                 parts.append(
                     f"Zone-matched analysis: {zone_n} similar application(s) "

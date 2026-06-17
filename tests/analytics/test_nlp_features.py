@@ -4,9 +4,53 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import polars as pl
+import pytest
 
-from zoneto.analytics.nlp import extract_text_features
+from zoneto.analytics.nlp import compute_bert_embeddings, extract_text_features
+
+
+class _FakeSentenceTransformer:
+    """No-network stub: encodes any text to a constant 4-dim vector."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    def half(self) -> _FakeSentenceTransformer:
+        return self
+
+    def encode(self, texts: list[str], **_: object) -> np.ndarray:
+        return np.ones((len(texts), 4), dtype=np.float32)
+
+
+def test_compute_bert_embeddings_index_includes_proposed_cols(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Given enriched data with proposed_storeys/units, When the BERT index is
+    built, Then it carries those columns so a comp's magnitude band can be computed
+    for runtime scale stratification."""
+    monkeypatch.setattr(
+        "sentence_transformers.SentenceTransformer", _FakeSentenceTransformer
+    )
+    enr = tmp_path / "enriched"
+    enr.mkdir(parents=True)
+    pl.DataFrame(
+        {
+            "folderrsn": ["A", "B"],
+            "description": ["a tower", "an infill"],
+            "application_type": ["OZ", "SA"],
+            "zoning_class": ["RM", "R"],
+            "proposed_storeys": [40, None],
+            "proposed_units": [400, 4],
+        }
+    ).write_parquet(enr / "dev_applications.parquet")
+
+    compute_bert_embeddings(data_dir=tmp_path)
+
+    idx = pl.read_parquet(enr / "desc_bert_index.parquet")
+    assert "proposed_storeys" in idx.columns
+    assert "proposed_units" in idx.columns
 
 
 def test_extract_text_features_produces_svd_columns(tmp_path: Path) -> None:

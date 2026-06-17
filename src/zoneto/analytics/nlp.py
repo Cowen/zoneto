@@ -157,9 +157,19 @@ def compute_bert_embeddings(data_dir: Path = Path("data")) -> int:
     np.save(out_dir / "desc_bert_embeddings.npy", embeddings)
     logger.info("compute_bert_embeddings: saved embeddings shape %s", embeddings.shape)
 
-    # Build index with metadata columns needed for similarity scoring
+    # Build index with metadata columns needed for similarity scoring.
+    # proposed_storeys/units let the BERT scorer compute a comp's magnitude band
+    # for runtime scale stratification (see desc_similarity.score_*_bert).
     index_cols = ["folderrsn", "application_type"]
-    for optional in ["dev_approved", "dev_appealed", "zoning_class", "lat", "lon"]:
+    for optional in [
+        "dev_approved",
+        "dev_appealed",
+        "zoning_class",
+        "lat",
+        "lon",
+        "proposed_storeys",
+        "proposed_units",
+    ]:
         if optional in df.columns:
             index_cols.append(optional)
     index_df = df.select(index_cols)

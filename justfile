@@ -39,6 +39,11 @@ bylaw-eval:
 comps-eval *ARGS:
     uv run python scripts/comps_eval.py {{ARGS}}
 
+# Regenerate BERT description embeddings + index from enriched data. Run after
+# `just enrich` — the artifacts must stay in sync with the corpus row count.
+bert:
+    uv run python -c "from zoneto.analytics.nlp import compute_bert_embeddings as f; f()"
+
 # Evaluate narrator confidence calibration against golden cases
 # (requires ANTHROPIC_API_KEY + data/reference; one LLM call per case)
 narrator-eval *ARGS:

@@ -8,8 +8,15 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from zoneto.analytics.retrieval_eval import magnitude_band as _compute_band
+
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
+
+# Minimum same-magnitude comps before the magnitude filter is applied — below
+# this, fall back to the broader zone(+type) set rather than report a rate over
+# a noisy handful.
+_MIN_MAGNITUDE_COMPS = 3
 
 
 def _deduplicate_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -43,6 +50,7 @@ def score_description_similarity(
     min_similarity: float = 0.1,
     zoning_class: str | None = None,
     application_type: str | None = None,
+    magnitude_band: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
     radius_m: float = 2000.0,
@@ -98,6 +106,8 @@ def score_description_similarity(
                 "zoning_class",
                 "lat",
                 "lon",
+                "proposed_storeys",
+                "proposed_units",
             ]
             if c in available
         ]
@@ -218,6 +228,24 @@ def score_description_similarity(
         if zoning_class is not None and has_zoning_col:
             if zm_type is not None:
                 result["zone_matched_application_type"] = zm_type
+            # Further restrict to comps of the same built-form scale, when the
+            # caller supplies the query's magnitude band and enough same-scale
+            # comps survive (else keep the broader zone(+type) set).
+            if (
+                magnitude_band is not None
+                and "proposed_storeys" in extra_cols
+                and zm_rows
+            ):
+                st_idx = n_svd + extra_cols.index("proposed_storeys")
+                un_idx = n_svd + extra_cols.index("proposed_units")
+                mag_rows = [
+                    r
+                    for r in zm_rows
+                    if _compute_band(r[st_idx], r[un_idx]) == magnitude_band
+                ]
+                if len(mag_rows) >= _MIN_MAGNITUDE_COMPS:
+                    zm_rows = mag_rows
+                    result["zone_matched_magnitude"] = magnitude_band
             if zm_rows:
                 zm_corpus = np.array(
                     [[float(r[i]) for i in range(n_svd)] for r in zm_rows],
@@ -297,6 +325,7 @@ def score_description_similarity_bert(
     min_similarity: float = 0.1,
     zoning_class: str | None = None,
     application_type: str | None = None,
+    magnitude_band: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
     radius_m: float = 2000.0,
@@ -435,6 +464,19 @@ def score_description_similarity_bert(
                 zm_mask = zm_mask & (index_df["application_type"] == zm_type)
                 result["zone_matched_application_type"] = zm_type
             zm_indices = [i for i, m in enumerate(zm_mask.to_list()) if m]
+            # Further restrict to the same built-form scale when the caller
+            # supplies the query band and enough same-scale comps survive.
+            if magnitude_band is not None and "proposed_storeys" in cols and zm_indices:
+                _storeys = index_df["proposed_storeys"].to_list()
+                _units = index_df["proposed_units"].to_list()
+                mag_indices = [
+                    i
+                    for i in zm_indices
+                    if _compute_band(_storeys[i], _units[i]) == magnitude_band
+                ]
+                if len(mag_indices) >= _MIN_MAGNITUDE_COMPS:
+                    zm_indices = mag_indices
+                    result["zone_matched_magnitude"] = magnitude_band
             if zm_indices:
                 zm_emb = embeddings[zm_indices]
                 zm_norms = np.linalg.norm(zm_emb, axis=1, keepdims=True) + 1e-10
