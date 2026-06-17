@@ -9,6 +9,7 @@ from typing import Any
 import joblib
 import pandas as pd
 import polars as pl
+from pydantic import BaseModel
 
 from zoneto.analytics.features import DEV_CAT_COLS, DEV_NUM_COLS
 from zoneto.analytics.planning_act import statutory_timeline_days
@@ -17,6 +18,19 @@ from zoneto.analytics.planning_act import statutory_timeline_days
 # The structured classifier/regressor models were deleted — none ever cleared the
 # quality bar (training-data limitations). See tests/analytics/test_retirement.py.
 _SURVIVAL_TYPES: frozenset[str] = frozenset({"OZ", "SA"})
+
+
+class SurvivalPrediction(BaseModel):
+    """Decision-time survival percentiles for one application.
+
+    All fields are None when no survival prediction applies (non-dev source,
+    non-OZ/SA application type, or the survival model is unavailable) — the
+    survival model emits all three percentiles together or none at all.
+    """
+
+    pred_dev_days_p25: float | None = None
+    pred_dev_days_p50: float | None = None
+    pred_dev_days_p75: float | None = None
 
 
 def _load(model_dir: Path, model_name: str) -> Any:
@@ -172,13 +186,13 @@ def score_one(
     source: str,
     features: dict[str, Any],
     model_dir: Path = Path("models"),
-) -> dict[str, Any]:
-    """Score a single application dict. Returns prediction dict.
+) -> SurvivalPrediction:
+    """Score a single application. Returns a :class:`SurvivalPrediction`.
 
     source must be 'dev_applications', 'coa', or 'permits_cleared'. Only
     'dev_applications' has a served model (the dev_days_to_decision survival model,
-    OZ+SA only); 'coa' and 'permits_cleared' return an empty dict — their models
-    were deleted for failing the quality bar.
+    OZ+SA only); 'coa' and 'permits_cleared' return an all-None prediction — their
+    models were deleted for failing the quality bar.
     """
     if source not in ("dev_applications", "coa", "permits_cleared"):
         raise ValueError(
@@ -186,9 +200,9 @@ def score_one(
             " or 'permits_cleared'."
         )
 
-    result: dict[str, Any] = {}
+    result: dict[str, float] = {}
     if source != "dev_applications":
-        return result
+        return SurvivalPrediction()
 
     all_cols = DEV_CAT_COLS + DEV_NUM_COLS
     # Apply NLP vectorizer if available
@@ -212,4 +226,4 @@ def score_one(
         for key in ("pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"):
             result[key] = float(_surv_preds[key][0])
 
-    return result
+    return SurvivalPrediction(**result)

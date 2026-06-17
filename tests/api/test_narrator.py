@@ -7,6 +7,7 @@ from zoneto.analytics.compliance import Severity, Violation
 from zoneto.analytics.extract import ProjectFeatures
 from zoneto.api.desc_similarity import DescriptionSimilarity
 from zoneto.api.narrator import (
+    CommunityBenefitsContext,
     _apply_confidence_overrides,
     _format_community_benefits,
     _format_description_similarity,
@@ -612,14 +613,14 @@ class TestProgrammaticCap:
 
 
 class TestFormatCommunityBenefits:
-    def _cb(self) -> dict:
-        return {
-            "n_comps": 8,
-            "median_monetary": 250_000.0,
-            "p25_monetary": 100_000.0,
-            "p75_monetary": 400_000.0,
-            "common_benefit_types": ["Cash", "Parkland dedication"],
-        }
+    def _cb(self) -> CommunityBenefitsContext:
+        return CommunityBenefitsContext(
+            n_comps=8,
+            median_monetary=250_000.0,
+            p25_monetary=100_000.0,
+            p75_monetary=400_000.0,
+            common_benefit_types=["Cash", "Parkland dedication"],
+        )
 
     def test_returns_empty_when_none(self) -> None:
         """Given: community_benefits is None.
@@ -654,7 +655,7 @@ class TestFormatCommunityBenefits:
         When: Formatting.
         Then: Does not crash, returns non-empty string."""
         cb = self._cb()
-        cb["common_benefit_types"] = []
+        cb.common_benefit_types = []
         out = _format_community_benefits(cb)
         assert isinstance(out, str)
         assert len(out) > 0
@@ -685,13 +686,13 @@ class TestNarrateEvaluationCommunityBenefits:
         Then: LLM user message includes Section 37 context with dollar amounts."""
         agent, captured = capturing_eval_agent(summary="Summary.", confidence=72)
         extracted = ProjectFeatures(None, None, "mixed_use", False)
-        cb = {
-            "n_comps": 5,
-            "median_monetary": 250_000.0,
-            "p25_monetary": 100_000.0,
-            "p75_monetary": 400_000.0,
-            "common_benefit_types": ["Cash", "Parkland"],
-        }
+        cb = CommunityBenefitsContext(
+            n_comps=5,
+            median_monetary=250_000.0,
+            p25_monetary=100_000.0,
+            p75_monetary=400_000.0,
+            common_benefit_types=["Cash", "Parkland"],
+        )
         narrate_evaluation(
             self._minimal_site(),
             extracted,

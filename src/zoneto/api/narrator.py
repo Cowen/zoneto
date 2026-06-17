@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any
 
+from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
     ModelMessage,
@@ -23,6 +23,17 @@ from zoneto.analytics.use_classifier import use_matches_zone
 from zoneto.api.desc_similarity import DescriptionSimilarity
 from zoneto.api.site_context import SiteContext
 from zoneto.llm.schemas import NarrationResult
+
+
+class CommunityBenefitsContext(BaseModel):
+    """Section 37 community-benefit aggregates over a recent year window."""
+
+    n_comps: int
+    median_monetary: float
+    p25_monetary: float
+    p75_monetary: float
+    common_benefit_types: list[str] = []
+
 
 _SYSTEM_PROMPT = """\
 You are a Toronto urban planning assistant that helps evaluate development
@@ -369,14 +380,14 @@ def _format_description_similarity(
     return " ".join(parts)
 
 
-def _format_community_benefits(cb: dict[str, Any] | None) -> str:
+def _format_community_benefits(cb: CommunityBenefitsContext | None) -> str:
     if not cb:
         return ""
-    n = cb["n_comps"]
-    median = cb["median_monetary"]
-    p25 = cb["p25_monetary"]
-    p75 = cb["p75_monetary"]
-    types = ", ".join(cb.get("common_benefit_types") or []) or "various"
+    n = cb.n_comps
+    median = cb.median_monetary
+    p25 = cb.p25_monetary
+    p75 = cb.p75_monetary
+    types = ", ".join(cb.common_benefit_types or []) or "various"
     return (
         f"Section 37 Community Benefits — based on {n} comparable Toronto rezonings:\n"
         f"  Median contribution: ${median:,.0f}  (range: ${p25:,.0f}–${p75:,.0f})\n"
@@ -546,7 +557,7 @@ def narrate_evaluation(
     description: str | None = None,
     data_gaps: list[str] | None = None,
     description_similarity: DescriptionSimilarity | None = None,
-    community_benefits: dict[str, Any] | None = None,
+    community_benefits: CommunityBenefitsContext | None = None,
 ) -> tuple[str, int]:
     """Generate a markdown compliance summary and confidence score.
 

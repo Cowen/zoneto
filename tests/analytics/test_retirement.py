@@ -16,7 +16,7 @@ import polars as pl
 import pytest
 
 from zoneto.analytics.importance import feature_importance
-from zoneto.analytics.score import score_all, score_one
+from zoneto.analytics.score import SurvivalPrediction, score_all, score_one
 from zoneto.analytics.train import train_all
 
 DELETED_MODELS = [
@@ -127,11 +127,11 @@ def test_score_one_no_appeal_predictions(tmp_path: Path) -> None:
     result = score_one(
         "dev_applications", {"application_type": "OZ"}, model_dir=model_dir
     )
-    assert "pred_dev_appealed" not in result
-    assert "prob_dev_appealed" not in result
+    assert not hasattr(result, "pred_dev_appealed")
+    assert not hasattr(result, "prob_dev_appealed")
 
-    assert score_one("coa", {}, model_dir=model_dir) == {}
-    assert score_one("permits_cleared", {}, model_dir=model_dir) == {}
+    assert score_one("coa", {}, model_dir=model_dir) == SurvivalPrediction()
+    assert score_one("permits_cleared", {}, model_dir=model_dir) == SurvivalPrediction()
 
 
 @pytest.mark.parametrize("model_name", DELETED_MODELS)

@@ -17,7 +17,7 @@ import polars as pl
 import pytest
 
 from zoneto.analytics.features import DEV_CAT_COLS, DEV_NUM_COLS
-from zoneto.analytics.score import score_all, score_one
+from zoneto.analytics.score import SurvivalPrediction, score_all, score_one
 from zoneto.analytics.train import _build_survival_pipeline
 
 # ---------------------------------------------------------------------------
@@ -224,12 +224,14 @@ def test_score_one_returns_survival_percentiles_for_oz(tmp_path: Path) -> None:
 
     result = score_one("dev_applications", features, model_dir=model_dir)
 
-    assert "pred_dev_appealed" not in result
-    for key in ("pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"):
-        assert key in result
-        assert isinstance(result[key], float)
-    assert result["pred_dev_days_p25"] <= result["pred_dev_days_p50"]
-    assert result["pred_dev_days_p50"] <= result["pred_dev_days_p75"]
+    assert not hasattr(result, "pred_dev_appealed")
+    p25, p50, p75 = (
+        result.pred_dev_days_p25,
+        result.pred_dev_days_p50,
+        result.pred_dev_days_p75,
+    )
+    assert p25 is not None and p50 is not None and p75 is not None
+    assert p25 <= p50 <= p75
 
 
 def test_score_one_survival_skipped_for_non_oz_sa(tmp_path: Path) -> None:
@@ -240,13 +242,13 @@ def test_score_one_survival_skipped_for_non_oz_sa(tmp_path: Path) -> None:
     result = score_one("dev_applications", features, model_dir=model_dir)
 
     for key in ("pred_dev_days_p25", "pred_dev_days_p50", "pred_dev_days_p75"):
-        assert key not in result
+        assert getattr(result, key) is None
 
 
 def test_score_one_coa_and_permits_return_empty(tmp_path: Path) -> None:
     model_dir = _setup_models(tmp_path)
-    assert score_one("coa", {}, model_dir=model_dir) == {}
-    assert score_one("permits_cleared", {}, model_dir=model_dir) == {}
+    assert score_one("coa", {}, model_dir=model_dir) == SurvivalPrediction()
+    assert score_one("permits_cleared", {}, model_dir=model_dir) == SurvivalPrediction()
 
 
 def test_score_one_unknown_source(tmp_path: Path) -> None:

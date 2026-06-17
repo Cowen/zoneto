@@ -114,9 +114,9 @@ def test_explain_one_result_shape(clf_model_dir: Path) -> None:
     )
     assert len(result) > 0
     for item in result:
-        assert "feature" in item
-        assert "shap_value" in item
-        assert item["direction"] in ("increases_risk", "decreases_risk")
+        assert item.feature
+        assert isinstance(item.shap_value, float)
+        assert item.direction in ("increases_risk", "decreases_risk")
 
 
 def test_explain_one_missing_model_returns_empty(tmp_path: Path) -> None:

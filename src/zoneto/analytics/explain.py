@@ -8,6 +8,7 @@ from typing import Any
 
 import joblib
 import pandas as pd
+from pydantic import BaseModel
 
 from zoneto.analytics.features import (
     DEV_CAT_COLS,
@@ -15,6 +16,14 @@ from zoneto.analytics.features import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class FeatureContribution(BaseModel):
+    """A single feature's SHAP contribution to one application's prediction."""
+
+    feature: str
+    shap_value: float
+    direction: str  # "increases_risk" | "decreases_risk"
 
 
 def _unwrap_pipeline(pipe: Any) -> Any:
@@ -36,16 +45,14 @@ def explain_one(
     model_name: str,
     *,
     top_n: int = 5,
-) -> list[dict[str, Any]]:
+) -> list[FeatureContribution]:
     """Return top-N SHAP feature contributions for a single application.
 
     Uses shap.TreeExplainer on the base HistGradientBoosting estimator
     (after unwrapping CalibratedClassifierCV).
 
-    Returns a list of dicts with keys:
-        feature (str): feature name
-        shap_value (float): SHAP value for this prediction
-        direction (str): "increases_risk" if shap_value > 0, else "decreases_risk"
+    Returns a list of :class:`FeatureContribution` (feature name, SHAP value,
+    and direction — "increases_risk" if shap_value > 0, else "decreases_risk").
 
     Returns [] when the model file is absent or SHAP computation fails.
     """
@@ -96,13 +103,11 @@ def explain_one(
         ]
 
         return [
-            {
-                "feature": feature_names[i]
-                if i < len(feature_names)
-                else f"feature_{i}",
-                "shap_value": round(float(v), 4),
-                "direction": "increases_risk" if v > 0 else "decreases_risk",
-            }
+            FeatureContribution(
+                feature=feature_names[i] if i < len(feature_names) else f"feature_{i}",
+                shap_value=round(float(v), 4),
+                direction="increases_risk" if v > 0 else "decreases_risk",
+            )
             for i, v in indexed
         ]
 

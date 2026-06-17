@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from zoneto.analytics.compliance import check_compliance
-from zoneto.analytics.explain import explain_one
+from zoneto.analytics.explain import FeatureContribution, explain_one
 from zoneto.analytics.extract import extract_project_features
 from zoneto.analytics.planning_act import (
     ADDITIONAL_PROCESS,
@@ -22,14 +22,18 @@ from zoneto.analytics.planning_act import (
     path_for_violations,
 )
 from zoneto.analytics.retrieval_eval import magnitude_band
-from zoneto.analytics.score import score_one
+from zoneto.analytics.score import SurvivalPrediction, score_one
 from zoneto.api.comps import query_comps
 from zoneto.api.desc_similarity import (
     DescriptionSimilarity,
     score_description_similarity,
     score_description_similarity_bert,
 )
-from zoneto.api.narrator import narrate_evaluation, narrate_question
+from zoneto.api.narrator import (
+    CommunityBenefitsContext,
+    narrate_evaluation,
+    narrate_question,
+)
 from zoneto.api.site_context import (
     SiteContext,
     lookup_site_context,
@@ -86,9 +90,9 @@ class ScoreRequest(BaseModel):
 
 
 class ScoreResponse(BaseModel):
-    predictions: dict[str, Any]
+    predictions: SurvivalPrediction
     production_ready_models: list[str]
-    explanations: dict[str, list[dict[str, Any]]] | None = None
+    explanations: dict[str, list[FeatureContribution]] | None = None
 
 
 class GeocodeResult(BaseModel):
@@ -199,7 +203,7 @@ def score(request: Request, body: ScoreRequest, explain: bool = False) -> ScoreR
 
     if not ready_model_names:
         return ScoreResponse(
-            predictions={},
+            predictions=SurvivalPrediction(),
             production_ready_models=[],
             explanations={} if explain else None,
         )
@@ -209,7 +213,7 @@ def score(request: Request, body: ScoreRequest, explain: bool = False) -> ScoreR
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    explanations: dict[str, list[dict[str, Any]]] | None = None
+    explanations: dict[str, list[FeatureContribution]] | None = None
     if explain:
         explanations = {}
         for model_name in ready_model_names:
@@ -295,7 +299,7 @@ class EvaluateResponse(BaseModel):
     confidence_score: int | None = None
     data_gaps: list[str] = []
     description_similarity: DescriptionSimilarity | None = None
-    community_benefits_context: dict[str, Any] | None = None
+    community_benefits_context: CommunityBenefitsContext | None = None
     statutory_process: StatutoryProcessResult | None = None
     additional_processes: list[StatutoryProcessResult] = []
     nearby_active_applications: list[NearbyApplication] = []
@@ -313,7 +317,7 @@ def _community_benefits_context(
     ward_number: str | None = None,
     years: int = 5,
     min_comps: int = 3,
-) -> dict[str, Any] | None:
+) -> CommunityBenefitsContext | None:
     """Aggregate Section 37 community benefits over a recent year window.
 
     Filters by ward when provided. Returns None if section37.parquet is absent
@@ -350,13 +354,13 @@ def _community_benefits_context(
 
     common = sorted(benefit_counts, key=lambda k: benefit_counts[k], reverse=True)[:3]
 
-    return {
-        "n_comps": len(s37),
-        "median_monetary": float(monetary.median()),  # type: ignore[arg-type]
-        "p25_monetary": float(monetary.quantile(0.25)),  # type: ignore[arg-type]
-        "p75_monetary": float(monetary.quantile(0.75)),  # type: ignore[arg-type]
-        "common_benefit_types": common,
-    }
+    return CommunityBenefitsContext(
+        n_comps=len(s37),
+        median_monetary=float(monetary.median()),  # type: ignore[arg-type]
+        p25_monetary=float(monetary.quantile(0.25)),  # type: ignore[arg-type]
+        p75_monetary=float(monetary.quantile(0.75)),  # type: ignore[arg-type]
+        common_benefit_types=common,
+    )
 
 
 def _geocode_address(address: str) -> tuple[float, float]:

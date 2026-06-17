@@ -474,15 +474,15 @@ class TestCommunityBenefitsContext:
     def test_returns_dict_with_required_keys(self, tmp_path: Path) -> None:
         """Given: section37.parquet with 4 records.
         When: _community_benefits_context is called with min_comps=3.
-        Then: Returns dict with n_comps, monetary stats, and common_benefit_types."""
+        Then: Returns model with n_comps, monetary stats, and common_benefit_types."""
         self._s37_parquet(tmp_path / "reference", n=4)
         result = _community_benefits_context(data_dir=tmp_path, min_comps=3)
         assert result is not None
-        assert result["n_comps"] == 4
-        assert "median_monetary" in result
-        assert "p25_monetary" in result
-        assert "p75_monetary" in result
-        assert isinstance(result["common_benefit_types"], list)
+        assert result.n_comps == 4
+        assert result.median_monetary is not None
+        assert result.p25_monetary is not None
+        assert result.p75_monetary is not None
+        assert isinstance(result.common_benefit_types, list)
 
     def test_filters_by_ward_number(self, tmp_path: Path) -> None:
         """Given: section37.parquet with ward 10 (3 records) and ward 11 (3 records).
@@ -511,8 +511,8 @@ class TestCommunityBenefitsContext:
             data_dir=tmp_path, ward_number="10", min_comps=3
         )
         assert result is not None
-        assert result["n_comps"] == 3
-        assert result["median_monetary"] < 500_000
+        assert result.n_comps == 3
+        assert result.median_monetary < 500_000
 
     def test_common_benefit_types_sorted_by_frequency(self, tmp_path: Path) -> None:
         """Given: section37.parquet with Cash 3 times and Parkland 2 times.
@@ -532,7 +532,7 @@ class TestCommunityBenefitsContext:
         s37.write_parquet(ref_dir / "section37.parquet")
         result = _community_benefits_context(data_dir=tmp_path, min_comps=3)
         assert result is not None
-        assert result["common_benefit_types"][0] == "Cash"
+        assert result.common_benefit_types[0] == "Cash"
 
 
 class TestAskEndpoint:

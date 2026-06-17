@@ -637,7 +637,7 @@ def evaluate(
         "suggestions": [v.suggested_remedy for v in violations if v.suggested_remedy],
         "data_gaps": data_gaps,
         "description_similarity": desc_sim.model_dump() if desc_sim else None,
-        "community_benefits_context": cb_context,
+        "community_benefits_context": cb_context.model_dump() if cb_context else None,
         "nearby_active_applications": nearby,
     }
 
