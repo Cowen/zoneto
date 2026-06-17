@@ -132,7 +132,7 @@ regression:
 
 # Run performance regression tests against real enriched data
 regression-integration:
-    uv run pytest tests/analytics/test_regression.py tests/api/test_narrator_regression.py -m integration -v
+    uv run pytest tests/analytics/test_regression.py tests/api/test_narrator_regression.py tests/api/test_uat_scenarios.py -m integration -v
 
 # Regenerate tests/fixtures/model_baselines.json from current enriched data
 update-baselines:
