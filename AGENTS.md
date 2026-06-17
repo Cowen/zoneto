@@ -8,6 +8,8 @@ Zoneto is a development application intelligence platform for Toronto. It provid
 
 **Target user:** Development firms doing site acquisition due diligence.
 
+**REMEMBER** We are presenting information to trained experts. It is more useful to them to be honest with our gaps and unknowns than it is to present potentially wrong information. A false positive is worse than giving no concrete answer.
+
 ## Quick Start
 
 ```bash
