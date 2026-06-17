@@ -14,6 +14,11 @@ import pytest
 from scripts.planning_act_eval import run_eval
 
 _ENRICHED = Path("data/enriched/dev_applications.parquet")
+# The Official Plan land-use layer is optional/interim (CLAUDE.md): fetched
+# separately by `just op`, graceful when absent. When it has not been fetched,
+# zero OP coverage is the expected state, not a join regression — so the OP guard
+# skips rather than false-failing.
+_OP_SOURCE = Path("data/reference/op_land_use.geojson")
 
 pytestmark = pytest.mark.integration
 
@@ -42,7 +47,18 @@ def test_rezoning_precision_above_floor(results: dict) -> None:
 
 def test_op_layer_present_and_non_regressive(results: dict) -> None:
     """The OP layer must be joined (non-zero coverage) and the OP-conformity signal
-    can only add OZ detections, never remove them (with_op >= path_only)."""
+    can only add OZ detections, never remove them (with_op >= path_only).
+
+    Skipped when the optional op_land_use.geojson layer has not been fetched —
+    zero coverage is then expected, not a regression. When the source IS present
+    but coverage is still zero, that is a real join/staleness failure and the
+    assertion below fires (re-run `just enrich` after `just op`).
+    """
+    if not _OP_SOURCE.exists():
+        pytest.skip(
+            "op_land_use.geojson not fetched (optional/interim layer) — run "
+            "`just op` then `just enrich` to provision and exercise this guard"
+        )
     coverage = results.get("op_coverage")
     assert coverage is not None
     assert coverage > 0.0, (
