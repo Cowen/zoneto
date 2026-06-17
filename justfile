@@ -54,6 +54,14 @@ narrator-eval *ARGS:
 narrator-triage *ARGS:
     uv run python scripts/narrator_refused_triage.py {{ARGS}}
 
+# Run UAT scenarios for failure-pattern cases through the full narrator pipeline
+# (requires ANTHROPIC_API_KEY, data/reference/, data/enriched/, models/)
+# Prints auto-checks + a human rubric per scenario. Skips cleanly if prereqs absent.
+# Usage: just uat                  # all five scenarios
+#        just uat --case mendota-2 # one scenario
+uat *ARGS:
+    uv run python scripts/uat_scenarios.py {{ARGS}}
+
 # Evaluate the Planning Act process classifier: derived process vs actual
 # application_type over the enriched corpus (deterministic; needs `just enrich`)
 planning-act-eval *ARGS:
