@@ -753,6 +753,78 @@
       "notes": "Was advisory (floor-70 despite secondary-plan-driven refusal); the storeys-to-metres inference now converts 13 storeys against the R zone's 13m limit into exactly 3.0x — cap-30, matching the refusal. Still-unfixed blind spots this case documented: in_secondary_plan=0 here (the Dupont Street Secondary Plan corridor is missing from the secondary-plans layer) and the 20m rail-corridor setback is unmodeled. Re-banded 2026-06-12 after the scoring change. Observed over 5 calibration runs post-change (2026-06-12): 25-28."
     },
     {
+      "id": "dupont-328-opa",
+      "label": "328 Dupont St — standalone employment OPA without rezoning, refused 2010",
+      "folderrsn": "2623559",
+      "lat": 43.67277991586383,
+      "lon": -79.40924372090099,
+      "description": "Standard OPA application.  to change Official Plan designation from employment area to mixed use area.  No accompanying rezoning application.  ",
+      "outcome": {
+        "decision": "refused",
+        "body": "City Council (OZ, Refused; AIC STATUS_DESC 'Refused'). Standalone OPA to convert an employment-area OP designation to mixed-use with no accompanying ZBA — a configuration the City consistently refuses because an OP designation change needs a companion rezoning to be actionable.",
+        "year": 2010,
+        "appealed": false,
+        "verification": {
+          "source": "Toronto AIC ArcGIS FeatureServer (live POST query, STATUS_DESC field)",
+          "url": "https://services3.arcgis.com/b9WvedVPoizGfvfD/ArcGIS/rest/services/COTGEO_IBMS_AIC_POINT/FeatureServer/0/query",
+          "verified_date": "2026-06-17"
+        }
+      },
+      "mechanism": "KNOWN LIMITATION: unknown-limits floor-55 fires — the OPA-designation-change description carries no storeys/units/height, mixed_use is not structurally blocked in the R zone, so confidence floors at 55; the real refusal reason (employment conversion needs a companion ZBA) is invisible to the engine",
+      "expected_confidence": {
+        "min": 40,
+        "max": 88
+      },
+      "advisory": true,
+      "ci": {
+        "site": {
+          "zoning_class": "R",
+          "zoning_max_units": null,
+          "zoning_max_density": 1.0,
+          "zoning_max_storeys": null,
+          "zoning_max_height_m": 13.0,
+          "permitted_use_category": "Residential",
+          "zoning_min_frontage_m": null,
+          "zoning_min_lot_area_sqm": null,
+          "zoning_max_coverage_pct": null,
+          "zoning_min_sqm_per_unit": null,
+          "zoning_holding": 0,
+          "zoning_exception": 1,
+          "zoning_exception_no": "900",
+          "zoning_pct_res": null,
+          "zoning_pct_comm": null,
+          "zoning_pct_emp": null,
+          "in_heritage_register": 0,
+          "in_heritage_district": 1,
+          "secondary_plan_name": null,
+          "in_secondary_plan": 0,
+          "in_mtsa": 0,
+          "in_trca_regulated_area": 0,
+          "in_greenbelt": 0
+        },
+        "sim_stub": null,
+        "expected_overrides": {
+          "floor_70": false,
+          "precedent_floor_55": false,
+          "unknown_limits_floor_55": true,
+          "cap_30": false
+        },
+        "expected_statutory": {
+          "path": "as_of_right",
+          "act_section_contains": "no amendment",
+          "decider": "Toronto Building (Chief Building Official)",
+          "non_decision_appeal_days": null,
+          "actual_process": "rezoning",
+          "matches_reality": false,
+          "note": "LIMITATION: an OPA-designation-change description has no structural signal -> engine derives as_of_right; the real process was an OPA (+ companion ZBA). op_use_nonconforming fires but only INFORMATIONAL, so it doesn't move the path.",
+          "additional": [
+            "site_plan"
+          ]
+        }
+      },
+      "notes": "ADVISORY — pins the 'employment-OPA without ZBA is invisible to the compliance engine' blind spot. extract_project_features yields proposed_use=mixed_use with no storeys/units/height/FSI; in the R zone (13m, 1.0 density, no storey/unit cap) nothing can be verified and mixed_use is not structurally blocked, so the unknown-limits floor pins confidence at 55. A 2010 refused application thus floors at 55 — a mid-confidence 'maybe' where the right answer is low. The engine does fire op_use_nonconforming (mixed-use proposed against the employment OP designation) but only at INFORMATIONAL severity, so it neither moves the path off as_of_right nor lowers the floor. Refusal reason (policy: employment land conversion requires a companion ZBA) is unencoded. Compare dupont-328 (same address, the later OZ revision that correctly gets cap-30 via height inference). When unit-density or OP-severity escalation lands, tighten this band toward [10, 40] and add an ordering vs dupont-328. Band calibrated in Task 3."
+    },
+    {
       "id": "mendota-2",
       "label": "2-4 Mendota Rd — 4st self-storage OZ in RM zone, Council refused 2026",
       "folderrsn": "5559219",

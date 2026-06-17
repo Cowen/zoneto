@@ -152,18 +152,23 @@ def test_statutory_process_detection_accuracy() -> None:
     """Across the golden set, the derived process matches the real-world process
     for all but the documented limits-unknowable cases.
 
-    Pins the known limitation (Finch pair: zone limits absent from data → the
-    engine sees no violation and derives as_of_right where reality was a
-    rezoning) so a regression that silently widens it fails loudly.
+    Pins the known limitations so a regression that silently widens them fails
+    loudly. Finch pair: zone limits absent from data → the engine sees no
+    violation and derives as_of_right where reality was a rezoning.
+    dupont-328-opa adds the employment-OPA blind spot: a designation-change
+    description has no structural signal, so the engine derives as_of_right
+    where reality was an OPA + companion rezoning.
     """
     misses = [
         cid
         for cid, c in _CASES.items()
         if not c["ci"]["expected_statutory"]["matches_reality"]
     ]
-    assert set(misses) == {"finch-57-revised", "finch-57-original"}, (
-        f"process-detection misses changed: {sorted(misses)}"
-    )
+    assert set(misses) == {
+        "finch-57-revised",
+        "finch-57-original",
+        "dupont-328-opa",
+    }, f"process-detection misses changed: {sorted(misses)}"
 
 
 def test_op_nonconformity_selects_combined_120_day_clock() -> None:
