@@ -12,7 +12,21 @@ from fastapi.testclient import TestClient
 
 from tests.stubs import stub_narrator_agents
 from zoneto.api.app import create_app
-from zoneto.api.routes import _community_benefits_context
+from zoneto.api.routes import _community_benefits_context, _expected_app_type
+
+
+class TestExpectedAppType:
+    def test_rezoning_path_maps_to_oz(self) -> None:
+        """A rezoning proposal's comps are rezonings (OZ) — the dev corpus's appeal
+        labels are OZ+SA only, so 'OZ' is the meaningful same-process filter."""
+        assert _expected_app_type("rezoning") == "OZ"
+
+    def test_non_rezoning_paths_map_to_none(self) -> None:
+        """Other paths have no clean dev-corpus application_type, so no restriction
+        is applied (zone-only matching is preserved)."""
+        assert _expected_app_type("minor_variance") is None
+        assert _expected_app_type("as_of_right") is None
+        assert _expected_app_type("prohibited") is None
 
 
 @pytest.fixture

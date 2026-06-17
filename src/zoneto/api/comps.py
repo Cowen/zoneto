@@ -168,9 +168,14 @@ def query_comps(
             ]
         )
         params.extend([lat_min, lat_max, lon_min, lon_max])
-        # squared Euclidean distance in degrees (sufficient for proximity sort)
+        # Squared planar distance for the proximity sort. The longitude term is
+        # scaled by cos(lat)^2 because a degree of longitude is shorter than a
+        # degree of latitude away from the equator (~0.72x at Toronto). Without
+        # this, the sort over-penalises east-west neighbours vs north-south ones.
+        cos_lat_sq = math.cos(math.radians(lat)) ** 2
         distance_expr = (
-            f"((lat - {lat}) * (lat - {lat}) + (lon - {lon}) * (lon - {lon}))"
+            f"((lat - {lat}) * (lat - {lat}) + "
+            f"{cos_lat_sq} * (lon - {lon}) * (lon - {lon}))"
         )
         order_by = "dist_sq ASC"
 

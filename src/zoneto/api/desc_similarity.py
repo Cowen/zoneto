@@ -42,6 +42,7 @@ def score_description_similarity(
     top_n: int = 20,
     min_similarity: float = 0.1,
     zoning_class: str | None = None,
+    application_type: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
     radius_m: float = 2000.0,
@@ -126,15 +127,22 @@ def score_description_similarity(
             f" WHERE {not_null_filter}{prox_filter}"
         ).fetchall()
 
-        # Fetch zone-matched corpus when caller supplies zoning_class
+        # Fetch zone-matched corpus when caller supplies zoning_class. When an
+        # application_type is also supplied, restrict to it — a rezoning's appeal
+        # exposure should be compared to rezonings, not site-plan applications.
         zm_rows: list[Any] = []
         has_zoning_col = "zoning_class" in available
+        zm_type = application_type if "application_type" in available else None
         if zoning_class is not None and has_zoning_col:
             zm_select = ", ".join(svd_cols + extra_cols)
+            zm_where = f"{not_null_filter} AND zoning_class = $1"
+            zm_params: list[Any] = [zoning_class]
+            if zm_type is not None:
+                zm_where += " AND application_type = $2"
+                zm_params.append(zm_type)
             zm_rows = con.execute(
-                f"SELECT {zm_select} FROM '{enriched_path}' "
-                f"WHERE {not_null_filter} AND zoning_class = $1",
-                [zoning_class],
+                f"SELECT {zm_select} FROM '{enriched_path}' WHERE {zm_where}",
+                zm_params,
             ).fetchall()
 
         con.close()
@@ -208,6 +216,8 @@ def score_description_similarity(
 
         # Zone-matched stats: only included when zoning_class was supplied
         if zoning_class is not None and has_zoning_col:
+            if zm_type is not None:
+                result["zone_matched_application_type"] = zm_type
             if zm_rows:
                 zm_corpus = np.array(
                     [[float(r[i]) for i in range(n_svd)] for r in zm_rows],
@@ -286,6 +296,7 @@ def score_description_similarity_bert(
     top_n: int = 20,
     min_similarity: float = 0.1,
     zoning_class: str | None = None,
+    application_type: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
     radius_m: float = 2000.0,
@@ -415,9 +426,14 @@ def score_description_similarity_bert(
             "query_lon": lon,
         }
 
-        # Zone-matched stats when zoning_class provided
+        # Zone-matched stats when zoning_class provided. When an application_type
+        # is also supplied, restrict to it (rezonings compared to rezonings).
         if zoning_class is not None and "zoning_class" in cols:
             zm_mask = index_df["zoning_class"] == zoning_class
+            zm_type = application_type if "application_type" in cols else None
+            if zm_type is not None:
+                zm_mask = zm_mask & (index_df["application_type"] == zm_type)
+                result["zone_matched_application_type"] = zm_type
             zm_indices = [i for i, m in enumerate(zm_mask.to_list()) if m]
             if zm_indices:
                 zm_emb = embeddings[zm_indices]

@@ -458,6 +458,18 @@ def _retrieve_chunks(
     return merged[:k]
 
 
+def _expected_app_type(path: str) -> str | None:
+    """Map a derived statutory path to the dev-corpus application_type to compare to.
+
+    Only ``rezoning`` maps cleanly: the dev_applications appeal labels are OZ+SA
+    only, and a rezoning files an OZ — so its appeal exposure should be read against
+    OZ comps, not site-plan (SA) applications. Other paths (minor variance is a COA
+    matter, as-of-right needs no relief) have no clean dev-corpus type, so they get
+    no type restriction and fall back to zone-only matching.
+    """
+    return "OZ" if path == "rezoning" else None
+
+
 def _compute_data_gaps(site: dict[str, Any], extracted: Any) -> list[str]:
     """Identify what information is unavailable and would improve the assessment."""
     gaps: list[str] = []
@@ -532,6 +544,11 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
     model_dir: Path = getattr(request.app.state, "model_dir", Path("models"))
     bert_model = getattr(request.app.state, "bert_model", None)
 
+    # Restrict the zone-matched outcome stats to the proposal's likely process
+    # type (rezoning -> OZ), so its appeal exposure is read against comparable
+    # filings rather than a mix of OZ and site-plan applications.
+    expected_type = _expected_app_type(_path)
+
     # BERT similarity preferred; fall back to TF-IDF+SVD when embeddings absent
     if bert_model is not None:
         desc_sim = score_description_similarity_bert(
@@ -539,6 +556,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
             data_dir=data_dir,
             model=bert_model,
             zoning_class=site.get("zoning_class"),
+            application_type=expected_type,
             lat=lat,
             lon=lon,
             min_dist_m=300.0,
@@ -549,6 +567,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
             data_dir=data_dir,
             model_dir=model_dir,
             zoning_class=site.get("zoning_class"),
+            application_type=expected_type,
             lat=lat,
             lon=lon,
             min_dist_m=300.0,

@@ -18,9 +18,9 @@ Spatial point-in-polygon against zoning, heritage, secondary-plan, MTSA, and the
 
 ## Description Similarity (`desc_similarity.py`)
 
-BERT scorer preferred; TF-IDF+SVD fallback. Both accept `zoning_class` for zone-matched stats.
+BERT scorer preferred; TF-IDF+SVD fallback. Both accept `zoning_class` for zone-matched stats and an optional `application_type` that **additionally** restricts the zone-matched subset to that process type (rezoning's exposure read against OZ comps, not site-plan SA). When applied, the result carries `zone_matched_application_type` and the narrator's zone-matched line names it ("same zone and process type"). `/evaluate` passes it via `_expected_app_type(path)` in `routes.py` (rezoning→`OZ`, else None — dev appeal labels are OZ+SA only, so only rezoning maps cleanly). Retrieval quality on the structured axes (zone/type/scale) is measured by `just comps-eval` (`scripts/comps_eval.py`); the harness showed text retrieval captures type well (+~40pp over random) but zone only weakly (+~8pp), which is why zone+type stratification of the *rate* matters.
 
-`approval_rate` is returned for API compat but **NOT surfaced in narrator** — `dev_approved` covers only ~9.6% of OZ/SA (survivorship bias). `zone_matched_appeal_rate` IS surfaced (no survivorship bias).
+`approval_rate` is returned for API compat but **NOT surfaced in narrator** — `dev_approved` covers only ~9.6% of OZ/SA (survivorship bias). `zone_matched_appeal_rate` IS surfaced (no survivorship bias) and is the rate **fed into the Planning Act statutory block** (`_format_statutory_process` prefers it over the zone-diluted pooled `appeal_rate`, falling back to pooled only when no same-zone rate exists).
 
 ## Narrator (`narrator.py`)
 

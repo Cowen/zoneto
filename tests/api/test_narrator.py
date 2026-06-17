@@ -335,6 +335,21 @@ class TestFormatDescriptionSimilarityZoneMatched:
         assert "3" in out
         assert "0%" not in out or "appeal" in out.lower()
 
+    def test_zone_matched_line_names_application_type_when_present(self) -> None:
+        """Given a zone-matched rate restricted to a process type, When formatting,
+        Then the line names that type so the rate isn't read as all-process."""
+        sim = {
+            "appeal_rate": 0.0,
+            "n_similar": 5,
+            "top_matches": [],
+            "zone_matched_n_similar": 4,
+            "zone_matched_appeal_rate": 0.25,
+            "zone_matched_application_type": "OZ",
+        }
+        out = _format_description_similarity(sim)
+        assert "same zone and process type" in out
+        assert "OZ application" in out
+
     def test_zone_matched_keys_absent_does_not_crash(self) -> None:
         """Given: zone_matched keys absent (callers without zone context).
         When: Formatting.

@@ -11,7 +11,115 @@ import polars as pl
 from zoneto.api.desc_similarity import (
     _deduplicate_matches,
     score_description_similarity,
+    score_description_similarity_bert,
 )
+
+
+class _FakeBertModel:
+    """Minimal SentenceTransformer stub: encodes anything to a constant vector."""
+
+    def encode(self, texts: list[str], **_: object) -> np.ndarray:
+        return np.ones((len(texts), 8), dtype=np.float32)
+
+
+def _write_bert_fixture(
+    data_dir: Path,
+    *,
+    zoning_classes: list[str | None],
+    app_types: list[str],
+    appeal_labels: list[int | None],
+) -> None:
+    (data_dir / "enriched").mkdir(parents=True, exist_ok=True)
+    n = len(zoning_classes)
+    np.save(
+        str(data_dir / "enriched" / "desc_bert_embeddings.npy"),
+        np.ones((n, 8), dtype=np.float32),
+    )
+    pl.DataFrame(
+        {
+            "folderrsn": [str(i) for i in range(n)],
+            "application_type": app_types,
+            "zoning_class": zoning_classes,
+            "dev_appealed": appeal_labels,
+            "dev_approved": [1] * n,
+        }
+    ).write_parquet(str(data_dir / "enriched" / "desc_bert_index.parquet"))
+
+
+def _write_fixture_zone_type(
+    data_dir: Path,
+    model_dir: Path,
+    *,
+    zoning_classes: list[str | None],
+    app_types: list[str],
+    appeal_labels: list[int | None],
+) -> None:
+    (data_dir / "enriched").mkdir(parents=True, exist_ok=True)
+    model_dir.mkdir(parents=True, exist_ok=True)
+    n = len(zoning_classes)
+    svd_cols = {f"desc_svd_{i}": [float(i % 3 + 1) * 0.1] * n for i in range(20)}
+    pl.DataFrame(
+        {
+            **svd_cols,
+            "dev_appealed": appeal_labels,
+            "dev_approved": [1] * n,
+            "folderrsn": [str(i) for i in range(n)],
+            "application_type": app_types,
+            "zoning_class": zoning_classes,
+        }
+    ).write_parquet(str(data_dir / "enriched" / "dev_applications.parquet"))
+    joblib.dump(_FakePipeline(), model_dir / "desc_tfidf.joblib")
+
+
+class TestZoneAndTypeMatched:
+    def test_tfidf_zone_matched_rate_restricted_to_application_type(
+        self, tmp_path: Path
+    ) -> None:
+        """Given same-zone comps of mixed process type (OZ appealed, SA not), When an
+        application_type is supplied, Then the zone-matched appeal rate is computed
+        over that type only — a rezoning's exposure compared to rezonings, not site
+        plans."""
+        data_dir = tmp_path / "d"
+        model_dir = tmp_path / "m"
+        _write_fixture_zone_type(
+            data_dir,
+            model_dir,
+            zoning_classes=["RM"] * 4,
+            app_types=["OZ", "OZ", "SA", "SA"],
+            appeal_labels=[1, 1, 0, 0],
+        )
+        result = score_description_similarity(
+            "test",
+            data_dir=data_dir,
+            model_dir=model_dir,
+            zoning_class="RM",
+            application_type="OZ",
+        )
+        assert result is not None
+        assert result["zone_matched_appeal_rate"] == 1.0  # OZ-only: both appealed
+        assert result["zone_matched_application_type"] == "OZ"
+
+    def test_bert_zone_matched_rate_restricted_to_application_type(
+        self, tmp_path: Path
+    ) -> None:
+        """Same as above for the BERT scorer path."""
+        data_dir = tmp_path / "db"
+        _write_bert_fixture(
+            data_dir,
+            zoning_classes=["RM"] * 4,
+            app_types=["OZ", "OZ", "SA", "SA"],
+            appeal_labels=[1, 1, 0, 0],
+        )
+        result = score_description_similarity_bert(
+            "test",
+            data_dir=data_dir,
+            model=_FakeBertModel(),
+            zoning_class="RM",
+            application_type="OZ",
+        )
+        assert result is not None
+        assert result["zone_matched_appeal_rate"] == 1.0
+        assert result["zone_matched_application_type"] == "OZ"
 
 
 class _FakePipeline:

@@ -138,9 +138,15 @@ def _format_statutory_process(
     rental replacement). This is CONTEXT only — it never changes CONFIDENCE.
     """
     path = planning_act.path_for_violations(violations)
-    appeal_rate = (
-        description_similarity.get("appeal_rate") if description_similarity else None
-    )
+    # Prefer the same-zone appeal rate: the pooled rate is computed over a
+    # text-similar comp set that is only weakly same-zone (~19% concordance, see
+    # scripts/comps_eval.py), so it must not drive the appeal-risk framing. Fall
+    # back to the pooled rate only when no same-zone rate is available.
+    appeal_rate = None
+    if description_similarity:
+        appeal_rate = description_similarity.get("zone_matched_appeal_rate")
+        if appeal_rate is None:
+            appeal_rate = description_similarity.get("appeal_rate")
     # OZ filings can be a standalone ZBA (90-day clock) or combined with an OPA
     # (120). An OPA is signalled by either an explicit mention in the description or
     # an Official-Plan non-conformity (op_use_nonconforming) — the latter *is* the
@@ -324,13 +330,22 @@ def _format_description_similarity(
             )
         else:
             zm_appeal = sim.get("zone_matched_appeal_rate")
+            zm_type = sim.get("zone_matched_application_type")
             if zm_appeal is not None:
                 zm_pct = round(zm_appeal * 100)
-                parts.append(
-                    f"Zone-matched analysis: {zone_n} similar application(s) "
-                    f"in the same zone, appeal rate {zm_pct}% "
-                    "(more representative than the overall rate — same zone type)."
-                )
+                if zm_type:
+                    parts.append(
+                        f"Zone-matched analysis: {zone_n} similar {zm_type} "
+                        f"application(s) in the same zone and process type, appeal "
+                        f"rate {zm_pct}% (more representative than the overall rate "
+                        "— same zone and process)."
+                    )
+                else:
+                    parts.append(
+                        f"Zone-matched analysis: {zone_n} similar application(s) "
+                        f"in the same zone, appeal rate {zm_pct}% "
+                        "(more representative than the overall rate — same zone type)."
+                    )
             else:
                 parts.append(
                     f"Zone-matched analysis: {zone_n} similar application(s) "

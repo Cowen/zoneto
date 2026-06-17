@@ -34,6 +34,11 @@ bylaw-index:
 bylaw-eval:
     uv run python scripts/bylaw_eval.py
 
+# Evaluate comparable-application retrieval: structured concordance (zone, type,
+# scale) of top-k comps vs a random baseline, leave-one-out (needs `just enrich`+train)
+comps-eval *ARGS:
+    uv run python scripts/comps_eval.py {{ARGS}}
+
 # Evaluate narrator confidence calibration against golden cases
 # (requires ANTHROPIC_API_KEY + data/reference; one LLM call per case)
 narrator-eval *ARGS:

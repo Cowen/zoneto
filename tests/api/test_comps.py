@@ -119,6 +119,46 @@ def test_query_comps_spatial_sorted_by_proximity(enriched_parquet: Path) -> None
     assert results[0]["folderrsn"] == "F001"  # closest to query point
 
 
+def test_query_comps_proximity_sort_is_metric_not_degrees(tmp_path: Path) -> None:
+    """Given two comps equidistant in raw degrees but not in metres, When sorted by
+    proximity, Then the truly-closer (east-west) one ranks first.
+
+    A degree of longitude is shorter than a degree of latitude at Toronto's
+    latitude (~0.72x), so a raw-degree distance sort over-penalises east-west
+    neighbours. EAST is 0.0010deg east (truly ~80m); NORTH is 0.00085deg north
+    (truly ~94m). Raw degrees would rank NORTH first (0.00085 < 0.0010); the
+    metric-correct sort ranks EAST first.
+    """
+    current_year = datetime.date.today().year
+    path = tmp_path / "enriched" / "dev_applications.parquet"
+    path.parent.mkdir(parents=True)
+    q_lat, q_lon = 43.70, -79.40
+    df = pl.DataFrame(
+        {
+            "folderrsn": ["EAST", "NORTH"],
+            "application_type": ["OZ", "OZ"],
+            "ward_number": ["10", "10"],
+            "zoning_class": ["RA1", "RA1"],
+            "status": ["Approved", "Approved"],
+            "year_submitted": pl.Series([current_year - 1] * 2, dtype=pl.Int32),
+            "lat": [q_lat, q_lat + 0.00085],
+            "lon": [q_lon + 0.0010, q_lon],
+            "dev_approved": pl.Series([1, 1], dtype=pl.Int8),
+            "dev_appealed": pl.Series([0, 0], dtype=pl.Int8),
+            "dev_days_to_decision": pl.Series([365, 365], dtype=pl.Int32),
+            "proposed_storeys": pl.Series([10, 10], dtype=pl.Int32),
+            "proposed_units": pl.Series([100, 100], dtype=pl.Int32),
+            "description": ["OZ application"] * 2,
+            "street_num": ["100", "200"],
+            "street_name": ["King St", "Queen St"],
+        }
+    )
+    df.write_parquet(path)
+
+    results = query_comps(path, lat=q_lat, lon=q_lon, radius_m=500, years=5)
+    assert [r["folderrsn"] for r in results] == ["EAST", "NORTH"]
+
+
 def test_query_comps_limit(enriched_parquet: Path) -> None:
     """Limit caps result count."""
     results = query_comps(enriched_parquet, years=10, limit=2)

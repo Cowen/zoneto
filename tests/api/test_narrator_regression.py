@@ -184,6 +184,54 @@ def test_op_nonconformity_selects_combined_120_day_clock() -> None:
     assert "90 days" in text_standalone
 
 
+def _rezoning_violations() -> tuple:
+    """A residential proposal in an Employment zone → use_not_permitted (rezoning),
+    with a conforming OP designation so no op_use_nonconforming muddies the path."""
+    extracted = extract_project_features(
+        "A 12-storey residential apartment building with 90 dwelling units"
+    )
+    site = {
+        "permitted_use_category": "Employment Industrial",
+        "op_land_use_designation": "Mixed Use Areas",
+    }
+    violations = check_compliance(extracted, site)
+    return violations, extracted
+
+
+def test_statutory_appeal_rate_prefers_zone_matched() -> None:
+    """Given both a pooled and a same-zone appeal rate, When the statutory block
+    renders, Then it reads the zone-matched rate — the pooled set is only weakly
+    same-zone (see scripts/comps_eval.py), so it must not drive appeal-risk framing.
+    """
+    violations, extracted = _rezoning_violations()
+    assert path_for_violations(violations) == "rezoning"
+    sim = {
+        "appeal_rate": 0.40,  # pooled, zone-diluted
+        "zone_matched_appeal_rate": 0.10,  # same-zone, sound
+        "zone_matched_n_similar": 5,
+        "n_similar": 20,
+        "top_matches": [],
+    }
+    text = _format_statutory_process(violations, extracted, description_similarity=sim)
+    assert "10% comparable appeal rate" in text
+    assert "40%" not in text
+
+
+def test_statutory_appeal_rate_falls_back_to_pooled_when_no_zone_match() -> None:
+    """Given no same-zone appeal rate, When the statutory block renders, Then it
+    falls back to the pooled rate rather than dropping the appeal-risk note."""
+    violations, extracted = _rezoning_violations()
+    sim = {
+        "appeal_rate": 0.40,
+        "zone_matched_appeal_rate": None,
+        "zone_matched_n_similar": 0,
+        "n_similar": 20,
+        "top_matches": [],
+    }
+    text = _format_statutory_process(violations, extracted, description_similarity=sim)
+    assert "40% comparable appeal rate" in text
+
+
 @pytest.mark.parametrize("case_id", _CASE_IDS)
 def test_narrate_end_to_end_mocked(case_id: str) -> None:
     """Given a golden case and a stub agent answering confidence 50,
