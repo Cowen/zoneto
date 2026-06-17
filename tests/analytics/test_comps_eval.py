@@ -50,3 +50,14 @@ def test_zone_not_worse_than_random(results: dict) -> None:
     base = results["baseline"]["zone"]
     assert conc is not None and base is not None
     assert conc >= base, f"zone concordance ({conc:.1%}) fell below random ({base:.1%})"
+
+
+def test_scale_magnitude_is_broadly_measurable(results: dict) -> None:
+    """The absolute-magnitude scale axis must be measurable for a large share of
+    queries (~60% coverage), unlike the sparse excess-ratio axis. Guards the
+    column-selection regression where proposed_storeys/units were not loaded."""
+    n_mag = results["measurable"]["scale_mag"]
+    assert n_mag > 0.3 * results["n_queries"], (
+        f"scale_mag measurable for only {n_mag}/{results['n_queries']} queries — "
+        "expected broad coverage from absolute magnitude"
+    )

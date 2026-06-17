@@ -28,7 +28,7 @@ compatibility, so `from zoneto.analytics.enrich import ...` still resolves them.
 ## Enrichment
 
 **Reference datasets** (fetched by `reference.py`, cached in `data/reference/`):
-- `zoning.geojson` — ZN_ZONE, UNITS (max units), DENSITY (max FSI); **-1 means no limit → treated as null**
+- `zoning.geojson` — ZN_ZONE, UNITS (max units), DENSITY (max FSI); **-1 means no limit → treated as null** (normalized in the enrich spatial join by `spatial.py` `_normalize_zoning_limits`, matching the live `lookup_site_context`; previously -1 leaked into the corpus)
 - `zoning_height.geojson` — HT_STORIES (max storeys, ~15% coverage); -1 treated as null
 - Heritage register/districts (ZIP→SHP), secondary plans (GeoJSON), `mtsa/` (ZIP→SHP)
 - `op_land_use.geojson` — Official Plan land-use **designation** polygons (`op_designation`); **interim Borealis source** (CC BY-NC, 10 designations dissolved, EPSG:26917→WGS84 via `ST_Transform`). Optional/graceful: absent → `op_land_use_designation` null. **Acquired by `just op` (NOT `enrich`)** so the download isn't forced. No official City polygon layer exists (verified 2026-06-13); swap for a GCC data-request layer when secured. See `specs/2026-06-13-planning-act-integration.md` item 4b.
@@ -40,7 +40,7 @@ compatibility, so `from zoneto.analytics.enrich import ...` still resolves them.
 - `dev_appealed` label (labels.py `_label_from_sets`): OZ+SA only. 1=appeal filed, 0=any closed non-appeal status, null=active/non-OZ/SA. Covers ALL closed OZ+SA to preserve true base rate (~15–25%). Earlier versions only labeled explicitly-approved rows as 0 — caused 50/50 bias.
 - `op_land_use_designation` (spatial.py `_add_op_land_use_feature`): OP designation from a point-in-polygon join against `op_land_use.geojson`. Written to enriched parquet for the conformity check + eval, but **NOT a model feature** (kept out of `features.py` `DEV_*_COLS` — adding it would change the model; framing-only stance).
 - `ward_appeal_rate_3y` uses only years strictly before `year_submitted` — temporal leakage-safe.
-- `unit_excess_ratio` = proposed_units / zoning_max_units; `storey_excess_ratio` = proposed_storeys / zoning_max_storeys (>1.0 exceeds by-law).
+- `unit_excess_ratio` = proposed_units / zoning_max_units; `storey_excess_ratio` = proposed_storeys / zoning_max_storeys; `fsi_excess_ratio` = proposed_fsi / zoning_max_density (>1.0 exceeds by-law). `proposed_fsi` is extracted from descriptions via `extract.py`'s `_FSI_RES` patterns. **Excess ratios are low-coverage** (~7% combined): most sites have no unit cap (`-1`, FSI governs) and the height overlay is sparse (~15%) — so the comps harness (`scripts/comps_eval.py`) uses an absolute-magnitude band (`retrieval_eval.magnitude_band`, from proposed_storeys/units, ~60% coverage) as the primary `scale_mag` axis and excess ratios as the secondary `scale_excess` axis. See [[project_zoning_excess_ratio]] memory.
 - `dev_days_to_decision` capped at 3,650 days (labels.py `_DEV_DAYS_CAP`).
 - NLP (nlp.py): descriptions TF-IDF→20-dim TruncatedSVD (`desc_svd_0..desc_svd_19`); pipeline serialized to `models/desc_tfidf.joblib`.
 - BERT: `compute_bert_embeddings()` (nlp.py) uses `BAAI/bge-small-en-v1.5` (384-dim) → `data/enriched/desc_bert_embeddings.npy` + `desc_bert_index.parquet`. Idempotent.

@@ -34,22 +34,32 @@ from zoneto.analytics.retrieval_eval import (
     concordance_at_k,
     count_measurable,
     excess_band,
+    magnitude_band,
 )
 from zoneto.api.desc_similarity import score_description_similarity
 
-_AXES = ("zone", "type", "scale")
+# scale_mag (absolute built-form size, ~60% coverage) is the primary scale axis;
+# scale_excess (proposed / zone-limit, ~7% coverage) is the secondary risk signal.
+_AXES = ("zone", "type", "scale_mag", "scale_excess")
 
 
 def _attrs_for(row: dict) -> dict[str, object]:
     """Project an enriched row onto the structured comparability axes."""
-    ratios = [row.get("unit_excess_ratio"), row.get("storey_excess_ratio")]
+    ratios = [
+        row.get("unit_excess_ratio"),
+        row.get("storey_excess_ratio"),
+        row.get("fsi_excess_ratio"),
+    ]
     known = [r for r in ratios if r is not None]
-    # Worst (largest) overage governs the scale-of-ask band; None if neither known.
-    scale = excess_band(max(known)) if known else None
     return {
         "zone": row.get("zoning_class"),
         "type": row.get("application_type"),
-        "scale": scale,
+        # Absolute magnitude needs no zone limit — high coverage, primary axis.
+        "scale_mag": magnitude_band(
+            row.get("proposed_storeys"), row.get("proposed_units")
+        ),
+        # Worst (largest) overage governs the excess band; None if neither known.
+        "scale_excess": excess_band(max(known)) if known else None,
     }
 
 
@@ -77,8 +87,11 @@ def run_eval(
         "description",
         "zoning_class",
         "application_type",
+        "proposed_storeys",
+        "proposed_units",
         "unit_excess_ratio",
         "storey_excess_ratio",
+        "fsi_excess_ratio",
     ]
     available = pl.scan_parquet(path).collect_schema().names()
     df = pl.read_parquet(path).select([c for c in wanted if c in available])
@@ -167,7 +180,7 @@ def run_eval(
             f"(leave-one-out, n={n_used:,} queries)\n"
         )
         hdr = (
-            f"  {'axis':>6} | {'retrieval':>10} | {'random':>8} | "
+            f"  {'axis':>12} | {'retrieval':>10} | {'random':>8} | "
             f"{'lift':>7} | {'n':>5}"
         )
         print(hdr)
@@ -178,16 +191,17 @@ def run_eval(
             bs = f"{b:.1%}" if b is not None else "  n/a"
             ls = f"{ell:+.1%}" if ell is not None else "  n/a"
             print(
-                f"  {a:>6} | {cs:>10} | {bs:>8} | {ls:>7} | {measurable.get(a, 0):>5,}"
+                f"  {a:>12} | {cs:>10} | {bs:>8} | {ls:>7} | {measurable.get(a, 0):>5,}"
             )
         print(
             "\n  Lift is retrieval concordance minus a random-comp baseline. "
             "Near-zero\n  lift on an axis means description-text retrieval is not "
             "capturing it — a\n  structured/hybrid ranker would. 'n' is how many "
-            "queries could measure the\n  axis: 'scale' has low coverage (excess "
-            "ratios ~7% of rows), so read its\n  mean with its n. Text-similarity "
-            "core only (no proximity or zone-derank);\n  layer those in as "
-            "configurable follow-ups.\n"
+            "queries could measure the\n  axis: scale_mag (absolute built-form size) "
+            "covers ~60% of rows;\n  scale_excess (proposed / zone-limit) only ~7% "
+            "(most sites have no unit\n  cap; sparse height overlay) — read each mean "
+            "with its n. Text-similarity\n  core only (no proximity or zone-derank); "
+            "layer those in as follow-ups.\n"
         )
     return results
 

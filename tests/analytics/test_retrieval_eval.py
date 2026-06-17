@@ -13,6 +13,7 @@ from zoneto.analytics.retrieval_eval import (
     concordance_at_k,
     count_measurable,
     excess_band,
+    magnitude_band,
 )
 
 
@@ -39,6 +40,39 @@ class TestExcessBand:
     def test_extreme_overage_is_extreme(self) -> None:
         """Given a ratio far past the limit, When banded, Then it is 'extreme'."""
         assert excess_band(3.5) == "extreme"
+
+
+class TestMagnitudeBand:
+    def test_none_inputs_return_none(self) -> None:
+        """Given neither storeys nor units, When banded, Then the size is unknown."""
+        assert magnitude_band(None, None) is None
+
+    def test_storeys_band_thresholds(self) -> None:
+        """Given a storey count, When banded, Then it maps to a Toronto built-form
+        size class (low/mid/high-rise/tower)."""
+        assert magnitude_band(3, None) == "small"  # low-rise 1-4
+        assert magnitude_band(8, None) == "medium"  # mid-rise 5-11
+        assert magnitude_band(20, None) == "large"  # high-rise 12-29
+        assert magnitude_band(45, None) == "xlarge"  # tower 30+
+
+    def test_units_used_when_storeys_absent(self) -> None:
+        """Given units but no storeys, When banded, Then unit thresholds map to the
+        same ordinal size class — so units-only proposals still get a scale."""
+        assert magnitude_band(None, 12) == "small"
+        assert magnitude_band(None, 60) == "medium"
+        assert magnitude_band(None, 250) == "large"
+        assert magnitude_band(None, 800) == "xlarge"
+
+    def test_storeys_preferred_over_units(self) -> None:
+        """Given both, When banded, Then storeys (the cleaner built-form signal)
+        governs."""
+        assert magnitude_band(40, 5) == "xlarge"
+
+    def test_nonpositive_storeys_falls_back_to_units(self) -> None:
+        """Given an invalid storey count but valid units, When banded, Then units
+        are used rather than producing a bogus band."""
+        assert magnitude_band(0, 250) == "large"
+        assert magnitude_band(0, 0) is None
 
 
 class TestConcordanceAtK:

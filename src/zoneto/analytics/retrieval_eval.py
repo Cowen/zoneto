@@ -38,6 +38,37 @@ def excess_band(ratio: float | None) -> str | None:
     return "extreme"
 
 
+def magnitude_band(storeys: float | None, units: float | None) -> str | None:
+    """Bucket a proposal's absolute size into a built-form class.
+
+    Unlike ``excess_band`` (proposed / zone-limit, ~7% coverage because most sites
+    have no unit cap and the height overlay is sparse), this needs no zone limit —
+    it bands the raw proposal magnitude, covering ~60% of the corpus. Storeys are
+    the cleaner built-form signal and take precedence; units (mapped to the same
+    ordinal classes) are the fallback so units-only proposals still get a scale.
+
+    Returns 'small' (low-rise), 'medium' (mid-rise), 'large' (high-rise), 'xlarge'
+    (tower), or None when neither a positive storey nor unit count is available.
+    """
+    if storeys is not None and storeys > 0:
+        if storeys <= 4:
+            return "small"
+        if storeys <= 11:
+            return "medium"
+        if storeys <= 29:
+            return "large"
+        return "xlarge"
+    if units is not None and units > 0:
+        if units < 20:
+            return "small"
+        if units < 100:
+            return "medium"
+        if units < 500:
+            return "large"
+        return "xlarge"
+    return None
+
+
 def concordance_at_k(
     query: Mapping[str, object],
     retrieved: Sequence[Mapping[str, object]],

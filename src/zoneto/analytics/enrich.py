@@ -8,6 +8,7 @@ from pathlib import Path
 
 import polars as pl
 
+from zoneto.analytics.extract import _FSI_RES
 from zoneto.analytics.labels import (
     _DEV_ACTIVE_SET,
     _DEV_APPEALED_SET,
@@ -363,10 +364,21 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
             .cast(pl.Int32, strict=False)
             .alias("proposed_units")
         )
+        # proposed_fsi: extract a stated floor space index ("an FSI of 5.0",
+        # "density of 3.2 times the lot"). Reuses the extract.py patterns (DRY);
+        # coalesce takes the first pattern that matches.
+        df = df.with_columns(
+            pl.coalesce(
+                [pl.col("description").str.extract(p.pattern, 1) for p in _FSI_RES]
+            )
+            .cast(pl.Float64, strict=False)
+            .alias("proposed_fsi")
+        )
     else:
         df = df.with_columns(
             pl.lit(None, dtype=pl.Int32).alias("proposed_storeys"),
             pl.lit(None, dtype=pl.Int32).alias("proposed_units"),
+            pl.lit(None, dtype=pl.Float64).alias("proposed_fsi"),
         )
 
     # unit_excess_ratio: proposed_units / zoning_max_units.
@@ -396,6 +408,21 @@ def enrich_dev(data_dir: Path = Path("data")) -> int:
         .otherwise(None)
         .cast(pl.Float64)
         .alias("storey_excess_ratio")
+    )
+
+    # fsi_excess_ratio: proposed_fsi / zoning_max_density (FSI). FSI is the density
+    # regulator for the ~half of sites that have no unit cap (zoning_max_units = -1),
+    # so this is the higher-coverage excess signal than unit_excess_ratio.
+    df = df.with_columns(
+        pl.when(
+            pl.col("proposed_fsi").is_not_null()
+            & pl.col("zoning_max_density").is_not_null()
+            & (pl.col("zoning_max_density") > 0)
+        )
+        .then(pl.col("proposed_fsi") / pl.col("zoning_max_density"))
+        .otherwise(None)
+        .cast(pl.Float64)
+        .alias("fsi_excess_ratio")
     )
 
     # is_combined_application: OZ with OPA in description field (case-insensitive)

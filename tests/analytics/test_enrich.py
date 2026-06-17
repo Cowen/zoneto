@@ -312,6 +312,54 @@ def test_enrich_dev_creates_output(
     assert (tmp_path / "enriched" / "dev_applications.parquet").exists()
 
 
+def test_enrich_dev_fsi_excess_ratio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Given a description stating an FSI and a zone FSI (density) limit, When
+    enriched, Then proposed_fsi is extracted and fsi_excess_ratio = proposed_fsi /
+    zone limit — the higher-coverage density-based scale-of-ask signal."""
+
+    def _stub_with_density(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
+        return df.with_columns(
+            pl.lit(None, dtype=pl.Utf8).alias("zoning_class"),
+            pl.lit(None, dtype=pl.Utf8).alias("secondary_plan_name"),
+            pl.lit(0, dtype=pl.Int8).alias("in_heritage_register"),
+            pl.lit(0, dtype=pl.Int8).alias("in_heritage_district"),
+            pl.lit(0, dtype=pl.Int8).alias("in_secondary_plan"),
+            pl.lit(None, dtype=pl.Int32).alias("zoning_max_units"),
+            pl.lit(2.0, dtype=pl.Float64).alias("zoning_max_density"),
+            pl.lit(None, dtype=pl.Int32).alias("zoning_max_storeys"),
+        )
+
+    monkeypatch.setattr("zoneto.analytics.enrich.spatial_join_dev", _stub_with_density)
+    df = pl.DataFrame(
+        {
+            "folderrsn": ["AAA"],
+            "application_url": [None],
+            "description": ["Rezoning for a Floor Space Index (FSI) of 6.0 building"],
+            "date_submitted": ["2021-06-01"],
+            "status": ["Closed"],
+            "application_type": ["Rezoning"],
+            "ward_number": ["Ward 1"],
+            "community_meeting_date": [None],
+            "parent_folder_number": [None],
+            "postal": ["M5V 2T6"],
+            "x": ["630000.0"],
+            "y": ["4840000.0"],
+            "source_name": ["dev_applications"],
+            "year": [2021],
+        }
+    ).with_columns(pl.col("date_submitted").str.to_date())
+    out = tmp_path / "dev_applications" / "year=2021"
+    out.mkdir(parents=True)
+    df.write_parquet(out / "part0.parquet")
+
+    enrich_dev(data_dir=tmp_path)
+    res = pl.read_parquet(tmp_path / "enriched" / "dev_applications.parquet")
+    assert res["proposed_fsi"][0] == 6.0
+    assert res["fsi_excess_ratio"][0] == 3.0  # 6.0 / 2.0
+
+
 def test_enrich_dev_approved_label(
     tmp_path: Path,
     stub_spatial_join: None,

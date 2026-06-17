@@ -73,6 +73,22 @@ def enrich_ward_features(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
     )
 
 
+def _normalize_zoning_limits(df: pl.DataFrame) -> pl.DataFrame:
+    """Null the by-law "no limit" sentinel in zoning limit columns.
+
+    `UNITS`/`DENSITY` from zoning.geojson use -1 for "no limit" (docs/
+    zoning_readme.txt). Any non-positive value is mapped to null so downstream
+    excess ratios and displays never treat it as a real cap — matching the height
+    overlay's `CASE WHEN > 0` handling. Tolerates absent columns.
+    """
+    exprs = [
+        pl.when(pl.col(col) > 0).then(pl.col(col)).otherwise(None).alias(col)
+        for col in ("zoning_max_units", "zoning_max_density")
+        if col in df.columns
+    ]
+    return df.with_columns(exprs) if exprs else df
+
+
 def _add_height_feature(df: pl.DataFrame, height_path: Path) -> pl.DataFrame:
     """Add zoning_max_storeys (Int32) via DuckDB spatial join against height overlay.
 
@@ -437,6 +453,11 @@ def spatial_join_dev(df: pl.DataFrame, data_dir: Path) -> pl.DataFrame:
         pl.col("zoning_max_units").cast(pl.Int32, strict=False),
         pl.col("zoning_max_density").cast(pl.Float64, strict=False),
     )
+    # Null the by-law "no limit" sentinel (-1, per docs/zoning_readme.txt) so excess
+    # ratios and displays never treat it as a real cap — matching the height
+    # overlay's CASE WHEN > 0 handling. The live lookup_site_context already does
+    # this; the enrich join did not, leaking -1 into the corpus.
+    result = _normalize_zoning_limits(result)
 
     # Add zoning max storeys from height overlay
     height_geojson = ref / "zoning_height.geojson"
