@@ -1,0 +1,34 @@
+{
+  "_comment": "City of Toronto municipal development charges (DCs), curated from the City's published rate schedule. DCs are a city-wide flat schedule (NOT spatial, NOT zoning-dependent): a rate per residential dwelling unit by unit type, and a rate per square metre of non-residential ground-floor gross floor area. They change over time via indexing and bylaw amendments. UPDATE PROCEDURE: when the bylaw or indexing changes, APPEND a new object to `versions` with a new `effective_from`, set the previous version's `effective_to` to the day before, and bump `verified_date`. Old `as_of` dates keep resolving to the correct historical rates. Excludes Community Benefits Charge (s.37/CBC), parkland dedication (s.42), and education development charges by design.",
+  "versions": [
+    {
+      "effective_from": "2024-06-06",
+      "effective_to": null,
+      "source_bylaw": "1137-2022",
+      "source_url": "https://www.toronto.ca/city-government/budget-finances/city-finance/development-charges/",
+      "verified_date": "2026-06-19",
+      "verified_source_pdf": "https://www.toronto.ca/wp-content/uploads/2025/04/97eb-DC-Rates-Effective-June-6-2024-and-May-1-2025.pdf",
+      "indexing_note": "Per Council item MM29.16 (April 2025), Toronto held housing DC rates at their June 6, 2024 levels; the scheduled May 1, 2025 indexing (a 4% adjustment) does NOT apply to housing developments. Indexing remains paused pending the City's DC bylaw review and a new bylaw. The June 6, 2024 rates require a Section 27 agreement under the Development Charges Act to be locked in prior to building-permit issuance.",
+      "non_residential_ground_floor_only": true,
+      "residential": [
+        {"tenure": "non_rental", "form": "singles_semis", "unit_type": "Singles & Semis", "rate_cad": 137846},
+        {"tenure": "non_rental", "form": "multiples", "unit_type": "Multiples 2+ Bedrooms", "rate_cad": 113938},
+        {"tenure": "non_rental", "form": "multiples", "unit_type": "Multiples 1 Bedroom & Bachelor", "rate_cad": 57153},
+        {"tenure": "non_rental", "form": "apartment", "unit_type": "Apartments 2+ Bedrooms", "rate_cad": 80690},
+        {"tenure": "non_rental", "form": "apartment", "unit_type": "Apartments 1 Bedroom & Bachelor", "rate_cad": 52676},
+        {"tenure": "non_rental", "form": "dwelling_room", "unit_type": "Dwelling Room", "rate_cad": 37356},
+
+        {"tenure": "rental", "form": "multiples", "unit_type": "Multiples 3+ Bedrooms", "rate_cad": 63937},
+        {"tenure": "rental", "form": "multiples", "unit_type": "Multiples 2 Bedrooms", "rate_cad": 68199},
+        {"tenure": "rental", "form": "multiples", "unit_type": "Multiples 1 Bedroom & Bachelor", "rate_cad": 36351},
+        {"tenure": "rental", "form": "apartment", "unit_type": "Apartments 3 Bedrooms & Larger", "rate_cad": 45280},
+        {"tenure": "rental", "form": "apartment", "unit_type": "Apartments 2 Bedrooms", "rate_cad": 48299},
+        {"tenure": "rental", "form": "apartment", "unit_type": "Apartments 1 Bedroom & Bachelor", "rate_cad": 33497},
+        {"tenure": "rental", "form": "dwelling_room", "unit_type": "Dwelling Room", "rate_cad": 23759}
+      ],
+      "non_residential": [
+        {"use_type": "Non-residential (ground-floor GFA)", "rate_per_sqm_cad": 805.64}
+      ]
+    }
+  ]
+}

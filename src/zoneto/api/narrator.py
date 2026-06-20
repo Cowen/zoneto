@@ -21,6 +21,7 @@ from zoneto.analytics.compliance import Severity, Violation, effective_height_m
 from zoneto.analytics.extract import ProjectFeatures
 from zoneto.analytics.use_classifier import use_matches_zone
 from zoneto.api.desc_similarity import DescriptionSimilarity
+from zoneto.api.dev_charges import DevelopmentChargeContext
 from zoneto.api.site_context import SiteContext
 from zoneto.llm.schemas import NarrationResult
 
@@ -123,6 +124,10 @@ STRICT RULES you must always follow:
      CONTEXT for the prose only. Requiring an OPA/ZBA, a minor variance,
      or having an OLT appeal route does NOT by itself lower confidence —
      it just names the correct path. Do NOT adjust confidence for it.
+   - The "Development charges" section is informational COST context only.
+     Development charges are never a compliance violation and must NEVER
+     change the confidence score. Report the figures as a range with their
+     caveats; do not present a range as if it were a single certain amount.
    The confidence is a separate numeric field — do NOT write it inside the
    summary text.
 """
@@ -411,6 +416,48 @@ def _format_community_benefits(cb: CommunityBenefitsContext | None) -> str:
     )
 
 
+def _format_development_charges(dc: DevelopmentChargeContext | None) -> str:
+    """Render the municipal development-charge cost context for the prompt.
+
+    Informational only — never scored. Surfaces the schedule vintage, a per-unit
+    range (never a single false-precise figure), the non-residential rate (not
+    totalled without GFA), and the honest caveats/exclusions.
+    """
+    if not dc:
+        return ""
+    lines = [
+        f"Municipal development charges (Toronto By-law {dc.source_bylaw}, rates "
+        f"effective {dc.effective_from:%B %-d, %Y}; verified {dc.verified_date}):"
+    ]
+    if dc.residential_total_low is not None and dc.residential_total_high is not None:
+        form = f" ({dc.residential_form})" if dc.residential_form else ""
+        lines.append(
+            f"  Residential estimate for {dc.units} unit(s){form}: "
+            f"${dc.residential_total_low:,.0f}–${dc.residential_total_high:,.0f} "
+            f"(${dc.residential_rate_low:,.0f}–${dc.residential_rate_high:,.0f} "
+            f"per unit, depending on dwelling-unit type)."
+        )
+    else:
+        lines.append(
+            "  No unit count was extracted, so no residential total is estimated; "
+            "the published per-unit schedule is provided for reference."
+        )
+    if dc.non_residential_rate_per_sqm is not None:
+        lines.append(
+            f"  Non-residential: ${dc.non_residential_rate_per_sqm:,.2f} per m². "
+            f"{dc.non_residential_note or ''}".rstrip()
+        )
+    if dc.rental_note:
+        lines.append(f"  {dc.rental_note}")
+    if dc.exclusions:
+        lines.append(
+            "  Excludes (NOT in the figures above): " + "; ".join(dc.exclusions)
+        )
+    if dc.caveats:
+        lines.append("  Caveats: " + " ".join(dc.caveats))
+    return "\n".join(lines)
+
+
 def _format_data_gaps(data_gaps: list[str]) -> str:
     if not data_gaps:
         return ""
@@ -574,6 +621,7 @@ def narrate_evaluation(
     data_gaps: list[str] | None = None,
     description_similarity: DescriptionSimilarity | None = None,
     community_benefits: CommunityBenefitsContext | None = None,
+    development_charges: DevelopmentChargeContext | None = None,
 ) -> tuple[str, int]:
     """Generate a markdown compliance summary and confidence score.
 
@@ -594,6 +642,7 @@ def narrate_evaluation(
         description_similarity, site_zoning_class=site_zone
     )
     cb_section = _format_community_benefits(community_benefits)
+    dc_section = _format_development_charges(development_charges)
     desc_section = f"\n## Project description\n{description}" if description else ""
     user_content = f"""\
 ## Site context
@@ -616,6 +665,15 @@ def narrate_evaluation(
             ""
             if not cb_section
             else ("\n## Section 37 Community Benefits Context\n" + cb_section)
+        )
+    }
+{
+        (
+            ""
+            if not dc_section
+            else (
+                "\n## Development charges (informational — not scored)\n" + dc_section
+            )
         )
     }
 {

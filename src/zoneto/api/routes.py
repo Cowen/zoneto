@@ -29,6 +29,10 @@ from zoneto.api.desc_similarity import (
     score_description_similarity,
     score_description_similarity_bert,
 )
+from zoneto.api.dev_charges import (
+    DevelopmentChargeContext,
+    estimate_development_charges,
+)
 from zoneto.api.narrator import (
     CommunityBenefitsContext,
     narrate_evaluation,
@@ -300,6 +304,7 @@ class EvaluateResponse(BaseModel):
     data_gaps: list[str] = []
     description_similarity: DescriptionSimilarity | None = None
     community_benefits_context: CommunityBenefitsContext | None = None
+    development_charges_context: DevelopmentChargeContext | None = None
     statutory_process: StatutoryProcessResult | None = None
     additional_processes: list[StatutoryProcessResult] = []
     nearby_active_applications: list[NearbyApplication] = []
@@ -543,6 +548,10 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
 
     data_gaps = _compute_data_gaps(site, extracted)
     cb_context = _community_benefits_context(data_dir=data_dir)
+    # Municipal development charges: a city-wide flat schedule (not spatial), so
+    # the estimate keys off the proposal's extracted features, not the location.
+    # as_of=today selects the current rate version. Informational only.
+    dc_context = estimate_development_charges(extracted, datetime.date.today())
     enriched_path = data_dir / "enriched" / "dev_applications.parquet"
     nearby = nearby_applications(lat, lon, enriched_path, radius_m=500.0, years=5)
     model_dir: Path = getattr(request.app.state, "model_dir", Path("models"))
@@ -591,6 +600,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         data_gaps=data_gaps,
         description_similarity=desc_sim,
         community_benefits=cb_context,
+        development_charges=dc_context,
     )
 
     return EvaluateResponse(
@@ -631,6 +641,7 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
         data_gaps=data_gaps,
         description_similarity=desc_sim,
         community_benefits_context=cb_context,
+        development_charges_context=dc_context,
         statutory_process=statutory_process,
         additional_processes=extra_processes,
         nearby_active_applications=[NearbyApplication(**r) for r in nearby],
