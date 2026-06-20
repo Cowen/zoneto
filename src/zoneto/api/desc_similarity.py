@@ -61,6 +61,9 @@ class DescriptionSimilarity(BaseModel):
     zone_matched_n_similar: int | None = None
     zone_matched_approval_rate: float | None = None
     zone_matched_appeal_rate: float | None = None
+    # The individual comps behind zone_matched_n_similar, so the cited count is
+    # backed by the actual applications (len == zone_matched_n_similar).
+    zone_matched_matches: list[SimilarMatch] = []
 
 
 def _deduplicate_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -139,22 +142,32 @@ def score_description_similarity(
             con.close()
             return None
 
-        extra_cols = [
-            c
-            for c in [
-                "dev_appealed",
-                "dev_approved",
-                "folderrsn",
-                "application_type",
-                "street_address",
-                "zoning_class",
-                "lat",
-                "lon",
-                "proposed_storeys",
-                "proposed_units",
-            ]
-            if c in available
-        ]
+        # Logical match columns paired with their SQL select expression. The
+        # enriched corpus stores the address as components, so street_address is
+        # composed the same way nearby_applications does (so the surfaced comps
+        # carry a human-readable address, not just a folderrsn).
+        extra_cols: list[str] = []
+        extra_select: list[str] = []
+        for c in [
+            "dev_appealed",
+            "dev_approved",
+            "folderrsn",
+            "application_type",
+            "zoning_class",
+            "lat",
+            "lon",
+            "proposed_storeys",
+            "proposed_units",
+        ]:
+            if c in available:
+                extra_cols.append(c)
+                extra_select.append(c)
+        if "street_num" in available and "street_name" in available:
+            extra_cols.append("street_address")
+            extra_select.append(
+                "TRIM(COALESCE(CAST(street_num AS VARCHAR), '') || ' ' || "
+                "COALESCE(street_name, '')) AS street_address"
+            )
         not_null_filter = f"{svd_cols[0]} IS NOT NULL"
 
         prox_filter = ""
@@ -175,7 +188,7 @@ def score_description_similarity(
                 )
 
         # Fetch corpus (proximity-filtered when lat/lon provided)
-        select = ", ".join(svd_cols + extra_cols)
+        select = ", ".join(svd_cols + extra_select)
         rows = con.execute(
             f"SELECT {select} FROM '{enriched_path}'"
             f" WHERE {not_null_filter}{prox_filter}"
@@ -188,7 +201,7 @@ def score_description_similarity(
         has_zoning_col = "zoning_class" in available
         zm_type = application_type if "application_type" in available else None
         if zoning_class is not None and has_zoning_col:
-            zm_select = ", ".join(svd_cols + extra_cols)
+            zm_select = ", ".join(svd_cols + extra_select)
             zm_where = f"{not_null_filter} AND zoning_class = $1"
             zm_params: list[Any] = [zoning_class]
             if zm_type is not None:
@@ -300,29 +313,21 @@ def score_description_similarity(
                 zm_sims: np.ndarray = zm_normed @ q_norm
                 zm_top_idx = np.argsort(zm_sims)[::-1][:top_n]
 
-                # Build zm_matches as dicts so we can deduplicate by folderrsn
+                # Build zm_matches as dicts (similarity + all columns) so the
+                # cited count is backed by the actual comps, deduped by folderrsn.
                 zm_match_dicts: list[dict[str, Any]] = []
-                rsn_idx = (
-                    n_svd + extra_cols.index("folderrsn")
-                    if "folderrsn" in extra_cols
-                    else None
-                )
                 for i in zm_top_idx:
-                    if float(zm_sims[i]) < min_similarity:
+                    zm_sim = float(zm_sims[i])
+                    if zm_sim < min_similarity:
                         continue
                     row = zm_rows[i]
-                    d: dict[str, Any] = {}
-                    if rsn_idx is not None:
-                        d["folderrsn"] = row[rsn_idx]
-                    if "dev_approved" in extra_cols:
-                        apr_idx = n_svd + extra_cols.index("dev_approved")
-                        d["dev_approved"] = row[apr_idx]
-                    if "dev_appealed" in extra_cols:
-                        ap_idx = n_svd + extra_cols.index("dev_appealed")
-                        d["dev_appealed"] = row[ap_idx]
+                    d: dict[str, Any] = {"similarity": round(zm_sim, 3)}
+                    for j, col in enumerate(extra_cols):
+                        d[col] = row[n_svd + j]
                     zm_match_dicts.append(d)
 
                 zm_match_dicts = _deduplicate_matches(zm_match_dicts)
+                result["zone_matched_matches"] = zm_match_dicts
                 result["zone_matched_n_similar"] = len(zm_match_dicts)
 
                 if "dev_approved" in extra_cols:
@@ -527,15 +532,26 @@ def score_description_similarity_bert(
                 zm_normed = zm_emb / zm_norms
                 zm_sims = zm_normed @ q_norm
                 zm_top = np.argsort(zm_sims)[::-1][:top_n]
-                zm_matches = [
-                    zm_indices[j] for j in zm_top if float(zm_sims[j]) >= min_similarity
-                ]
-                result["zone_matched_n_similar"] = len(zm_matches)
+                # Build dicts (similarity + all columns) so the cited count is
+                # backed by the actual comps, deduped by folderrsn.
+                zm_match_dicts: list[dict[str, Any]] = []
+                for j in zm_top:
+                    zm_sim = float(zm_sims[j])
+                    if zm_sim < min_similarity:
+                        continue
+                    row = index_df.row(int(zm_indices[j]), named=True)
+                    d = {"similarity": round(zm_sim, 3)}
+                    for c in cols:
+                        d[c] = row.get(c)
+                    zm_match_dicts.append(d)
+                zm_match_dicts = _deduplicate_matches(zm_match_dicts)
+                result["zone_matched_matches"] = zm_match_dicts
+                result["zone_matched_n_similar"] = len(zm_match_dicts)
                 if "dev_approved" in cols:
                     zm_apr = [
-                        int(index_df["dev_approved"][idx])
-                        for idx in zm_matches
-                        if index_df["dev_approved"][idx] is not None
+                        int(d["dev_approved"])
+                        for d in zm_match_dicts
+                        if d.get("dev_approved") is not None
                     ]
                     result["zone_matched_approval_rate"] = (
                         sum(zm_apr) / len(zm_apr) if zm_apr else None
@@ -545,9 +561,9 @@ def score_description_similarity_bert(
                 # Zone-matched appeal rate: appeal rate for same-zone similar apps only
                 if "dev_appealed" in cols:
                     zm_ap = [
-                        int(index_df["dev_appealed"][idx])
-                        for idx in zm_matches
-                        if index_df["dev_appealed"][idx] is not None
+                        int(d["dev_appealed"])
+                        for d in zm_match_dicts
+                        if d.get("dev_appealed") is not None
                     ]
                     result["zone_matched_appeal_rate"] = (
                         sum(zm_ap) / len(zm_ap) if zm_ap else None

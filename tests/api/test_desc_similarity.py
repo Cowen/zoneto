@@ -66,6 +66,8 @@ def _write_fixture_zone_type(
             "folderrsn": [str(i) for i in range(n)],
             "application_type": app_types,
             "zoning_class": zoning_classes,
+            "street_num": [100 + i for i in range(n)],
+            "street_name": [f"King St {i}" for i in range(n)],
         }
     ).write_parquet(str(data_dir / "enriched" / "dev_applications.parquet"))
     joblib.dump(_FakePipeline(), model_dir / "desc_tfidf.joblib")
@@ -120,6 +122,61 @@ class TestZoneAndTypeMatched:
         assert result is not None
         assert result.zone_matched_appeal_rate == 1.0
         assert result.zone_matched_application_type == "OZ"
+
+    def test_tfidf_zone_matched_records_surfaced(self, tmp_path: Path) -> None:
+        """Given same-zone OZ comps behind the zone-matched count, When scoring,
+        Then the individual records are surfaced so the cited count is backed by
+        the actual applications (count == len(records)), each carrying its
+        folderrsn, type and zone."""
+        data_dir = tmp_path / "d"
+        model_dir = tmp_path / "m"
+        _write_fixture_zone_type(
+            data_dir,
+            model_dir,
+            zoning_classes=["RM"] * 4,
+            app_types=["OZ", "OZ", "SA", "SA"],
+            appeal_labels=[1, 1, 0, 0],
+        )
+        result = score_description_similarity(
+            "test",
+            data_dir=data_dir,
+            model_dir=model_dir,
+            zoning_class="RM",
+            application_type="OZ",
+        )
+        assert result is not None
+        assert result.zone_matched_n_similar == len(result.zone_matched_matches)
+        assert len(result.zone_matched_matches) == 2  # the two OZ rows
+        assert all(m.application_type == "OZ" for m in result.zone_matched_matches)
+        assert all(m.zoning_class == "RM" for m in result.zone_matched_matches)
+        assert all(m.folderrsn is not None for m in result.zone_matched_matches)
+        # Address composed from street_num/street_name components.
+        assert all(
+            m.street_address and "King St" in m.street_address
+            for m in result.zone_matched_matches
+        )
+
+    def test_bert_zone_matched_records_surfaced(self, tmp_path: Path) -> None:
+        """Same as above for the BERT scorer path."""
+        data_dir = tmp_path / "db"
+        _write_bert_fixture(
+            data_dir,
+            zoning_classes=["RM"] * 4,
+            app_types=["OZ", "OZ", "SA", "SA"],
+            appeal_labels=[1, 1, 0, 0],
+        )
+        result = score_description_similarity_bert(
+            "test",
+            data_dir=data_dir,
+            model=_FakeBertModel(),
+            zoning_class="RM",
+            application_type="OZ",
+        )
+        assert result is not None
+        assert result.zone_matched_n_similar == len(result.zone_matched_matches)
+        assert len(result.zone_matched_matches) == 2
+        assert all(m.application_type == "OZ" for m in result.zone_matched_matches)
+        assert all(m.folderrsn is not None for m in result.zone_matched_matches)
 
 
 def _write_fixture_zone_magnitude(

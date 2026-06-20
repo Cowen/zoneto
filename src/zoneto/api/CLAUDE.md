@@ -22,6 +22,8 @@ BERT scorer preferred; TF-IDF+SVD fallback. Both accept `zoning_class` for zone-
 
 `approval_rate` is returned for API compat but **NOT surfaced in narrator** — `dev_approved` covers only ~9.6% of OZ/SA (survivorship bias). `zone_matched_appeal_rate` IS surfaced (no survivorship bias) and is the rate **fed into the Planning Act statutory block** (`_format_statutory_process` prefers it over the zone-diluted pooled `appeal_rate`, falling back to pooled only when no same-zone rate exists).
 
+`zone_matched_matches`: the **individual** comps behind `zone_matched_n_similar` (both scorers retain the deduped records, `len == zone_matched_n_similar`, so the narrator's cited "N comparable OZ in same zone" is backed by viewable applications). Carries similarity + folderrsn/application_type/zoning_class/dev_appealed/dev_approved/proposed_storeys+units, plus a `street_address` composed from `street_num`/`street_name` (the enriched corpus has no `street_address` column — both the TF-IDF SQL and the BERT index build compose it, mirroring `nearby_applications`). Surfaced in the frontend as a "Same-zone comparables" table (`renderZoneMatchedComps`, `#eval-zone-comps`) — **distinct from the spatial `/comps` table** (`nearby_applications`, 500 m): the zone-matched set is city-wide by description+zone similarity, so it generally shares no rows with the nearby table. This closes the gap where the count was asserted without showing the underlying comps.
+
 ## Narrator (`narrator.py`)
 
 _Last verified: 2026-05-29_

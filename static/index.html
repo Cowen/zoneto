@@ -337,6 +337,7 @@
     <div id="eval-results" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid #e9ecef">
       <div id="eval-extracted"></div>
       <div id="eval-desc-similarity"></div>
+      <div id="eval-zone-comps"></div>
       <div id="eval-data-gaps"></div>
       <div id="eval-violations"></div>
       <div id="eval-community-benefits"></div>
@@ -1574,6 +1575,7 @@
 
         renderExtracted(data.extracted);
         renderDescSimilarity(data.description_similarity ?? null);
+        renderZoneMatchedComps(data.description_similarity ?? null);
         renderDataGaps(data.data_gaps ?? []);
         renderViolations(data.violations);
         renderCommunityBenefits(data.community_benefits_context ?? null);
@@ -1623,6 +1625,37 @@
         html += `<span class="ctx-flag ctx-flag-on" data-tooltip="${escHtml(tip)}">${sim.n_similar} similar applications found</span>`;
       }
       el.innerHTML = `<div style="margin-bottom:0.6rem">${html}</div>`;
+    }
+
+    // Plain-language labels for the magnitude_band ordinal classes.
+    const MAG_LABELS = { small: 'low-rise', medium: 'mid-rise', large: 'high-rise', xlarge: 'tower' };
+
+    function zmAppeal(m) {
+      if (m.dev_appealed === 1) return '<span class="badge badge-appealed">Appealed</span>';
+      if (m.dev_appealed === 0) return '<span class="badge badge-approved">Not appealed</span>';
+      return '—';
+    }
+
+    // Surface the actual same-zone comparables behind the narrator's cited count,
+    // so the number is backed by viewable applications rather than asserted.
+    function renderZoneMatchedComps(sim) {
+      const el = document.getElementById('eval-zone-comps');
+      const matches = (sim && sim.zone_matched_matches) || [];
+      if (!matches.length) { el.innerHTML = ''; return; }
+      const typeWord = sim.zone_matched_application_type ? `${escHtml(sim.zone_matched_application_type)} ` : '';
+      const magWord = sim.zone_matched_magnitude ? ` · ${MAG_LABELS[sim.zone_matched_magnitude] ?? sim.zone_matched_magnitude}` : '';
+      const apr = sim.zone_matched_appeal_rate != null ? ` · appeal rate ${(sim.zone_matched_appeal_rate * 100).toFixed(0)}%` : '';
+      const rows = matches.map(m => `<tr>
+          <td>${m.application_url ? `<a href="${escHtml(m.application_url)}" target="_blank" rel="noopener noreferrer">${escHtml(m.folderrsn ?? '')}</a>` : escHtml(m.folderrsn ?? '—')}</td>
+          <td>${m.application_type ? `<span data-tooltip="${escHtml(TYPE_LABELS[m.application_type] ?? '')}">${escHtml(m.application_type)}</span>` : '—'}</td>
+          <td>${escHtml(m.street_address?.trim() || '—')}</td>
+          <td>${m.proposed_storeys ?? '—'}</td>
+          <td>${m.proposed_units ?? '—'}</td>
+          <td>${m.similarity != null ? (m.similarity * 100).toFixed(0) + '%' : '—'}</td>
+          <td>${zmAppeal(m)}</td>
+        </tr>`).join('');
+      el.innerHTML = `<div style="margin:0.6rem 0 0.3rem;font-size:0.8rem;color:#6c757d">Same-zone comparables — ${matches.length} ${typeWord}application(s) in this zone${magWord}${apr}:</div>
+        <table><thead><tr><th>ID</th><th>Type</th><th>Address</th><th>Storeys</th><th>Units</th><th>Similarity</th><th>Appeal</th></tr></thead><tbody>${rows}</tbody></table>`;
     }
 
     function renderDataGaps(gaps) {

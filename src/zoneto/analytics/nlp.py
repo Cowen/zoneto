@@ -121,7 +121,8 @@ def compute_bert_embeddings(data_dir: Path = Path("data")) -> int:
     Writes two files to data/enriched/:
       - desc_bert_embeddings.npy: float32 array of shape [n_rows, 384]
       - desc_bert_index.parquet: folderrsn, application_type, dev_approved,
-        dev_appealed, zoning_class — metadata rows parallel to embeddings
+        dev_appealed, zoning_class, street_address (composed from components),
+        lat/lon, proposed_storeys/units — metadata rows parallel to embeddings
 
     Idempotent: re-encodes the full corpus each call (cheap to re-run after
     an enrich because the model is cached by sentence-transformers).
@@ -160,11 +161,25 @@ def compute_bert_embeddings(data_dir: Path = Path("data")) -> int:
     # Build index with metadata columns needed for similarity scoring.
     # proposed_storeys/units let the BERT scorer compute a comp's magnitude band
     # for runtime scale stratification (see desc_similarity.score_*_bert).
+    # Compose a human-readable address from components (the enriched corpus has
+    # no street_address column) so the BERT scorer can surface it on each comp.
+    if {"street_num", "street_name"} <= set(df.columns):
+        df = df.with_columns(
+            (
+                pl.col("street_num").cast(pl.String).fill_null("")
+                + " "
+                + pl.col("street_name").fill_null("")
+            )
+            .str.strip_chars()
+            .alias("street_address")
+        )
+
     index_cols = ["folderrsn", "application_type"]
     for optional in [
         "dev_approved",
         "dev_appealed",
         "zoning_class",
+        "street_address",
         "lat",
         "lon",
         "proposed_storeys",

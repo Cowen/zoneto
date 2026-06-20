@@ -43,7 +43,7 @@ compatibility, so `from zoneto.analytics.enrich import ...` still resolves them.
 - `unit_excess_ratio` = proposed_units / zoning_max_units; `storey_excess_ratio` = proposed_storeys / zoning_max_storeys; `fsi_excess_ratio` = proposed_fsi / zoning_max_density (>1.0 exceeds by-law). `proposed_fsi` is extracted from descriptions via `extract.py`'s `_FSI_RES` patterns. **Excess ratios are low-coverage** (~7% combined): most sites have no unit cap (`-1`, FSI governs) and the height overlay is sparse (~15%) — so the comps harness (`scripts/comps_eval.py`) uses an absolute-magnitude band (`retrieval_eval.magnitude_band`, from proposed_storeys/units, ~60% coverage) as the primary `scale_mag` axis and excess ratios as the secondary `scale_excess` axis. See [[project_zoning_excess_ratio]] memory.
 - `dev_days_to_decision` capped at 3,650 days (labels.py `_DEV_DAYS_CAP`).
 - NLP (nlp.py): descriptions TF-IDF→20-dim TruncatedSVD (`desc_svd_0..desc_svd_19`); pipeline serialized to `models/desc_tfidf.joblib`.
-- BERT: `compute_bert_embeddings()` (nlp.py) uses `BAAI/bge-small-en-v1.5` (384-dim) → `data/enriched/desc_bert_embeddings.npy` + `desc_bert_index.parquet`. Idempotent.
+- BERT: `compute_bert_embeddings()` (nlp.py) uses `BAAI/bge-small-en-v1.5` (384-dim) → `data/enriched/desc_bert_embeddings.npy` + `desc_bert_index.parquet`. Idempotent. The index carries a `street_address` **composed** from `street_num`/`street_name` (no `street_address` column exists in enriched) so the BERT scorer can surface it on each zone-matched comp.
 
 ## Training (`train.py`)
 
