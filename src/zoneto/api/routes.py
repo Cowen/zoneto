@@ -441,6 +441,24 @@ def _retrieve_chunks(
     return merged[:k]
 
 
+def _lookup_exception_text(bylaw_index: Any, site: SiteContext) -> str | None:
+    """Fetch the verbatim exception-schedule text for a site, if any.
+
+    Mirrors the direct lookup in ``_retrieve_chunks`` so the compliance engine
+    can quote the actual provisions instead of punting the review to the user.
+    Returns None when there is no exception, no zone prefix, or no matching
+    schedule in the index.
+    """
+    if bylaw_index is None or not site.zoning_exception_no:
+        return None
+    zones = _zone_prefixes(site.zoning_class)
+    if not zones:
+        return None
+    chunks = bylaw_index.lookup_exception(zones[0], site.zoning_exception_no)
+    text = "\n\n".join(c.text for c in chunks).strip()
+    return text or None
+
+
 def _expected_app_type(path: str) -> str | None:
     """Map a derived statutory path to the dev-corpus application_type to compare to.
 
@@ -501,7 +519,13 @@ def evaluate(request: Request, body: EvaluateRequest) -> EvaluateResponse:
     lat, lon = _geocode_address(body.address)
     site = lookup_site_context(lat, lon, ref_dir)
     extracted = extract_project_features(body.description)
-    violations = check_compliance(extracted, site)
+    exception_text = _lookup_exception_text(bylaw_index, site)
+    violations = check_compliance(
+        extracted,
+        site,
+        exception_text=exception_text,
+        site_address=body.address,
+    )
 
     _path = path_for_violations(violations)
     _proc = PROCESS_BY_PATH[_path]
@@ -635,7 +659,13 @@ def ask(request: Request, body: AskRequest) -> dict[str, str]:
     lat, lon = _geocode_address(body.address)
     site = lookup_site_context(lat, lon, ref_dir)
     extracted = extract_project_features(body.description)
-    violations = check_compliance(extracted, site)
+    exception_text = _lookup_exception_text(bylaw_index, site)
+    violations = check_compliance(
+        extracted,
+        site,
+        exception_text=exception_text,
+        site_address=body.address,
+    )
 
     chunks = []
     if bylaw_index is not None:

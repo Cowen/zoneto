@@ -702,6 +702,19 @@
       return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
+    // Render a multi-section remedy (e.g. the zoning-exception reconciliation):
+    // header lines (ending in ':') become bold section titles, indented bullet
+    // lines ('  • ...') become a tighter list. Single-line remedies pass through
+    // unchanged. Escaped first; only our own tags are added afterward.
+    function formatRemedy(str) {
+      return escHtml(str).split('\n').map((line, i) => {
+        const top = i === 0 ? '0' : '0.35rem';
+        if (/^\S.*:$/.test(line)) return `<div style="font-weight:600;margin-top:${top}">${line}</div>`;
+        if (/^\s*•\s/.test(line)) return `<div style="padding-left:0.9rem;text-indent:-0.6rem">${line.trim()}</div>`;
+        return `<div style="margin-top:${top}">${line}</div>`;
+      }).join('');
+    }
+
     // --- "What could I build here?" ---
 
     const FALLBACK_SCENARIOS = [
@@ -1637,7 +1650,7 @@
           </div>
           <div>Observed: <strong>${escHtml(v.observed)}</strong> — Allowed: ${escHtml(v.allowed)}</div>
           <div style="color:#6c757d;font-size:0.78rem;margin-top:0.15rem">${escHtml(v.section_ref)}</div>
-          ${v.suggested_remedy ? `<div style="margin-top:0.25rem;font-size:0.82rem;color:#0a3622">&#8594; ${escHtml(v.suggested_remedy)}</div>` : ''}
+          ${v.suggested_remedy ? `<div style="margin-top:0.25rem;font-size:0.82rem;color:#0a3622;line-height:1.45;display:flex;gap:0.35rem"><span>&#8594;</span><div style="flex:1">${formatRemedy(v.suggested_remedy)}</div></div>` : ''}
         </div>`).join('');
       el.innerHTML = `<div style="margin-bottom:0.75rem">
         <div style="font-size:0.78rem;font-weight:700;color:#495057;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.4rem">Violations</div>

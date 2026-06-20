@@ -115,6 +115,9 @@ def _minor_variance_note() -> str:
 def check_compliance(
     extracted: ProjectFeatures,
     site: SiteContext,
+    *,
+    exception_text: str | None = None,
+    site_address: str | None = None,
 ) -> list[Violation]:
     """Run deterministic compliance checks against site zoning limits.
 
@@ -128,6 +131,12 @@ def check_compliance(
             zoning_class, zoning_max_storeys, zoning_max_units, zoning_max_density,
             permitted_use_category, in_heritage_register, in_heritage_district,
             in_mtsa, zoning_exception, zoning_holding.
+        exception_text: Verbatim text of the site's exception schedule (retrieved
+            from the bylaw index by the caller). When provided, the exception
+            finding quotes the actual provisions and reconciles them against the
+            other violations rather than punting back to the user.
+        site_address: The subject site's street address. Used to resolve which of
+            the exception's address-scoped prevailing by-laws actually apply here.
 
     Returns:
         List of Violation findings, empty when no issues detected.
@@ -148,7 +157,11 @@ def check_compliance(
     violations.extend(_check_trca(site))
     violations.extend(_check_greenbelt(site))
     violations.extend(_check_holding(site))
-    violations.extend(_check_exception(site))
+    # The exception check reconciles against everything flagged before it, so it
+    # runs last and receives a snapshot of the prior findings.
+    violations.extend(
+        _check_exception(site, list(violations), exception_text, site_address)
+    )
 
     return violations
 
@@ -631,25 +644,417 @@ def _check_holding(site: SiteContext) -> list[Violation]:
     ]
 
 
-def _check_exception(site: SiteContext) -> list[Violation]:
+# Which exception-schedule dimension would relax each curable base-zone
+# violation. Only these rule_ids participate in reconciliation; INFORMATIONAL
+# context flags (heritage, MTSA, …) are never "cured" by an exception, and
+# prohibited_use is absolute (no exception can permit it).
+_VIOLATION_DIMENSION: dict[str, str] = {
+    "storeys_exceed_max": "height",
+    "height_exceeds_max": "height",
+    "height_exceeds_max_inferred": "height",
+    "units_exceed_max": "density",
+    "unit_limit_advisory": "density",
+    "fsi_exceeds_max": "density",
+    "use_not_permitted": "use",
+}
+
+_DIMENSION_LABELS: dict[str, str] = {
+    "height": "height/storeys",
+    "density": "density (units/FSI)",
+    "use": "permitted use",
+}
+
+# Keyword signatures used to decide whether a readable provision touches a
+# dimension. Deliberately conservative: a miss yields "not modified" (the safe,
+# common case) and a hit yields a hedged "appears to" — the verbatim provision
+# is always shown so the expert makes the final call.
+_DIMENSION_SIGNATURES: dict[str, re.Pattern[str]] = {
+    "height": re.compile(r"\b(height|storey|storeys|angular plane)\b", re.I),
+    "density": re.compile(
+        r"gross floor area|floor space index|\bFSI\b|\bdensity\b|dwelling unit", re.I
+    ),
+    "use": re.compile(
+        r"\bpermitted\b|building type|apartment building|mixed[- ]use|\buse\b", re.I
+    ),
+}
+
+# A lettered provision item: "(A) ...text..." up to the next letter or end.
+_LETTER_ITEM_RE = re.compile(r"\(([A-Z])\)\s+(.*?)(?=\n\s*\([A-Z]\)|\Z)", re.S)
+# By-law / former-municipality references inside the prevailing block.
+_BYLAW_REF_RE = re.compile(r"By-law[s]?\s+[\d][\d\-]*(?:\([A-Z]+\))?", re.I)
+
+# Street-type suffixes -> canonical abbreviation, for address normalization.
+_STREET_SUFFIXES: dict[str, str] = {
+    "road": "rd",
+    "rd": "rd",
+    "avenue": "ave",
+    "ave": "ave",
+    "street": "st",
+    "st": "st",
+    "boulevard": "blvd",
+    "blvd": "blvd",
+    "drive": "dr",
+    "dr": "dr",
+    "crescent": "cres",
+    "cres": "cres",
+    "court": "crt",
+    "crt": "crt",
+    "ct": "crt",
+    "lane": "lane",
+    "place": "pl",
+    "pl": "pl",
+    "way": "way",
+    "terrace": "terr",
+    "trail": "trail",
+    "square": "sq",
+    "sq": "sq",
+    "gardens": "gdns",
+    "grove": "grv",
+    "parkway": "pkwy",
+    "pkwy": "pkwy",
+    "circle": "cir",
+    "cir": "cir",
+    "row": "row",
+    "path": "path",
+    "gate": "gate",
+    "mews": "mews",
+    "hill": "hill",
+    "park": "park",
+}
+_DIRECTIONS: dict[str, str] = {
+    "east": "e",
+    "west": "w",
+    "north": "n",
+    "south": "s",
+    "e": "e",
+    "w": "w",
+    "n": "n",
+    "s": "s",
+}
+# Longest-first so multi-char suffixes win over their abbreviations.
+_SUFFIX_KEYS: list[str] = list(_STREET_SUFFIXES)
+_SUFFIX_KEYS.sort(key=len, reverse=True)
+_SUFFIX_ALT = "|".join(re.escape(s) for s in _SUFFIX_KEYS)
+# A municipal address: one or more street numbers on a single named street, e.g.
+# "1500 Weston Road" or "601, 603 and 605 Oakwood Avenue". Requires a street-type
+# suffix so by-law numbers ("By-law 1268-2009") and section refs never match.
+_ADDRESS_RE = re.compile(
+    r"(?P<nums>\d{1,6}(?:\s*,\s*\d{1,6}|\s+and\s+\d{1,6})*)\s+"
+    r"(?P<street>[A-Za-z][A-Za-z.'-]+(?:\s+[A-Za-z][A-Za-z.'-]+){0,2}?)\s+"
+    r"(?P<suffix>" + _SUFFIX_ALT + r")\b"
+    r"(?:\s+(?P<dir>East|West|North|South|E|W|N|S)\b)?",
+    re.I,
+)
+# Concise prevailing reference for display: a former-by-law section, or a by-law
+# number (optionally prefixed with the former municipality).
+_PREV_REF_RE = re.compile(
+    r"Section\s+\d+\s*\([^)]*\)\s*\d+[A-Za-z()]*\s+of\s+former[^.;,]*?By-law\s+[\d-]+"
+    r"|(?:Former City of [A-Za-z]+(?:\s+[A-Za-z]+)?\s+)?[Bb]y-?laws?\s+\d[\d-]*"
+    r"(?:\([A-Z]+\))?",
+    re.I,
+)
+
+
+@dataclass(frozen=True)
+class _Address:
+    """A parsed municipal address. Equality/scope is judged on (number, street)."""
+
+    number: int
+    street: str  # normalized, e.g. "weston rd" / "queen st e"
+    display: str  # original-cased, e.g. "1500 Weston Road"
+
+
+def _parse_addresses(text: str) -> list[_Address]:
+    """Extract municipal addresses from free text (one per street number).
+
+    A street-type suffix is required, so by-law numbers and section references
+    are never mistaken for addresses. "601, 603 and 605 Oakwood Avenue" yields
+    three addresses sharing the normalized street "oakwood ave".
+    """
+    out: list[_Address] = []
+    for m in _ADDRESS_RE.finditer(text):
+        street_raw = re.sub(r"\s+", " ", m.group("street")).strip()
+        suffix_raw = m.group("suffix")
+        suffix_norm = _STREET_SUFFIXES.get(suffix_raw.lower(), suffix_raw.lower())
+        dir_raw = m.group("dir") or ""
+        dir_norm = _DIRECTIONS.get(dir_raw.lower(), dir_raw.lower())
+        street_key = " ".join(
+            p for p in (street_raw.lower(), suffix_norm, dir_norm) if p
+        )
+        for num in re.findall(r"\d{1,6}", m.group("nums")):
+            display = " ".join(p for p in (num, street_raw, suffix_raw, dir_raw) if p)
+            out.append(_Address(int(num), street_key, display))
+    return out
+
+
+def _address_applies(subject: list[_Address], scope: list[_Address]) -> bool | None:
+    """Does the subject site fall within an address-scoped clause?
+
+    Returns True on an exact (number, street) match, False on a confident
+    mismatch, and None when either side could not be parsed — the conservative
+    case, where the caller must keep the honest "confirm" caveat rather than
+    claim the clause does not apply.
+    """
+    if not subject or not scope:
+        return None
+    scope_keys = {(a.number, a.street) for a in scope}
+    return any((a.number, a.street) in scope_keys for a in subject)
+
+
+@dataclass
+class _PrevailingItem:
+    """One entry in an exception's Prevailing By-laws / Sections block."""
+
+    reference: str  # concise display label (by-law no. or section ref)
+    scope_addresses: list[_Address]  # lands the entry is scoped to ([] = unscoped)
+
+
+@dataclass
+class _ExceptionDigest:
+    """Parsed contents of an exception schedule's verbatim text."""
+
+    site_specific: list[str]  # readable site-specific provisions
+    prevailing_items: list[_PrevailingItem]  # imported by-law/section entries
+    has_prevailing: bool
+
+
+def _clean_provision(text: str) -> str:
+    """Collapse the PDF line-wrapping inside a single provision item."""
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _extract_items(section: str) -> list[str]:
+    """Pull cleaned lettered items from a provisions section, dropping noise."""
+    items: list[str] = []
+    for _letter, body in _LETTER_ITEM_RE.findall(section):
+        cleaned = _clean_provision(body)
+        # Strip trailing office-consolidation page-footer noise.
+        cleaned = re.split(r"\bBy-law 569-2013 as amended\b", cleaned)[0].strip()
+        if cleaned and "none apply" not in cleaned.lower():
+            items.append(cleaned)
+    return items
+
+
+def _prevailing_reference(item: str) -> str:
+    """A concise display label for a prevailing entry (section or by-law ref)."""
+    refs: list[str] = []
+    for r in _PREV_REF_RE.findall(item):
+        cleaned = _clean_provision(r)
+        if cleaned and cleaned not in refs:
+            refs.append(cleaned)
+    return "; ".join(refs) if refs else _clean_provision(item)[:90]
+
+
+def _parse_prevailing_items(prev_section: str) -> list[_PrevailingItem]:
+    """Parse each lettered entry in the Prevailing block into ref + scope."""
+    items: list[_PrevailingItem] = []
+    for _letter, body in _LETTER_ITEM_RE.findall(prev_section):
+        cleaned = _clean_provision(body)
+        # Strip office-consolidation footer noise, then rejoin numbers split
+        # across the PDF line-wrap ("1268- 2009" -> "1268-2009").
+        cleaned = re.split(r"\bBy-law 569-2013 as amended\b", cleaned)[0].strip()
+        cleaned = re.sub(r"(\d)-\s+(\d)", r"\1-\2", cleaned)
+        if not cleaned or "none apply" in cleaned.lower():
+            continue
+        items.append(
+            _PrevailingItem(
+                reference=_prevailing_reference(cleaned),
+                scope_addresses=_parse_addresses(cleaned),
+            )
+        )
+    return items
+
+
+def _parse_exception(text: str) -> _ExceptionDigest:
+    """Split exception text into readable provisions vs. unreadable imports."""
+    m_prev = re.search(r"Prevailing By-laws and Prevailing Sections\s*:?", text, re.I)
+    if m_prev:
+        ss_section = text[: m_prev.start()]
+        prev_section = text[m_prev.end() :]
+    else:
+        ss_section, prev_section = text, ""
+
+    m_ss = re.search(r"Site Specific Provisions\s*:?", ss_section, re.I)
+    ss_body = ss_section[m_ss.end() :] if m_ss else ""
+    site_specific = [] if "none apply" in ss_body.lower() else _extract_items(ss_body)
+
+    has_prevailing = bool(prev_section) and "none apply" not in prev_section.lower()
+    prevailing_items = _parse_prevailing_items(prev_section) if has_prevailing else []
+    return _ExceptionDigest(site_specific, prevailing_items, has_prevailing)
+
+
+def _reconcile_violations(
+    exc_label: str,
+    digest: _ExceptionDigest,
+    prior_violations: list[Violation],
+) -> list[str]:
+    """Reconciliation lines ONLY where the exception text touches a violation.
+
+    For each curable violation, checks whether a readable site-specific provision
+    actually mentions that dimension (height/density/use). A keyword hit -> one
+    hedged "appears to modify — confirm" line, quoting the provision. A miss emits
+    nothing: an exception about lot frontage has no bearing on a storeys or units
+    violation, and manufacturing a "this violation stands" line against every
+    unrelated violation is noise, not review. Absence of a relaxation is the
+    default — the violation already stands as its own separate finding.
+    """
+    lines: list[str] = []
+    for v in prior_violations:
+        dim = _VIOLATION_DIMENSION.get(v.rule_id)
+        if dim is None:
+            continue
+        signature = _DIMENSION_SIGNATURES[dim]
+        matches = [p for p in digest.site_specific if signature.search(p)]
+        if not matches:
+            continue
+        label = _DIMENSION_LABELS[dim]
+        quoted = "; ".join(f'"{m}"' for m in matches)
+        lines.append(
+            f"  • {v.rule_id} ({label}): {exc_label} appears to modify this "
+            f"dimension — confirm whether it relaxes the limit your proposal "
+            f"exceeds: {quoted}"
+        )
+    return lines
+
+
+def _render_prevailing(
+    exc_label: str,
+    items: list[_PrevailingItem],
+    site_address: str | None,
+) -> str:
+    """Per-clause applicability verdict for the Prevailing By-laws block.
+
+    Applicability is judged by ADDRESS SCOPE only — we read each clause's
+    scoping ("On the lands known as 1500 Weston Road, …"), never the by-law's
+    content (which is not in our corpus). So we say "does not apply" only when a
+    clause is scoped to a different parcel; we never claim a clause's substance
+    has been cleared. Falls back to the honest blanket caveat if nothing parsed.
+    """
+    subject = _parse_addresses(site_address or "")
+    site_disp = subject[0].display if subject else (site_address or "this site")
+    gap = "its text is not in our corpus"
+
+    lines: list[str] = []
+    for it in items:
+        if not it.scope_addresses:
+            lines.append(
+                f"  • {it.reference} — not address-scoped, so it applies to this "
+                f"parcel; {gap}, confirm its provisions."
+            )
+            continue
+        scope_disp = ", ".join(dict.fromkeys(a.display for a in it.scope_addresses))
+        verdict = _address_applies(subject, it.scope_addresses)
+        if verdict is False:
+            lines.append(
+                f"  • {it.reference} — scoped to {scope_disp}; does not apply to "
+                f"{site_disp} (a different parcel)."
+            )
+        elif verdict is True:
+            lines.append(
+                f"  • {it.reference} — scoped to lands that include {site_disp}; "
+                f"applies — {gap}, confirm its provisions."
+            )
+        else:
+            lines.append(
+                f"  • {it.reference} — scoped to specific lands ({scope_disp}); "
+                f"we cannot confirm from the address whether {site_disp} is among "
+                f"them; {gap}, confirm."
+            )
+
+    if not lines:
+        refs = ", ".join(it.reference for it in items)
+        refs_note = f" (e.g. {refs})" if refs else ""
+        return (
+            f"Caveat: {exc_label} also imports prevailing by-laws/sections"
+            f"{refs_note} that are not in our corpus — some are scoped to specific "
+            "addresses. Confirm whether any apply to this site; they could modify "
+            "standards we could not read."
+        )
+    return (
+        "Prevailing by-laws & sections (applicability judged by address scope; "
+        "their text is not in our corpus):\n" + "\n".join(lines)
+    )
+
+
+def _check_exception(
+    site: SiteContext,
+    prior_violations: list[Violation],
+    exception_text: str | None,
+    site_address: str | None = None,
+) -> list[Violation]:
     if not site.zoning_exception:
         return []
     exc_no = site.zoning_exception_no
     exc_label = f"Exception No. {exc_no}" if exc_no else "a site-specific exception"
+    section_ref = f"By-law 569-2013 — {exc_label}"
+
+    # No schedule text available: be honest about OUR gap rather than punting
+    # the review back to the expert.
+    if not exception_text:
+        return [
+            Violation(
+                rule_id="zoning_exception",
+                section_ref=section_ref,
+                observed=f"site has {exc_label} modifying base zone standards",
+                allowed=(
+                    "site-specific exception schedules may permit uses, heights, "
+                    "or densities that differ from the base zone limits above"
+                ),
+                severity=Severity.INFORMATIONAL,
+                suggested_remedy=(
+                    f"{exc_label} applies to this site, but its schedule text was "
+                    "not available to retrieve, so its provisions could not be "
+                    "read here. Consult the exception schedule in By-law 569-2013 "
+                    "directly."
+                ),
+            )
+        ]
+
+    digest = _parse_exception(exception_text)
+
+    parts: list[str] = []
+    if digest.site_specific:
+        provisions = "\n".join(f"  • {p}" for p in digest.site_specific)
+        parts.append(f"{exc_label} site-specific provisions:\n{provisions}")
+    else:
+        parts.append(
+            f"{exc_label} carries no readable site-specific provisions "
+            "(its schedule modifies the base zone only through the prevailing "
+            "by-laws/sections below)."
+        )
+
+    # Only surfaced when a readable provision actually bears on a flagged
+    # violation; an exception unrelated to the violations adds no line here.
+    reconciliation = _reconcile_violations(exc_label, digest, prior_violations)
+    if reconciliation:
+        parts.append(
+            "Bearing on the violations flagged above:\n" + "\n".join(reconciliation)
+        )
+
+    if digest.has_prevailing:
+        parts.append(
+            _render_prevailing(exc_label, digest.prevailing_items, site_address)
+        )
+
     return [
         Violation(
             rule_id="zoning_exception",
-            section_ref=f"By-law 569-2013 — {exc_label}",
-            observed=f"site has {exc_label} that modifies base zone standards",
+            section_ref=section_ref,
+            observed=(
+                f"site has {exc_label}: "
+                f"{len(digest.site_specific)} readable site-specific provision(s)"
+                + (
+                    f", {len(digest.prevailing_items)} prevailing by-law/section "
+                    "import(s)"
+                    if digest.has_prevailing
+                    else ""
+                )
+            ),
             allowed=(
-                "site-specific exception schedules may permit uses, heights, or "
-                "densities that differ from the base zone limits shown above"
+                "site-specific exception schedules may modify the base zone "
+                "limits shown above; its readable provisions are quoted below"
             ),
             severity=Severity.INFORMATIONAL,
-            suggested_remedy=(
-                f"Review {exc_label} in By-law 569-2013 to confirm which "
-                "standards are modified. Some violations flagged above may be "
-                "permitted as-of-right under the exception schedule."
-            ),
+            suggested_remedy="\n".join(parts),
         )
     ]

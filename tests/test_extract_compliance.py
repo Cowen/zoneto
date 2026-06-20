@@ -7,6 +7,8 @@ import pytest
 from zoneto.analytics.compliance import (
     Severity,
     Violation,
+    _address_applies,
+    _parse_addresses,
     check_compliance,
 )
 from zoneto.analytics.extract import ProjectFeatures, extract_project_features
@@ -874,6 +876,29 @@ class TestExtractBuildingType:
         result = extract_project_features("A stacked townhouse with 10 units.")
         assert result.building_type == "townhouse"
 
+    def test_infers_apartment_from_mixed_use_building(self) -> None:
+        """Given: A mid-rise mixed-use commercial-residential building with no
+        explicit residential type keyword or unit count.
+        When: Extracting features.
+        Then: building_type is inferred as 'apartment' — a mixed-use building is
+        an apartment-form building by definition, never detached/semi/townhouse,
+        so the residential building type is NOT a data gap."""
+        result = extract_project_features(
+            "A 4-storey mixed use commercial residential building with a medical "
+            "clinic on the ground floor"
+        )
+        assert result.proposed_use == "mixed_use"
+        assert result.building_type == "apartment"
+
+    def test_explicit_type_still_wins_over_mixed_use(self) -> None:
+        """Given: A mixed-use proposal that names an explicit low-rise type.
+        When: Extracting features.
+        Then: the explicit keyword wins over the mixed-use apartment inference."""
+        result = extract_project_features(
+            "A mixed-use stacked townhouse development with retail at grade."
+        )
+        assert result.building_type == "townhouse"
+
     def test_building_type_none_when_unspecified(self) -> None:
         """Given: Description with no keyword and only 1 unit (ambiguous).
         When: Extracting features.
@@ -1207,3 +1232,353 @@ class TestComplianceZeroLimits:
         ids = {v.rule_id for v in violations}
         assert "units_exceed_max" not in ids
         assert "unit_limit_advisory" not in ids
+
+
+# ---------------------------------------------------------------------------
+# check_compliance — site-specific zoning exception reconciliation
+# ---------------------------------------------------------------------------
+
+
+# Verbatim Exception RM 252 schedule text (By-law 569-2013) as stored in the
+# bylaw index — one readable site-specific provision plus address-scoped
+# prevailing by-laws not in our corpus.
+_RM_252_TEXT = """(252) Exception RM 252
+
+The lands are subject to the following Site Specific Provisions, Prevailing
+      By-laws and Prevailing Sections.
+
+      Site Specific Provisions:
+        (A) The minimum lot frontage is 8.0 metres for a detached house.
+      Prevailing By-laws and Prevailing Sections:
+        (A) On the lands known as 1500 Weston Road, City of Toronto By-law 1268-
+            2009(OMB)
+        (B) On the lands known as 605 Oakwood Avenue, City of Toronto By-law 593-
+            2008. [ By-law: 1675-2013; 802-2020 ]
+"""
+
+# A synthetic exception whose readable provision DOES modify height — used to
+# prove the reconciliation surfaces a relaxation, not just a non-modification.
+_HEIGHT_EXC_TEXT = """(99) Exception RM 99
+
+      Site Specific Provisions:
+        (A) The maximum permitted height of a building is 18.0 metres.
+      Prevailing By-laws and Prevailing Sections: (None Apply)
+"""
+
+
+class TestComplianceException:
+    def _site(self, **kwargs: object) -> SiteContext:
+        base: dict = {
+            "zoning_class": "RM",
+            "zoning_max_storeys": None,
+            "zoning_max_units": None,
+            "zoning_max_density": None,
+            "permitted_use_category": None,
+            "zoning_exception": 1,
+            "zoning_exception_no": "252",
+        }
+        base.update(kwargs)
+        return SiteContext.model_validate(base)
+
+    def test_no_exception_no_violation(self) -> None:
+        """Given: Site has no zoning exception.
+        When: Checking compliance.
+        Then: No zoning_exception violation is emitted."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(
+            extracted, self._site(zoning_exception=0, zoning_exception_no=None)
+        )
+        assert "zoning_exception" not in {v.rule_id for v in violations}
+
+    def test_exception_is_informational(self) -> None:
+        """Given: Site has Exception 252 with schedule text.
+        When: Checking compliance.
+        Then: The zoning_exception finding is INFORMATIONAL (never a failure)."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(
+            extracted, self._site(), exception_text=_RM_252_TEXT
+        )
+        exc = next(v for v in violations if v.rule_id == "zoning_exception")
+        assert exc.severity == Severity.INFORMATIONAL
+
+    def test_exception_embeds_verbatim_provisions(self) -> None:
+        """Given: Exception RM 252 schedule text is available.
+        When: Checking compliance.
+        Then: The finding quotes the actual provision verbatim rather than
+        telling the user to go review it themselves."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(
+            extracted, self._site(), exception_text=_RM_252_TEXT
+        )
+        exc = next(v for v in violations if v.rule_id == "zoning_exception")
+        assert "minimum lot frontage is 8.0 metres" in exc.suggested_remedy
+        # The old generic punt phrasing must be gone.
+        assert "may be permitted as-of-right under the exception" not in (
+            exc.suggested_remedy
+        )
+
+    def test_exception_flags_unreadable_prevailing_imports(self) -> None:
+        """Given: Exception imports former-municipality by-laws not in our corpus.
+        When: Checking compliance.
+        Then: The finding caveats those imports as unverifiable (honest gap)."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(
+            extracted, self._site(), exception_text=_RM_252_TEXT
+        )
+        exc = next(v for v in violations if v.rule_id == "zoning_exception")
+        assert "1268-2009" in exc.suggested_remedy
+        assert "not in our corpus" in exc.suggested_remedy.lower() or (
+            "could not" in exc.suggested_remedy.lower()
+        )
+
+    def test_exception_does_not_cite_unrelated_violations(self) -> None:
+        """Given: A storeys violation plus Exception 252 (which only changes lot
+        frontage — a dimension unrelated to the storeys violation).
+        When: Checking compliance.
+        Then: The exception finding does NOT enumerate the unrelated storeys
+        violation. We only speak to dimensions the exception text actually
+        touches; manufacturing a "this violation stands" line for every
+        unrelated violation is noise, not review."""
+        extracted = ProjectFeatures(
+            proposed_storeys=4,
+            proposed_units=None,
+            proposed_use="residential",
+            has_ground_floor_retail=False,
+        )
+        violations = check_compliance(
+            extracted,
+            self._site(zoning_max_storeys=2),
+            exception_text=_RM_252_TEXT,
+        )
+        # The storeys violation still stands on its own as a separate finding.
+        assert "storeys_exceed_max" in {v.rule_id for v in violations}
+        exc = next(v for v in violations if v.rule_id == "zoning_exception")
+        remedy = exc.suggested_remedy.lower()
+        # …but the exception finding must not drag it in, nor manufacture a
+        # "not modified / this violation stands" verdict against it.
+        assert "storeys_exceed_max" not in remedy
+        assert "not modif" not in remedy
+        assert "this violation stands" not in remedy
+        # The readable provision and the corpus-gap caveat still appear.
+        assert "8.0 metres" in exc.suggested_remedy
+        assert "not in our corpus" in remedy
+
+    def test_exception_surfaces_relaxed_dimension(self) -> None:
+        """Given: A storeys violation plus an exception whose readable provision
+        modifies height.
+        When: Checking compliance.
+        Then: The finding flags that the exception appears to address the
+        height dimension and should be confirmed."""
+        extracted = ProjectFeatures(
+            proposed_storeys=5,
+            proposed_units=None,
+            proposed_use="residential",
+            has_ground_floor_retail=False,
+        )
+        violations = check_compliance(
+            extracted,
+            self._site(zoning_exception_no="99", zoning_max_storeys=2),
+            exception_text=_HEIGHT_EXC_TEXT,
+        )
+        exc = next(v for v in violations if v.rule_id == "zoning_exception")
+        remedy = exc.suggested_remedy.lower()
+        assert "18.0 metres" in exc.suggested_remedy
+        assert "appears to" in remedy or "may relax" in remedy or "confirm" in remedy
+
+    def test_exception_without_text_is_honest_about_gap(self) -> None:
+        """Given: Site has an exception but its schedule text was not available.
+        When: Checking compliance.
+        Then: The finding states OUR gap (text unavailable) rather than telling
+        the expert to go do the review we should have done."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(extracted, self._site(), exception_text=None)
+        exc = next(v for v in violations if v.rule_id == "zoning_exception")
+        remedy = exc.suggested_remedy.lower()
+        assert "not available" in remedy or "could not" in remedy
+
+
+# ---------------------------------------------------------------------------
+# Prevailing by-law address-scope resolver (pure helpers)
+# ---------------------------------------------------------------------------
+
+
+class TestPrevailingAddressResolver:
+    def test_parse_single_address(self) -> None:
+        """Given: A scope clause naming one street address.
+        When: Parsing addresses.
+        Then: Number and normalized street are extracted."""
+        addrs = _parse_addresses("On the lands known as 1500 Weston Road, By-law X")
+        assert len(addrs) == 1
+        assert addrs[0].number == 1500
+        assert addrs[0].street == "weston rd"
+
+    def test_parse_multi_number_run(self) -> None:
+        """Given: A scope clause with several numbers on one street.
+        When: Parsing addresses.
+        Then: One address per number is produced, same street."""
+        addrs = _parse_addresses("601, 603 and 605 Oakwood Avenue")
+        assert sorted(a.number for a in addrs) == [601, 603, 605]
+        assert all(a.street == "oakwood ave" for a in addrs)
+
+    def test_bylaw_number_is_not_parsed_as_address(self) -> None:
+        """Given: A by-law number with no street suffix.
+        When: Parsing addresses.
+        Then: Nothing is extracted (guards against by-law numbers)."""
+        assert _parse_addresses("City of Toronto By-law 1268-2009(OMB)") == []
+
+    def test_section_reference_is_not_parsed_as_address(self) -> None:
+        """Given: A former-by-law section reference.
+        When: Parsing addresses.
+        Then: Nothing is extracted (it is unscoped, not address-scoped)."""
+        assert _parse_addresses("Section 12(2) 269 of former By-law 438-86") == []
+
+    def test_parse_subject_with_trailing_city(self) -> None:
+        """Given: A user address with trailing city/province.
+        When: Parsing addresses.
+        Then: The street address is still extracted cleanly."""
+        addrs = _parse_addresses("321 Boon Avenue, Toronto, ON")
+        assert len(addrs) == 1
+        assert addrs[0].number == 321
+        assert addrs[0].street == "boon ave"
+
+    def test_applies_false_on_clear_mismatch(self) -> None:
+        """Given: A subject address and a scope address on different streets.
+        When: Resolving applicability.
+        Then: False (scoped to other lands)."""
+        subj = _parse_addresses("321 Boon Avenue")
+        scope = _parse_addresses("1500 Weston Road")
+        assert _address_applies(subj, scope) is False
+
+    def test_applies_true_on_match(self) -> None:
+        """Given: A subject address among the scoped lands.
+        When: Resolving applicability.
+        Then: True."""
+        subj = _parse_addresses("605 Oakwood Avenue")
+        scope = _parse_addresses("601, 603 and 605 Oakwood Avenue")
+        assert _address_applies(subj, scope) is True
+
+    def test_applies_none_when_subject_unparseable(self) -> None:
+        """Given: No parseable subject address.
+        When: Resolving applicability.
+        Then: None (cannot tell — stay conservative)."""
+        scope = _parse_addresses("1500 Weston Road")
+        assert _address_applies([], scope) is None
+
+
+# ---------------------------------------------------------------------------
+# Prevailing by-law resolver wired through check_compliance
+# ---------------------------------------------------------------------------
+
+
+# An exception whose prevailing by-laws are address-scoped to OTHER parcels.
+_RM_252_RESOLVE = """(252) Exception RM 252
+
+      Site Specific Provisions:
+        (A) The minimum lot frontage is 8.0 metres for a detached house.
+      Prevailing By-laws and Prevailing Sections:
+        (A) On the lands known as 1500 Weston Road, By-law 1268-2009(OMB)
+        (B) On the lands known as 601, 603 and 605 Oakwood Avenue, By-law 593-2008.
+"""
+
+# An exception whose prevailing entry is an unscoped former-by-law section.
+_SECTION_PREVAILING = """(11) Exception RM 11
+
+      Site Specific Provisions: (None Apply)
+      Prevailing By-laws and Prevailing Sections:
+        (A) Section 12(2) 269 of former City of Toronto By-law 438-86.
+"""
+
+
+class TestPrevailingResolverIntegration:
+    def _site(self, **kwargs: object) -> SiteContext:
+        base: dict = {
+            "zoning_class": "RM",
+            "zoning_max_storeys": None,
+            "zoning_max_units": None,
+            "zoning_max_density": None,
+            "permitted_use_category": None,
+            "zoning_exception": 1,
+            "zoning_exception_no": "252",
+        }
+        base.update(kwargs)
+        return SiteContext.model_validate(base)
+
+    def test_prevailing_scoped_elsewhere_does_not_apply(self) -> None:
+        """Given: RM 252's prevailing by-laws scoped to 1500 Weston / 605 Oakwood,
+        evaluated for 321 Boon Avenue.
+        When: Checking compliance with the site address.
+        Then: Each is resolved as 'does not apply' (scoped to other lands), the
+        old blanket 'confirm whether any apply' punt is gone, and the honest
+        text-gap note remains."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(
+            extracted,
+            self._site(),
+            exception_text=_RM_252_RESOLVE,
+            site_address="321 Boon Avenue",
+        )
+        exc = next(v for v in violations if v.rule_id == "zoning_exception")
+        r = exc.suggested_remedy.lower()
+        assert "does not apply" in r
+        assert "weston road" in r and "oakwood" in r
+        assert "confirm whether any apply to this site" not in r
+        assert "not in our corpus" in r
+
+    def test_resolver_makes_no_content_clearance_claim(self) -> None:
+        """Given: All prevailing by-laws resolve to 'does not apply'.
+        When: Checking compliance.
+        Then: We never assert a sweeping 'no provisions affect this site' —
+        applicability is judged by address scope, not by reading the text."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(
+            extracted,
+            self._site(),
+            exception_text=_RM_252_RESOLVE,
+            site_address="321 Boon Avenue",
+        )
+        exc = next(v for v in violations if v.rule_id == "zoning_exception")
+        r = exc.suggested_remedy.lower()
+        assert "no unread prevailing provisions" not in r
+        assert "no provisions affect this site" not in r
+
+    def test_prevailing_matching_site_applies(self) -> None:
+        """Given: The subject site IS one of the scoped parcels.
+        When: Checking compliance.
+        Then: The by-law is reported as applying (confirm provisions), never as
+        'does not apply'."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(
+            extracted,
+            self._site(),
+            exception_text=_RM_252_RESOLVE,
+            site_address="605 Oakwood Avenue",
+        )
+        exc = next(v for v in violations if v.rule_id == "zoning_exception")
+        # Isolate the line for the Oakwood-scoped by-law (593-2008): it must be
+        # reported as applying, never as "does not apply". (The Weston by-law on
+        # the same exception correctly does NOT apply to an Oakwood site.)
+        oakwood_line = next(
+            ln for ln in exc.suggested_remedy.splitlines() if "593-2008" in ln
+        ).lower()
+        assert "applies" in oakwood_line
+        assert "confirm" in oakwood_line
+        assert "does not apply" not in oakwood_line
+
+    def test_prevailing_unscoped_section_applies_to_parcel(self) -> None:
+        """Given: An unscoped former-by-law section reference.
+        When: Checking compliance for any site.
+        Then: It is reported as applying to this parcel, with the honest
+        text-gap note (no false 'does not apply')."""
+        extracted = ProjectFeatures(None, None, None, False)
+        violations = check_compliance(
+            extracted,
+            self._site(zoning_exception_no="11"),
+            exception_text=_SECTION_PREVAILING,
+            site_address="321 Boon Avenue",
+        )
+        exc = next(v for v in violations if v.rule_id == "zoning_exception")
+        r = exc.suggested_remedy.lower()
+        assert "applies to this parcel" in r
+        assert "not in our corpus" in r
+        assert "438-86" in exc.suggested_remedy
+        assert "does not apply" not in r

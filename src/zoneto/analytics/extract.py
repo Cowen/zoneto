@@ -122,8 +122,13 @@ def extract_project_features(description: str | None) -> ProjectFeatures:
             break
 
     if building_type is None:
-        if (storeys is not None and storeys >= 5) or (
-            units is not None and units >= 20
+        # A mixed-use commercial-residential building is an apartment-form
+        # building by definition — never detached/semi/duplex/townhouse — so its
+        # residential building type is known even without a height or unit count.
+        if (
+            proposed_use == "mixed_use"
+            or (storeys is not None and storeys >= 5)
+            or (units is not None and units >= 20)
         ):
             building_type = "apartment"
         elif (

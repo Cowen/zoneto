@@ -45,6 +45,14 @@ STRICT RULES you must always follow:
 2. When citing, use the form: By-law 569-2013, §10.20.40.10(1)
 3. The VIOLATIONS LIST is authoritative. You must not soften, re-interpret,
    or contradict it. You may explain it.
+   - SITE-SPECIFIC EXCEPTIONS: when the violations include a zoning_exception
+     finding, its remedy text already reconciles the exception's provisions
+     against the other violations. Read those provisions back to the user in
+     prose — state plainly what the exception modifies and which flagged
+     violations it does and does not touch. Do NOT just note that an exception
+     exists and tell the user to go review it. If the finding caveats prevailing
+     by-laws not in our corpus, carry that caveat through honestly rather than
+     implying the exception resolves the violations.
 4. If a question cannot be answered from the provided context, say:
    "I cannot answer this from the available context. Please consult
    Toronto City Planning at toronto.ca/city-planning or call 311."
@@ -125,11 +133,19 @@ def _format_violations(violations: list[Violation]) -> str:
         return "No violations detected from available structured data."
     lines = []
     for v in violations:
-        lines.append(
+        line = (
             f"- [{v.severity.value.upper()}] {v.rule_id}: "
             f"{v.observed} (allowed: {v.allowed})\n"
             f"  Reference: {v.section_ref}"
         )
+        # Surface the exception finding's reconciliation (verbatim provisions +
+        # per-violation read + prevailing-import caveat) so the narrator can
+        # report it back instead of re-punting. Other remedies stay out of the
+        # prompt to keep the confidence-band calibration unchanged.
+        if v.rule_id == "zoning_exception" and v.suggested_remedy:
+            indented = "\n".join(f"  {ln}" for ln in v.suggested_remedy.splitlines())
+            line += f"\n  Reconciliation:\n{indented}"
+        lines.append(line)
     return "\n".join(lines)
 
 
